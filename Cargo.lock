@@ -403,6 +403,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "saku-tdo"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "colored",
+ "dirs",
+ "fs2",
+ "jiff",
+ "serde",
+ "serde_json",
+ "slug",
+ "tempfile",
+ "term_size",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -470,24 +488,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tdo"
-version = "0.1.0"
-dependencies = [
- "clap",
- "colored",
- "dirs",
- "fs2",
- "jiff",
- "serde",
- "serde_json",
- "slug",
- "tempfile",
- "term_size",
- "thiserror",
- "uuid",
 ]
 
 [[package]]
