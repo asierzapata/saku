@@ -266,7 +266,10 @@ mod tests {
             ..Task::default()
         };
         store.add_task(task.clone());
-        store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+        store
+            .get_task_by_number(store.next_task_number - 1)
+            .unwrap()
+            .clone()
     }
 
     // ============================================================================

@@ -22,22 +22,22 @@ pub fn get_status_glyph(task: &Task, is_overdue: bool) -> ColoredString {
 /// Build the context string for a task (Area/Project hierarchy)
 /// Returns None if task has no area or project associations
 pub fn get_task_context(task: &Task, store: &Store) -> Option<String> {
-    if let Some(project_id) = task.project_id {
-        if let Some(project) = store.get_project(project_id) {
-            if let Some(area_id) = project.area_id {
-                if let Some(area) = store.get_area(area_id) {
-                    // Rule A: {Area Name} / {Project Name}
-                    return Some(format!("{} / {}", area.name, project.name));
-                }
-            }
-            return Some(project.name.clone());
+    if let Some(project_id) = task.project_id
+        && let Some(project) = store.get_project(project_id)
+    {
+        if let Some(area_id) = project.area_id
+            && let Some(area) = store.get_area(area_id)
+        {
+            // Rule A: {Area Name} / {Project Name}
+            return Some(format!("{} / {}", area.name, project.name));
         }
+        return Some(project.name.clone());
     }
 
-    if let Some(area_id) = task.area_id {
-        if let Some(area) = store.get_area(area_id) {
-            return Some(area.name.clone());
-        }
+    if let Some(area_id) = task.area_id
+        && let Some(area) = store.get_area(area_id)
+    {
+        return Some(area.name.clone());
     }
 
     None
@@ -97,10 +97,8 @@ fn render_task_line_with_options(
         } else {
             completion_date
         }
-    } else if let Some(ctx) = context {
-        ctx
     } else {
-        String::new()
+        context.unwrap_or_default()
     };
 
     if !right_section.is_empty() {

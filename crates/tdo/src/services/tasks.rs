@@ -464,7 +464,9 @@ pub enum EditTaskError {
     #[error("Invalid date format for '{0}': {1}")]
     InvalidDate(String, String),
 
-    #[error("Invalid 'when' value: {0}. Expected: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD")]
+    #[error(
+        "Invalid 'when' value: {0}. Expected: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD"
+    )]
     InvalidWhen(String),
 
     #[error("No changes detected")]
@@ -520,8 +522,8 @@ pub fn edit_task(
     let editor_content = task_editor::serialize_task_for_edit(task, store);
 
     // 3. Open editor and get modified content
-    let modified_content = task_editor::open_in_editor(&editor_content)
-        .map_err(|e| EditTaskError::EditorFailed(e))?;
+    let modified_content =
+        task_editor::open_in_editor(&editor_content).map_err(EditTaskError::EditorFailed)?;
 
     // 4. Parse edited content
     let parsed =
@@ -586,15 +588,14 @@ pub fn edit_task(
     };
 
     // 10. Parse defer_until if provided
-    let defer_until = if let Some(defer_str) = parsed.defer_until {
-        Some(
-            defer_str
-                .parse::<Date>()
-                .map_err(|e| EditTaskError::InvalidDate("defer_until".to_string(), e.to_string()))?,
-        )
-    } else {
-        None
-    };
+    let defer_until =
+        if let Some(defer_str) = parsed.defer_until {
+            Some(defer_str.parse::<Date>().map_err(|e| {
+                EditTaskError::InvalidDate("defer_until".to_string(), e.to_string())
+            })?)
+        } else {
+            None
+        };
 
     // 11. Build checklist
     let checklist: Vec<_> = parsed
@@ -725,7 +726,10 @@ mod tests {
             ..Task::default()
         };
         store.add_task(task.clone());
-        store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+        store
+            .get_task_by_number(store.next_task_number - 1)
+            .unwrap()
+            .clone()
     }
 
     // ============================================================================
@@ -924,10 +928,7 @@ mod tests {
             },
         );
 
-        assert!(matches!(
-            result,
-            Err(AddTaskError::AmbiguousProjectName(_))
-        ));
+        assert!(matches!(result, Err(AddTaskError::AmbiguousProjectName(_))));
     }
 
     #[test]
@@ -1160,7 +1161,10 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert!(matches!(result.unwrap().when, When::Today { evening: true }));
+        assert!(matches!(
+            result.unwrap().when,
+            When::Today { evening: true }
+        ));
     }
 
     #[test]

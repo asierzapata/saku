@@ -47,19 +47,19 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
 
     // Project
     output.push_str("Project: ");
-    if let Some(project_id) = task.project_id {
-        if let Some(project) = store.get_project(project_id) {
-            output.push_str(&project.name);
-        }
+    if let Some(project_id) = task.project_id
+        && let Some(project) = store.get_project(project_id)
+    {
+        output.push_str(&project.name);
     }
     output.push_str("\n\n");
 
     // Area
     output.push_str("Area: ");
-    if let Some(area_id) = task.area_id {
-        if let Some(area) = store.get_area(area_id) {
-            output.push_str(&area.name);
-        }
+    if let Some(area_id) = task.area_id
+        && let Some(area) = store.get_area(area_id)
+    {
+        output.push_str(&area.name);
     }
     output.push_str("\n\n");
 
@@ -71,7 +71,7 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
     // When
     output.push_str("When: ");
     output.push_str(&when_to_string(&task.when));
-    output.push_str("\n");
+    output.push('\n');
     output.push_str("# Options: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD\n\n");
 
     // Deadline
@@ -79,7 +79,7 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
     if let Some(deadline) = task.deadline {
         output.push_str(&deadline.to_string());
     }
-    output.push_str("\n");
+    output.push('\n');
     output.push_str("# Format: YYYY-MM-DD or leave empty\n\n");
 
     // Defer Until
@@ -87,7 +87,7 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
     if let Some(defer_until) = task.defer_until {
         output.push_str(&defer_until.to_string());
     }
-    output.push_str("\n");
+    output.push('\n');
     output.push_str("# Format: YYYY-MM-DD or leave empty\n\n");
 
     // Checklist
@@ -342,11 +342,10 @@ pub fn has_changes(original_task: &Task, parsed: &ParsedTaskEdit, store: &Store)
         return true;
     }
     for (i, original_item) in original_task.checklist.iter().enumerate() {
-        if let Some((parsed_title, parsed_completed)) = parsed.checklist.get(i) {
-            if original_item.title != *parsed_title || original_item.completed != *parsed_completed
-            {
-                return true;
-            }
+        if let Some((parsed_title, parsed_completed)) = parsed.checklist.get(i)
+            && (original_item.title != *parsed_title || original_item.completed != *parsed_completed)
+        {
+            return true;
         }
     }
 

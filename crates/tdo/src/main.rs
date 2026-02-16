@@ -17,8 +17,8 @@ use tdo::{
         tasks::{
             AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
             DeleteTaskError, DeleteTaskParameters, EditTaskError, EditTaskParameters,
-            MoveTaskError, MoveTaskParameters, RestoreTaskError, RestoreTaskParameters,
-            add_task, complete_task, delete_task, edit_task, move_task, restore_task,
+            MoveTaskError, MoveTaskParameters, RestoreTaskError, RestoreTaskParameters, add_task,
+            complete_task, delete_task, edit_task, move_task, restore_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
@@ -387,7 +387,7 @@ fn main() {
                     };
                     grouped
                         .entry(group.to_string())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(task);
                 }
 
@@ -438,7 +438,7 @@ fn main() {
 
                 for task in &upcoming_tasks {
                     if let When::Scheduled { date } = task.when {
-                        grouped.entry(date).or_insert_with(Vec::new).push(task);
+                        grouped.entry(date).or_default().push(task);
                     }
                 }
 
@@ -482,7 +482,7 @@ fn main() {
                         let year_month = tdo::ui::get_year_month(completed_at);
                         grouped
                             .entry(year_month)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(task);
                     }
                 }
@@ -530,7 +530,10 @@ fn main() {
 
                 // Show deleted projects
                 if !deleted_projects.is_empty() {
-                    tdo::ui::render_section_header(&format!("Projects ({})", deleted_projects.len()));
+                    tdo::ui::render_section_header(&format!(
+                        "Projects ({})",
+                        deleted_projects.len()
+                    ));
                     for project in deleted_projects {
                         println!("  {} {}", "•".dimmed(), project.name.dimmed());
                     }
@@ -766,7 +769,9 @@ fn main() {
                 }
                 Err(EditTaskError::InvalidWhen(value)) => {
                     eprintln!("Error: Invalid 'when' value: {}", value);
-                    eprintln!("\nExpected: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD");
+                    eprintln!(
+                        "\nExpected: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD"
+                    );
                     std::process::exit(1);
                 }
                 Err(EditTaskError::Storage(e)) => {
@@ -789,7 +794,10 @@ fn main() {
                     println!("✓ Task deleted: {}", task.title);
                     println!("  #{}", task.task_number);
                     println!("\nUse 'tdo trash' to view deleted items");
-                    println!("Use 'tdo restore {}' to restore this task", task.task_number);
+                    println!(
+                        "Use 'tdo restore {}' to restore this task",
+                        task.task_number
+                    );
                 }
                 Err(DeleteTaskError::TaskNotFound(identifier)) => {
                     eprintln!("Error: Task '{}' not found", identifier);
@@ -1229,10 +1237,10 @@ fn main() {
                     println!("{} {}", "•".green(), project.name.bold());
 
                     // Display area if project belongs to one
-                    if let Some(area_id) = project.area_id {
-                        if let Some(area) = store.get_area(area_id) {
-                            println!("    {} {}", "Area:".dimmed(), area.name.blue());
-                        }
+                    if let Some(area_id) = project.area_id
+                        && let Some(area) = store.get_area(area_id)
+                    {
+                        println!("    {} {}", "Area:".dimmed(), area.name.blue());
                     }
 
                     // Display task count
