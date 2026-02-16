@@ -8,6 +8,7 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "AGPL-3.0-or-later"
+authors = ["Asier Zapata <me@asierzapata.com>"]
 
 [workspace.dependencies]
 # Shared dependencies with versions

@@ -1,6 +1,13 @@
 [package]
 name = "tdo"
 version = "0.1.0"
+description = "A minimal and clean task manager for your terminal"
+repository = "https://github.com/asierzapata/saku"
+homepage = "https://asierzapata.github.io/saku/"
+keywords = ["cli", "task-manager", "todo", "productivity", "terminal"]
+categories = ["command-line-utilities"]
+readme = "../../README.md"
+authors.workspace = true
 edition.workspace = true
 license.workspace = true
 
