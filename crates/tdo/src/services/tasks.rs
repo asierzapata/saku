@@ -435,6 +435,225 @@ pub fn restore_task(
     Ok(restored_task)
 }
 
+#[derive(Debug, Error)]
+pub enum EditTaskError {
+    #[error("Task '{0}' not found")]
+    TaskNotFound(String),
+
+    #[error("Task name is ambiguous. Multiple tasks found: {}", .0.join(", "))]
+    AmbiguousTaskName(Vec<String>),
+
+    #[error("Failed to open editor: {0}")]
+    EditorFailed(String),
+
+    #[error("Failed to parse edited task: {0}")]
+    ParseFailed(String),
+
+    #[error("Project '{0}' not found")]
+    ProjectNotFound(String),
+
+    #[error("Project name is ambiguous. Multiple projects found: {}", .0.join(", "))]
+    AmbiguousProjectName(Vec<String>),
+
+    #[error("Area '{0}' not found")]
+    AreaNotFound(String),
+
+    #[error("Area name is ambiguous. Multiple areas found: {}", .0.join(", "))]
+    AmbiguousAreaName(Vec<String>),
+
+    #[error("Invalid date format for '{0}': {1}")]
+    InvalidDate(String, String),
+
+    #[error("Invalid 'when' value: {0}. Expected: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD")]
+    InvalidWhen(String),
+
+    #[error("No changes detected")]
+    NoChanges,
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+}
+
+pub struct EditTaskParameters {
+    pub task_number_or_fuzzy_name: String,
+}
+
+pub fn edit_task(
+    store: &mut Store,
+    storage: &impl Storage,
+    parameters: EditTaskParameters,
+) -> Result<Task, EditTaskError> {
+    use crate::services::task_editor;
+    use uuid::Uuid;
+
+    // 1. Find task by number or fuzzy name match
+    let task = if let Ok(task_number) = parameters.task_number_or_fuzzy_name.parse::<u64>() {
+        store.get_task_by_number(task_number).ok_or_else(|| {
+            EditTaskError::TaskNotFound(parameters.task_number_or_fuzzy_name.clone())
+        })?
+    } else {
+        // Fuzzy matching by title
+        let matching_tasks: Vec<_> = store
+            .get_active_tasks()
+            .filter(|t| {
+                t.title
+                    .to_lowercase()
+                    .contains(&parameters.task_number_or_fuzzy_name.to_lowercase())
+            })
+            .collect();
+
+        match matching_tasks.len() {
+            0 => {
+                return Err(EditTaskError::TaskNotFound(
+                    parameters.task_number_or_fuzzy_name,
+                ));
+            }
+            1 => matching_tasks[0],
+            _ => {
+                let titles: Vec<String> = matching_tasks.iter().map(|t| t.title.clone()).collect();
+                return Err(EditTaskError::AmbiguousTaskName(titles));
+            }
+        }
+    };
+
+    // 2. Serialize task to editor format
+    let editor_content = task_editor::serialize_task_for_edit(task, store);
+
+    // 3. Open editor and get modified content
+    let modified_content = task_editor::open_in_editor(&editor_content)
+        .map_err(|e| EditTaskError::EditorFailed(e))?;
+
+    // 4. Parse edited content
+    let parsed =
+        task_editor::parse_edited_task(&modified_content).map_err(EditTaskError::ParseFailed)?;
+
+    // 5. Validate changes detected
+    if !task_editor::has_changes(task, &parsed, store) {
+        return Err(EditTaskError::NoChanges);
+    }
+
+    // 6. Validate and resolve project name to ID
+    let project_id = if let Some(project_name) = parsed.project {
+        let matching_projects: Vec<_> = store
+            .get_active_projects()
+            .filter(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()))
+            .collect();
+
+        match matching_projects.len() {
+            0 => return Err(EditTaskError::ProjectNotFound(project_name)),
+            1 => Some(matching_projects[0].id),
+            _ => {
+                let names: Vec<String> = matching_projects.iter().map(|p| p.name.clone()).collect();
+                return Err(EditTaskError::AmbiguousProjectName(names));
+            }
+        }
+    } else {
+        None
+    };
+
+    // 7. Validate and resolve area name to ID
+    let area_id = if let Some(area_name) = parsed.area {
+        let matching_areas: Vec<_> = store
+            .get_active_areas()
+            .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
+            .collect();
+
+        match matching_areas.len() {
+            0 => return Err(EditTaskError::AreaNotFound(area_name)),
+            1 => Some(matching_areas[0].id),
+            _ => {
+                let names: Vec<String> = matching_areas.iter().map(|a| a.name.clone()).collect();
+                return Err(EditTaskError::AmbiguousAreaName(names));
+            }
+        }
+    } else {
+        None
+    };
+
+    // 8. Parse when string
+    let when = parse_when_string(&parsed.when)
+        .map_err(|_| EditTaskError::InvalidWhen(parsed.when.clone()))?;
+
+    // 9. Parse deadline if provided
+    let deadline = if let Some(deadline_str) = parsed.deadline {
+        Some(
+            deadline_str
+                .parse::<Date>()
+                .map_err(|e| EditTaskError::InvalidDate("deadline".to_string(), e.to_string()))?,
+        )
+    } else {
+        None
+    };
+
+    // 10. Parse defer_until if provided
+    let defer_until = if let Some(defer_str) = parsed.defer_until {
+        Some(
+            defer_str
+                .parse::<Date>()
+                .map_err(|e| EditTaskError::InvalidDate("defer_until".to_string(), e.to_string()))?,
+        )
+    } else {
+        None
+    };
+
+    // 11. Build checklist
+    let checklist: Vec<_> = parsed
+        .checklist
+        .into_iter()
+        .map(|(title, completed)| crate::models::task::ChecklistItem {
+            id: Uuid::new_v4(),
+            title,
+            completed,
+        })
+        .collect();
+
+    // 12. Build updated task
+    let updated_task = Task {
+        id: task.id,
+        task_number: task.task_number,
+        title: parsed.title,
+        notes: parsed.notes,
+        project_id,
+        area_id,
+        tags: parsed.tags,
+        when,
+        deadline,
+        defer_until,
+        checklist,
+        completed_at: task.completed_at,
+        deleted_at: task.deleted_at,
+        created_at: task.created_at,
+    };
+
+    let task_id = task.id;
+
+    // 13. Update store
+    store.update_task(updated_task);
+
+    // 14. Persist to storage
+    storage.save(store)?;
+
+    // 15. Return updated task
+    Ok(store.get_task(task_id).unwrap().clone())
+}
+
+/// Parse when string to When enum
+fn parse_when_string(s: &str) -> Result<When, ()> {
+    match s.to_lowercase().as_str() {
+        "inbox" => Ok(When::Inbox),
+        "today" => Ok(When::Today { evening: false }),
+        "today-evening" => Ok(When::Today { evening: true }),
+        "anytime" => Ok(When::Anytime),
+        "someday" => Ok(When::Someday),
+        _ => {
+            // Try to parse as date
+            s.parse::<Date>()
+                .map(|date| When::Scheduled { date })
+                .map_err(|_| ())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

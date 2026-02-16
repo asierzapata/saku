@@ -16,7 +16,8 @@ use tdo::{
         },
         tasks::{
             AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
-            MoveTaskError, MoveTaskParameters, add_task, complete_task, move_task,
+            EditTaskError, EditTaskParameters, MoveTaskError, MoveTaskParameters, add_task,
+            complete_task, edit_task, move_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
@@ -152,6 +153,9 @@ enum Commands {
 
     /// Complete a task
     Done { task_number_or_fuzzy_name: String },
+
+    /// Edit a task in your editor
+    Edit { task_number_or_fuzzy_name: String },
 
     /// Manage areas
     #[command(subcommand)]
@@ -680,6 +684,85 @@ fn main() {
                     std::process::exit(1);
                 }
                 Err(CompleteTaskError::Storage(e)) => {
+                    eprintln!("Error: Failed to save task: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Edit {
+            task_number_or_fuzzy_name,
+        }) => {
+            let params = EditTaskParameters {
+                task_number_or_fuzzy_name,
+            };
+
+            match edit_task(&mut store, &storage, params) {
+                Ok(task) => {
+                    println!("✓ Task updated: {}", task.title);
+                    println!("  #{}", task.task_number);
+                }
+                Err(EditTaskError::TaskNotFound(identifier)) => {
+                    eprintln!("Error: Task '{}' not found", identifier);
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::AmbiguousTaskName(titles)) => {
+                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                    for title in titles {
+                        eprintln!("  - {}", title);
+                    }
+                    eprintln!("\nPlease be more specific or use the task number.");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::EditorFailed(msg)) => {
+                    eprintln!("Error: Failed to open editor: {}", msg);
+                    eprintln!("\nMake sure $EDITOR or $VISUAL is set to a valid editor.");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::ParseFailed(msg)) => {
+                    eprintln!("Error: Failed to parse edited task: {}", msg);
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::NoChanges) => {
+                    println!("No changes detected - task not modified");
+                    std::process::exit(0);
+                }
+                Err(EditTaskError::ProjectNotFound(name)) => {
+                    eprintln!("Error: Project '{}' not found", name);
+                    eprintln!("\nUse 'tdo project list' to see available projects.");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::AmbiguousProjectName(names)) => {
+                    eprintln!("Error: Project name is ambiguous. Multiple projects found:");
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::AreaNotFound(name)) => {
+                    eprintln!("Error: Area '{}' not found", name);
+                    eprintln!("\nUse 'tdo area list' to see available areas.");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::AmbiguousAreaName(names)) => {
+                    eprintln!("Error: Area name is ambiguous. Multiple areas found:");
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::InvalidDate(field, error)) => {
+                    eprintln!("Error: Invalid date for '{}': {}", field, error);
+                    eprintln!("\nExpected format: YYYY-MM-DD (e.g., 2026-03-15)");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::InvalidWhen(value)) => {
+                    eprintln!("Error: Invalid 'when' value: {}", value);
+                    eprintln!("\nExpected: inbox, today, today-evening, anytime, someday, or YYYY-MM-DD");
+                    std::process::exit(1);
+                }
+                Err(EditTaskError::Storage(e)) => {
                     eprintln!("Error: Failed to save task: {}", e);
                     std::process::exit(1);
                 }

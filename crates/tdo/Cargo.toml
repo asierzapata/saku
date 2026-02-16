@@ -20,3 +20,4 @@ dirs.workspace = true
 colored.workspace = true
 slug.workspace = true
 term_size.workspace = true
+tempfile.workspace = true
