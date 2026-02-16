@@ -17,8 +17,8 @@ use tdo::{
         tasks::{
             AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
             DeleteTaskError, DeleteTaskParameters, EditTaskError, EditTaskParameters,
-            MoveTaskError, MoveTaskParameters, add_task, complete_task, delete_task,
-            edit_task, move_task,
+            MoveTaskError, MoveTaskParameters, RestoreTaskError, RestoreTaskParameters,
+            add_task, complete_task, delete_task, edit_task, move_task, restore_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
@@ -160,6 +160,9 @@ enum Commands {
 
     /// Delete a task (move to trash)
     Delete { task_number_or_fuzzy_name: String },
+
+    /// Restore a task from trash
+    Restore { task_number: String },
 
     /// Manage areas
     #[command(subcommand)]
@@ -807,6 +810,50 @@ fn main() {
                 }
                 Err(DeleteTaskError::Storage(e)) => {
                     eprintln!("Error: Failed to delete task: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Restore { task_number }) => {
+            // Parse task number
+            let parsed_task_number = match task_number.parse::<u64>() {
+                Ok(num) => num,
+                Err(_) => {
+                    eprintln!("Error: Invalid task number '{}'", task_number);
+                    eprintln!("\nTask number must be a numeric value.");
+                    eprintln!("Use 'tdo trash' to see deleted tasks with their numbers.");
+                    std::process::exit(1);
+                }
+            };
+
+            // Build parameters
+            let params = RestoreTaskParameters {
+                task_number: parsed_task_number,
+            };
+
+            // Call service
+            match restore_task(&mut store, &storage, params) {
+                Ok(task) => {
+                    println!("✓ Task restored: {}", task.title);
+                    println!("  #{}", task.task_number);
+                    if let Some(project_id) = task.project_id
+                        && let Some(project) = store.get_project(project_id)
+                    {
+                        println!("  Project: {}", project.name);
+                    }
+                }
+                Err(RestoreTaskError::TaskNotFound(identifier)) => {
+                    eprintln!("Error: Task '{}' not found", identifier);
+                    eprintln!("\nUse 'tdo trash' to see deleted tasks.");
+                    std::process::exit(1);
+                }
+                Err(RestoreTaskError::TaskNotDeleted(title)) => {
+                    eprintln!("Error: Task '{}' is not deleted", title);
+                    eprintln!("\nThis task is already active. Use 'tdo all' to see active tasks.");
+                    std::process::exit(1);
+                }
+                Err(RestoreTaskError::Storage(e)) => {
+                    eprintln!("Error: Failed to restore task: {}", e);
                     std::process::exit(1);
                 }
             }
