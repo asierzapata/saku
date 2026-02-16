@@ -16,8 +16,9 @@ use tdo::{
         },
         tasks::{
             AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
-            EditTaskError, EditTaskParameters, MoveTaskError, MoveTaskParameters, add_task,
-            complete_task, edit_task, move_task,
+            DeleteTaskError, DeleteTaskParameters, EditTaskError, EditTaskParameters,
+            MoveTaskError, MoveTaskParameters, add_task, complete_task, delete_task,
+            edit_task, move_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
@@ -156,6 +157,9 @@ enum Commands {
 
     /// Edit a task in your editor
     Edit { task_number_or_fuzzy_name: String },
+
+    /// Delete a task (move to trash)
+    Delete { task_number_or_fuzzy_name: String },
 
     /// Manage areas
     #[command(subcommand)]
@@ -764,6 +768,45 @@ fn main() {
                 }
                 Err(EditTaskError::Storage(e)) => {
                     eprintln!("Error: Failed to save task: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Delete {
+            task_number_or_fuzzy_name,
+        }) => {
+            // Build parameters
+            let params = DeleteTaskParameters {
+                task_number_or_fuzzy_name,
+            };
+
+            // Call service
+            match delete_task(&mut store, &storage, params) {
+                Ok(task) => {
+                    println!("✓ Task deleted: {}", task.title);
+                    println!("  #{}", task.task_number);
+                    println!("\nUse 'tdo trash' to view deleted items");
+                    println!("Use 'tdo restore {}' to restore this task", task.task_number);
+                }
+                Err(DeleteTaskError::TaskNotFound(identifier)) => {
+                    eprintln!("Error: Task '{}' not found", identifier);
+                    std::process::exit(1);
+                }
+                Err(DeleteTaskError::AmbiguousTaskName(titles)) => {
+                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                    for title in titles {
+                        eprintln!("  - {}", title);
+                    }
+                    eprintln!("\nPlease be more specific or use the task number.");
+                    std::process::exit(1);
+                }
+                Err(DeleteTaskError::TaskAlreadyDeleted(title)) => {
+                    eprintln!("Error: Task '{}' is already deleted", title);
+                    eprintln!("\nUse 'tdo trash' to view deleted items.");
+                    std::process::exit(1);
+                }
+                Err(DeleteTaskError::Storage(e)) => {
+                    eprintln!("Error: Failed to delete task: {}", e);
                     std::process::exit(1);
                 }
             }
