@@ -187,3 +187,435 @@ pub fn restore_project(
 
     Ok(store.get_project(project_id).unwrap().clone())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{area::Area, task::Task};
+    use std::cell::RefCell;
+
+    // Mock storage implementation for testing
+    struct MockStorage {
+        store: RefCell<Store>,
+        save_count: RefCell<usize>,
+    }
+
+    impl MockStorage {
+        fn new() -> Self {
+            Self {
+                store: RefCell::new(Store::default()),
+                save_count: RefCell::new(0),
+            }
+        }
+
+        fn save_count(&self) -> usize {
+            *self.save_count.borrow()
+        }
+    }
+
+    impl Storage for MockStorage {
+        fn load(&self) -> Result<Store, StorageError> {
+            Ok(self.store.borrow().clone())
+        }
+
+        fn save(&self, store: &Store) -> Result<(), StorageError> {
+            *self.store.borrow_mut() = store.clone();
+            *self.save_count.borrow_mut() += 1;
+            Ok(())
+        }
+    }
+
+    // Helper functions for test fixtures
+    fn create_test_area(store: &mut Store, name: &str) -> Area {
+        let area = Area {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            slug: slugify(name),
+            deleted_at: None,
+        };
+        store.add_area(area.clone());
+        area
+    }
+
+    fn create_test_task(store: &mut Store, title: &str, project_id: Option<Uuid>) -> Task {
+        let task = Task {
+            id: Uuid::new_v4(),
+            task_number: 0,
+            title: title.to_string(),
+            project_id,
+            created_at: jiff::Timestamp::now(),
+            ..Task::default()
+        };
+        store.add_task(task.clone());
+        store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+    }
+
+    // ============================================================================
+    // create_project tests
+    // ============================================================================
+
+    #[test]
+    fn test_create_project_without_area() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        let result = create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Test Project".to_string(),
+                area: None,
+            },
+        );
+
+        assert!(result.is_ok());
+        let project = result.unwrap();
+        assert_eq!(project.name, "Test Project");
+        assert_eq!(project.area_id, None);
+        assert_eq!(storage.save_count(), 1);
+    }
+
+    #[test]
+    fn test_create_project_with_area() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let area = create_test_area(&mut store, "Work");
+
+        let result = create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Work Project".to_string(),
+                area: Some(area.slug.clone()),
+            },
+        );
+
+        assert!(result.is_ok());
+        let project = result.unwrap();
+        assert_eq!(project.area_id, Some(area.id));
+    }
+
+    #[test]
+    fn test_create_project_generates_slug() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        let result = create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "My Cool Project".to_string(),
+                area: None,
+            },
+        );
+
+        assert!(result.is_ok());
+        let project = result.unwrap();
+        assert_eq!(project.slug, "my-cool-project");
+    }
+
+    #[test]
+    fn test_create_project_area_not_found() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        let result = create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Project".to_string(),
+                area: Some("non-existent".to_string()),
+            },
+        );
+
+        assert!(matches!(result, Err(CreateProjectError::AreaNotFound(_))));
+    }
+
+    // ============================================================================
+    // delete_project tests
+    // ============================================================================
+
+    #[test]
+    fn test_delete_project() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Test Project".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        let result = delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Test".to_string(),
+            },
+        );
+
+        assert!(result.is_ok());
+        let deleted = result.unwrap();
+        assert!(deleted.project.deleted_at.is_some());
+        assert_eq!(deleted.cascaded_tasks_count, 0);
+    }
+
+    #[test]
+    fn test_delete_project_cascades_to_tasks() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let project = create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Test Project".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        // Create tasks in this project
+        create_test_task(&mut store, "Task 1", Some(project.id));
+        create_test_task(&mut store, "Task 2", Some(project.id));
+        create_test_task(&mut store, "Task 3", Some(project.id));
+
+        let result = delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Test".to_string(),
+            },
+        );
+
+        assert!(result.is_ok());
+        let deleted = result.unwrap();
+        assert_eq!(deleted.cascaded_tasks_count, 3);
+
+        // Verify tasks are deleted
+        let active_tasks: Vec<_> = store.get_active_tasks().collect();
+        assert_eq!(active_tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_delete_project_returns_counts() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let project = create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Project With Tasks".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        create_test_task(&mut store, "Task 1", Some(project.id));
+        create_test_task(&mut store, "Task 2", Some(project.id));
+
+        let result = delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Project".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.cascaded_tasks_count, 2);
+    }
+
+    #[test]
+    fn test_delete_project_not_found() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        let result = delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "NonExistent".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(DeleteProjectError::ProjectNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_delete_project_ambiguous() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Project One".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Project Two".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        let result = delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Project".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(DeleteProjectError::AmbiguousProjectName(_))
+        ));
+    }
+
+    #[test]
+    fn test_delete_project_already_deleted() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Test Project".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        // Delete once
+        delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Test".to_string(),
+            },
+        )
+        .unwrap();
+
+        // Try to delete again - should not find it (it's not in active projects)
+        let result = delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Test".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(DeleteProjectError::ProjectNotFound(_))
+        ));
+    }
+
+    // ============================================================================
+    // restore_project tests
+    // ============================================================================
+
+    #[test]
+    fn test_restore_project() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Test Project".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        // Delete first
+        delete_project(
+            &mut store,
+            &storage,
+            DeleteProjectParameters {
+                name: "Test".to_string(),
+            },
+        )
+        .unwrap();
+
+        // Restore
+        let result = restore_project(
+            &mut store,
+            &storage,
+            RestoreProjectParameters {
+                name: "Test".to_string(),
+            },
+        );
+
+        assert!(result.is_ok());
+        let restored = result.unwrap();
+        assert!(restored.deleted_at.is_none());
+    }
+
+    #[test]
+    fn test_restore_project_not_found() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        let result = restore_project(
+            &mut store,
+            &storage,
+            RestoreProjectParameters {
+                name: "NonExistent".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(RestoreProjectError::ProjectNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_restore_project_not_deleted() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+
+        create_project(
+            &mut store,
+            &storage,
+            CreateProjectParameters {
+                name: "Active Project".to_string(),
+                area: None,
+            },
+        )
+        .unwrap();
+
+        // Try to restore an active (non-deleted) project
+        let result = restore_project(
+            &mut store,
+            &storage,
+            RestoreProjectParameters {
+                name: "Active".to_string(),
+            },
+        );
+
+        // Should not find it in deleted projects
+        assert!(matches!(
+            result,
+            Err(RestoreProjectError::ProjectNotFound(_))
+        ));
+    }
+}

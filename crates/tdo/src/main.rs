@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use colored::*;
 
-use crate::{
+use tdo::{
     models::task::{When, WhenInstantiationError},
     services::{
         areas::{
@@ -15,17 +15,12 @@ use crate::{
             DeleteProjectParameters, create_project, delete_project,
         },
         tasks::{
-            AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters, add_task,
-            complete_task,
+            AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
+            MoveTaskError, MoveTaskParameters, add_task, complete_task, move_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
 };
-
-mod models;
-mod services;
-mod storage;
-mod ui;
 
 #[derive(Parser)]
 #[command(
@@ -278,28 +273,28 @@ fn main() {
             if total == 0 {
                 println!("No tasks for today");
             } else {
-                ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
+                tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
 
                 // Show overdue first if any
                 if !overdue_tasks.is_empty() {
-                    ui::render_section_header("Overdue");
+                    tdo::ui::render_section_header("Overdue");
                     for task in overdue_tasks {
-                        ui::render_task_line(task, &store, true);
+                        tdo::ui::render_task_line(task, &store, true);
                     }
                 }
 
                 // Show regular today tasks
                 if !today_regular.is_empty() {
                     for task in today_regular {
-                        ui::render_task_line(task, &store, false);
+                        tdo::ui::render_task_line(task, &store, false);
                     }
                 }
 
                 // Show evening tasks
                 if !today_evening.is_empty() {
-                    ui::render_section_header("Evening");
+                    tdo::ui::render_section_header("Evening");
                     for task in today_evening {
-                        ui::render_task_line(task, &store, false);
+                        tdo::ui::render_task_line(task, &store, false);
                     }
                 }
             }
@@ -316,9 +311,9 @@ fn main() {
             if inbox_tasks.is_empty() {
                 println!("Inbox is empty");
             } else {
-                ui::render_view_header("Inbox", inbox_tasks.len());
+                tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                 for task in inbox_tasks {
-                    ui::render_task_line(task, &store, false);
+                    tdo::ui::render_task_line(task, &store, false);
                 }
             }
         }
@@ -334,9 +329,9 @@ fn main() {
             if anytime_tasks.is_empty() {
                 println!("No anytime tasks");
             } else {
-                ui::render_view_header("Anytime", anytime_tasks.len());
+                tdo::ui::render_view_header("Anytime", anytime_tasks.len());
                 for task in anytime_tasks {
-                    ui::render_task_line(task, &store, false);
+                    tdo::ui::render_task_line(task, &store, false);
                 }
             }
         }
@@ -352,9 +347,9 @@ fn main() {
             if someday_tasks.is_empty() {
                 println!("No someday tasks");
             } else {
-                ui::render_view_header("Someday", someday_tasks.len());
+                tdo::ui::render_view_header("Someday", someday_tasks.len());
                 for task in someday_tasks {
-                    ui::render_task_line(task, &store, false);
+                    tdo::ui::render_task_line(task, &store, false);
                 }
             }
         }
@@ -368,7 +363,7 @@ fn main() {
                 println!("No active tasks");
             } else {
                 // Group tasks by When variant
-                let mut grouped: HashMap<String, Vec<&crate::models::task::Task>> = HashMap::new();
+                let mut grouped: HashMap<String, Vec<&tdo::models::task::Task>> = HashMap::new();
 
                 for task in &all_tasks {
                     let group = match &task.when {
@@ -397,10 +392,10 @@ fn main() {
 
                 for group_name in order {
                     if let Some(tasks) = grouped.get(group_name) {
-                        ui::render_section_header(group_name);
+                        tdo::ui::render_section_header(group_name);
                         for task in tasks {
-                            let is_overdue = ui::is_overdue(task);
-                            ui::render_task_line(task, &store, is_overdue);
+                            let is_overdue = tdo::ui::is_overdue(task);
+                            tdo::ui::render_task_line(task, &store, is_overdue);
                         }
                     }
                 }
@@ -428,7 +423,7 @@ fn main() {
                 println!("No upcoming tasks");
             } else {
                 // Group by date
-                let mut grouped: BTreeMap<Date, Vec<&crate::models::task::Task>> = BTreeMap::new();
+                let mut grouped: BTreeMap<Date, Vec<&tdo::models::task::Task>> = BTreeMap::new();
 
                 for task in &upcoming_tasks {
                     if let When::Scheduled { date } = task.when {
@@ -436,14 +431,14 @@ fn main() {
                     }
                 }
 
-                ui::render_view_header("Upcoming", upcoming_tasks.len());
+                tdo::ui::render_view_header("Upcoming", upcoming_tasks.len());
 
                 // Display by date
                 for (date, mut tasks) in grouped {
                     tasks.sort_by_key(|t| t.task_number);
-                    ui::render_section_header(&ui::format_date_header(date));
+                    tdo::ui::render_section_header(&tdo::ui::format_date_header(date));
                     for task in tasks {
-                        ui::render_task_line(task, &store, false);
+                        tdo::ui::render_task_line(task, &store, false);
                     }
                 }
             }
@@ -457,7 +452,7 @@ fn main() {
                 .values()
                 .filter(|t| {
                     if let Some(completed_at) = t.completed_at {
-                        ui::is_within_days(completed_at, 14)
+                        tdo::ui::is_within_days(completed_at, 14)
                     } else {
                         false
                     }
@@ -468,12 +463,12 @@ fn main() {
                 println!("No completed tasks in the last 14 days");
             } else {
                 // Group by month
-                let mut grouped: BTreeMap<(i16, i8), Vec<&crate::models::task::Task>> =
+                let mut grouped: BTreeMap<(i16, i8), Vec<&tdo::models::task::Task>> =
                     BTreeMap::new();
 
                 for task in &completed_tasks {
                     if let Some(completed_at) = task.completed_at {
-                        let year_month = ui::get_year_month(completed_at);
+                        let year_month = tdo::ui::get_year_month(completed_at);
                         grouped
                             .entry(year_month)
                             .or_insert_with(Vec::new)
@@ -481,7 +476,7 @@ fn main() {
                     }
                 }
 
-                ui::render_view_header("Logbook", completed_tasks.len());
+                tdo::ui::render_view_header("Logbook", completed_tasks.len());
 
                 // Display by month (most recent first)
                 for (_year_month, tasks) in grouped.iter().rev() {
@@ -492,11 +487,11 @@ fn main() {
 
                     // Use the first task's timestamp to format the month header
                     let month_header =
-                        ui::format_month_header(sorted_tasks[0].completed_at.unwrap());
-                    ui::render_section_header(&month_header);
+                        tdo::ui::format_month_header(sorted_tasks[0].completed_at.unwrap());
+                    tdo::ui::render_section_header(&month_header);
 
                     for task in sorted_tasks {
-                        ui::render_task_line_with_completion_date(task, &store, false);
+                        tdo::ui::render_task_line_with_completion_date(task, &store, false);
                     }
                 }
             }
@@ -512,19 +507,19 @@ fn main() {
             if total == 0 {
                 println!("Trash is empty");
             } else {
-                ui::render_view_header("Trash", total);
+                tdo::ui::render_view_header("Trash", total);
 
                 // Show deleted tasks
                 if !deleted_tasks.is_empty() {
-                    ui::render_section_header(&format!("Tasks ({})", deleted_tasks.len()));
+                    tdo::ui::render_section_header(&format!("Tasks ({})", deleted_tasks.len()));
                     for task in deleted_tasks {
-                        ui::render_task_line(task, &store, false);
+                        tdo::ui::render_task_line(task, &store, false);
                     }
                 }
 
                 // Show deleted projects
                 if !deleted_projects.is_empty() {
-                    ui::render_section_header(&format!("Projects ({})", deleted_projects.len()));
+                    tdo::ui::render_section_header(&format!("Projects ({})", deleted_projects.len()));
                     for project in deleted_projects {
                         println!("  {} {}", "•".dimmed(), project.name.dimmed());
                     }
@@ -532,7 +527,7 @@ fn main() {
 
                 // Show deleted areas
                 if !deleted_areas.is_empty() {
-                    ui::render_section_header(&format!("Areas ({})", deleted_areas.len()));
+                    tdo::ui::render_section_header(&format!("Areas ({})", deleted_areas.len()));
                     for area in deleted_areas {
                         println!("  {} {}", "•".dimmed(), area.name.dimmed());
                     }
@@ -696,14 +691,151 @@ fn main() {
             evening,
             someday,
             anytime,
-            when,
+            when: when_str,
             deadline,
             project,
             area,
             tag,
             notes,
         }) => {
-            todo!()
+            // Parse when flags
+            let when = match When::from_command_flags(today, evening, someday, anytime, when_str) {
+                Ok(w) => w,
+                Err(WhenInstantiationError::ScheduleAtIncorrect(date_str)) => {
+                    eprintln!("Error: Invalid schedule date format: '{}'", date_str);
+                    eprintln!(
+                        "\nExpected format: YYYY-MM-DD (e.g., 2025-03-01) or relative dates like 'friday', 'next monday'"
+                    );
+                    std::process::exit(1);
+                }
+                Err(WhenInstantiationError::ConflictingFlags(flags)) => {
+                    eprintln!("Error: Cannot use multiple scheduling flags together");
+                    eprintln!("\nConflicting flags provided: {}", flags.join(", "));
+                    eprintln!("\nPlease use only one of:");
+                    eprintln!("  --today       Schedule for today");
+                    eprintln!("  --someday     Defer to someday");
+                    eprintln!("  --anytime     Available anytime");
+                    eprintln!("  --when DATE   Schedule for a specific date");
+                    std::process::exit(1);
+                }
+                Err(WhenInstantiationError::EveningWithoutToday) => {
+                    eprintln!("Error: The --evening flag can only be used with --today");
+                    eprintln!("\nExample: tdo add 'Review PRs' --today --evening");
+                    std::process::exit(1);
+                }
+            };
+
+            let parsed_task_number = match task_number.parse::<u64>() {
+                Ok(num) => num,
+                Err(_) => {
+                    eprintln!("Error: Invalid task number '{}'", task_number);
+                    std::process::exit(1);
+                }
+            };
+
+            // Build parameters
+            let params = MoveTaskParameters {
+                task_number: parsed_task_number,
+                notes,
+                when,
+                deadline,
+                project,
+                area,
+                tags: tag,
+            };
+
+            // Call service
+            match move_task(&mut store, &storage, params) {
+                Ok(task) => {
+                    println!("✓ Task moved");
+                    println!("  #{}", task.task_number);
+                    if let Some(project_id) = task.project_id
+                        && let Some(project) = store.get_project(project_id)
+                    {
+                        println!("  Project: {}", project.name);
+                    }
+                }
+                Err(MoveTaskError::TaskNotFound(identifier)) => {
+                    eprintln!("Error: Task '{}' not found", identifier);
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::AmbiguousTaskName(titles)) => {
+                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                    for title in titles {
+                        eprintln!("  - {}", title);
+                    }
+                    eprintln!("\nPlease be more specific or use the task number.");
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::AmbiguousTagName(names)) => {
+                    eprintln!("Error: Tag name is ambiguous. Multiple tags found:");
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::TagNotFound(name)) => {
+                    eprintln!("Error: Tag '{}' not found", name);
+                    // TODO: Suggest existing tags if any
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::ProjectNotFound(name)) => {
+                    eprintln!("Error: Project '{}' not found", name);
+
+                    // Suggest existing projects if any
+                    let projects: Vec<_> = store.projects.values().collect();
+                    if !projects.is_empty() {
+                        eprintln!("\nAvailable projects:");
+                        for project in projects {
+                            eprintln!("  - {}", project.name);
+                        }
+                    } else {
+                        eprintln!("\nNo projects exist yet. Create one first or omit --project.");
+                    }
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::AmbiguousProjectName(names)) => {
+                    eprintln!("Error: Project name is ambiguous. Multiple projects found:");
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::AreaNotFound(name)) => {
+                    eprintln!("Error: Area '{}' not found", name);
+
+                    // Suggest existing areas if any
+                    let areas: Vec<_> = store.areas.values().collect();
+                    if !areas.is_empty() {
+                        eprintln!("\nAvailable areas:");
+                        for area in areas {
+                            eprintln!("  - {}", area.name);
+                        }
+                    } else {
+                        eprintln!("\nNo areas exist yet. Create one first or omit --area.");
+                    }
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::AmbiguousAreaName(names)) => {
+                    eprintln!("Error: Area name is ambiguous. Multiple areas found:");
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::InvalidDeadline(date_str, error)) => {
+                    eprintln!("Error: Invalid deadline '{}': {}", date_str, error);
+                    eprintln!("\nExpected format: YYYY-MM-DD (e.g., 2025-03-01)");
+                    std::process::exit(1);
+                }
+                Err(MoveTaskError::Storage(e)) => {
+                    eprintln!("Error: Failed to save task: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
         Some(Commands::Area(AreaCommands::New { name })) => {
             let params = CreateAreaParameters { name };
@@ -985,10 +1117,10 @@ fn main() {
                     if tasks.is_empty() {
                         println!("No tasks in project '{}'", header);
                     } else {
-                        ui::render_view_header(&header, tasks.len());
+                        tdo::ui::render_view_header(&header, tasks.len());
                         for task in tasks {
-                            let is_overdue = ui::is_overdue(task);
-                            ui::render_task_line(task, &store, is_overdue);
+                            let is_overdue = tdo::ui::is_overdue(task);
+                            tdo::ui::render_task_line(task, &store, is_overdue);
                         }
                     }
                 }
@@ -1125,10 +1257,10 @@ fn main() {
                 }
             } else {
                 tasks.sort_by_key(|t| t.task_number);
-                ui::render_view_header(&format!("#{}", name), tasks.len());
+                tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
                 for task in tasks {
-                    let is_overdue = ui::is_overdue(task);
-                    ui::render_task_line(task, &store, is_overdue);
+                    let is_overdue = tdo::ui::is_overdue(task);
+                    tdo::ui::render_task_line(task, &store, is_overdue);
                 }
             }
         }
@@ -1171,28 +1303,28 @@ fn main() {
             if total == 0 {
                 println!("No tasks for today");
             } else {
-                ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
+                tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
 
                 // Show overdue first if any
                 if !overdue_tasks.is_empty() {
-                    ui::render_section_header("Overdue");
+                    tdo::ui::render_section_header("Overdue");
                     for task in overdue_tasks {
-                        ui::render_task_line(task, &store, true);
+                        tdo::ui::render_task_line(task, &store, true);
                     }
                 }
 
                 // Show regular today tasks
                 if !today_regular.is_empty() {
                     for task in today_regular {
-                        ui::render_task_line(task, &store, false);
+                        tdo::ui::render_task_line(task, &store, false);
                     }
                 }
 
                 // Show evening tasks
                 if !today_evening.is_empty() {
-                    ui::render_section_header("Evening");
+                    tdo::ui::render_section_header("Evening");
                     for task in today_evening {
-                        ui::render_task_line(task, &store, false);
+                        tdo::ui::render_task_line(task, &store, false);
                     }
                 }
             }

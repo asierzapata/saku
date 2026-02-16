@@ -30,6 +30,7 @@ impl Default for StoredStore {
 }
 
 /// In-memory representation (how we work with data in the app)
+#[derive(Clone)]
 pub struct Store {
     pub version: u32,
     pub next_task_number: u64,
@@ -83,6 +84,11 @@ impl Store {
     pub fn add_task(&mut self, mut task: Task) {
         task.task_number = self.next_task_number;
         self.next_task_number += 1;
+        self.tasks.insert(task.id, task);
+    }
+
+    /// Update an existing task in the store
+    pub fn update_task(&mut self, task: Task) {
         self.tasks.insert(task.id, task);
     }
 
