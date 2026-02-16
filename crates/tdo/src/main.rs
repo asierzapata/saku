@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use colored::*;
 
-use tdo::{
+use saku_tdo::{
     models::task::{When, WhenInstantiationError},
     services::{
         areas::{
@@ -284,28 +284,28 @@ fn main() {
             if total == 0 {
                 println!("No tasks for today");
             } else {
-                tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
+                saku_tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
 
                 // Show overdue first if any
                 if !overdue_tasks.is_empty() {
-                    tdo::ui::render_section_header("Overdue");
+                    saku_tdo::ui::render_section_header("Overdue");
                     for task in overdue_tasks {
-                        tdo::ui::render_task_line(task, &store, true);
+                        saku_tdo::ui::render_task_line(task, &store, true);
                     }
                 }
 
                 // Show regular today tasks
                 if !today_regular.is_empty() {
                     for task in today_regular {
-                        tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store, false);
                     }
                 }
 
                 // Show evening tasks
                 if !today_evening.is_empty() {
-                    tdo::ui::render_section_header("Evening");
+                    saku_tdo::ui::render_section_header("Evening");
                     for task in today_evening {
-                        tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store, false);
                     }
                 }
             }
@@ -322,9 +322,9 @@ fn main() {
             if inbox_tasks.is_empty() {
                 println!("Inbox is empty");
             } else {
-                tdo::ui::render_view_header("Inbox", inbox_tasks.len());
+                saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                 for task in inbox_tasks {
-                    tdo::ui::render_task_line(task, &store, false);
+                    saku_tdo::ui::render_task_line(task, &store, false);
                 }
             }
         }
@@ -340,9 +340,9 @@ fn main() {
             if anytime_tasks.is_empty() {
                 println!("No anytime tasks");
             } else {
-                tdo::ui::render_view_header("Anytime", anytime_tasks.len());
+                saku_tdo::ui::render_view_header("Anytime", anytime_tasks.len());
                 for task in anytime_tasks {
-                    tdo::ui::render_task_line(task, &store, false);
+                    saku_tdo::ui::render_task_line(task, &store, false);
                 }
             }
         }
@@ -358,9 +358,9 @@ fn main() {
             if someday_tasks.is_empty() {
                 println!("No someday tasks");
             } else {
-                tdo::ui::render_view_header("Someday", someday_tasks.len());
+                saku_tdo::ui::render_view_header("Someday", someday_tasks.len());
                 for task in someday_tasks {
-                    tdo::ui::render_task_line(task, &store, false);
+                    saku_tdo::ui::render_task_line(task, &store, false);
                 }
             }
         }
@@ -374,7 +374,7 @@ fn main() {
                 println!("No active tasks");
             } else {
                 // Group tasks by When variant
-                let mut grouped: HashMap<String, Vec<&tdo::models::task::Task>> = HashMap::new();
+                let mut grouped: HashMap<String, Vec<&saku_tdo::models::task::Task>> = HashMap::new();
 
                 for task in &all_tasks {
                     let group = match &task.when {
@@ -385,10 +385,7 @@ fn main() {
                         When::Anytime => "Anytime",
                         When::Scheduled { date: _ } => "Scheduled",
                     };
-                    grouped
-                        .entry(group.to_string())
-                        .or_default()
-                        .push(task);
+                    grouped.entry(group.to_string()).or_default().push(task);
                 }
 
                 // Display in a logical order
@@ -403,10 +400,10 @@ fn main() {
 
                 for group_name in order {
                     if let Some(tasks) = grouped.get(group_name) {
-                        tdo::ui::render_section_header(group_name);
+                        saku_tdo::ui::render_section_header(group_name);
                         for task in tasks {
-                            let is_overdue = tdo::ui::is_overdue(task);
-                            tdo::ui::render_task_line(task, &store, is_overdue);
+                            let is_overdue = saku_tdo::ui::is_overdue(task);
+                            saku_tdo::ui::render_task_line(task, &store, is_overdue);
                         }
                     }
                 }
@@ -434,7 +431,7 @@ fn main() {
                 println!("No upcoming tasks");
             } else {
                 // Group by date
-                let mut grouped: BTreeMap<Date, Vec<&tdo::models::task::Task>> = BTreeMap::new();
+                let mut grouped: BTreeMap<Date, Vec<&saku_tdo::models::task::Task>> = BTreeMap::new();
 
                 for task in &upcoming_tasks {
                     if let When::Scheduled { date } = task.when {
@@ -442,14 +439,14 @@ fn main() {
                     }
                 }
 
-                tdo::ui::render_view_header("Upcoming", upcoming_tasks.len());
+                saku_tdo::ui::render_view_header("Upcoming", upcoming_tasks.len());
 
                 // Display by date
                 for (date, mut tasks) in grouped {
                     tasks.sort_by_key(|t| t.task_number);
-                    tdo::ui::render_section_header(&tdo::ui::format_date_header(date));
+                    saku_tdo::ui::render_section_header(&saku_tdo::ui::format_date_header(date));
                     for task in tasks {
-                        tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store, false);
                     }
                 }
             }
@@ -463,7 +460,7 @@ fn main() {
                 .values()
                 .filter(|t| {
                     if let Some(completed_at) = t.completed_at {
-                        tdo::ui::is_within_days(completed_at, 14)
+                        saku_tdo::ui::is_within_days(completed_at, 14)
                     } else {
                         false
                     }
@@ -474,20 +471,17 @@ fn main() {
                 println!("No completed tasks in the last 14 days");
             } else {
                 // Group by month
-                let mut grouped: BTreeMap<(i16, i8), Vec<&tdo::models::task::Task>> =
+                let mut grouped: BTreeMap<(i16, i8), Vec<&saku_tdo::models::task::Task>> =
                     BTreeMap::new();
 
                 for task in &completed_tasks {
                     if let Some(completed_at) = task.completed_at {
-                        let year_month = tdo::ui::get_year_month(completed_at);
-                        grouped
-                            .entry(year_month)
-                            .or_default()
-                            .push(task);
+                        let year_month = saku_tdo::ui::get_year_month(completed_at);
+                        grouped.entry(year_month).or_default().push(task);
                     }
                 }
 
-                tdo::ui::render_view_header("Logbook", completed_tasks.len());
+                saku_tdo::ui::render_view_header("Logbook", completed_tasks.len());
 
                 // Display by month (most recent first)
                 for (_year_month, tasks) in grouped.iter().rev() {
@@ -498,11 +492,11 @@ fn main() {
 
                     // Use the first task's timestamp to format the month header
                     let month_header =
-                        tdo::ui::format_month_header(sorted_tasks[0].completed_at.unwrap());
-                    tdo::ui::render_section_header(&month_header);
+                        saku_tdo::ui::format_month_header(sorted_tasks[0].completed_at.unwrap());
+                    saku_tdo::ui::render_section_header(&month_header);
 
                     for task in sorted_tasks {
-                        tdo::ui::render_task_line_with_completion_date(task, &store, false);
+                        saku_tdo::ui::render_task_line_with_completion_date(task, &store, false);
                     }
                 }
             }
@@ -518,19 +512,19 @@ fn main() {
             if total == 0 {
                 println!("Trash is empty");
             } else {
-                tdo::ui::render_view_header("Trash", total);
+                saku_tdo::ui::render_view_header("Trash", total);
 
                 // Show deleted tasks
                 if !deleted_tasks.is_empty() {
-                    tdo::ui::render_section_header(&format!("Tasks ({})", deleted_tasks.len()));
+                    saku_tdo::ui::render_section_header(&format!("Tasks ({})", deleted_tasks.len()));
                     for task in deleted_tasks {
-                        tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store, false);
                     }
                 }
 
                 // Show deleted projects
                 if !deleted_projects.is_empty() {
-                    tdo::ui::render_section_header(&format!(
+                    saku_tdo::ui::render_section_header(&format!(
                         "Projects ({})",
                         deleted_projects.len()
                     ));
@@ -541,7 +535,7 @@ fn main() {
 
                 // Show deleted areas
                 if !deleted_areas.is_empty() {
-                    tdo::ui::render_section_header(&format!("Areas ({})", deleted_areas.len()));
+                    saku_tdo::ui::render_section_header(&format!("Areas ({})", deleted_areas.len()));
                     for area in deleted_areas {
                         println!("  {} {}", "•".dimmed(), area.name.dimmed());
                     }
@@ -1298,10 +1292,10 @@ fn main() {
                     if tasks.is_empty() {
                         println!("No tasks in project '{}'", header);
                     } else {
-                        tdo::ui::render_view_header(&header, tasks.len());
+                        saku_tdo::ui::render_view_header(&header, tasks.len());
                         for task in tasks {
-                            let is_overdue = tdo::ui::is_overdue(task);
-                            tdo::ui::render_task_line(task, &store, is_overdue);
+                            let is_overdue = saku_tdo::ui::is_overdue(task);
+                            saku_tdo::ui::render_task_line(task, &store, is_overdue);
                         }
                     }
                 }
@@ -1438,10 +1432,10 @@ fn main() {
                 }
             } else {
                 tasks.sort_by_key(|t| t.task_number);
-                tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
+                saku_tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
                 for task in tasks {
-                    let is_overdue = tdo::ui::is_overdue(task);
-                    tdo::ui::render_task_line(task, &store, is_overdue);
+                    let is_overdue = saku_tdo::ui::is_overdue(task);
+                    saku_tdo::ui::render_task_line(task, &store, is_overdue);
                 }
             }
         }
@@ -1484,28 +1478,28 @@ fn main() {
             if total == 0 {
                 println!("No tasks for today");
             } else {
-                tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
+                saku_tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
 
                 // Show overdue first if any
                 if !overdue_tasks.is_empty() {
-                    tdo::ui::render_section_header("Overdue");
+                    saku_tdo::ui::render_section_header("Overdue");
                     for task in overdue_tasks {
-                        tdo::ui::render_task_line(task, &store, true);
+                        saku_tdo::ui::render_task_line(task, &store, true);
                     }
                 }
 
                 // Show regular today tasks
                 if !today_regular.is_empty() {
                     for task in today_regular {
-                        tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store, false);
                     }
                 }
 
                 // Show evening tasks
                 if !today_evening.is_empty() {
-                    tdo::ui::render_section_header("Evening");
+                    saku_tdo::ui::render_section_header("Evening");
                     for task in today_evening {
-                        tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store, false);
                     }
                 }
             }
