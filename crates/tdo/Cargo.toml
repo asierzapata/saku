@@ -1,0 +1,22 @@
+[package]
+name = "tdo"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tdo"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+jiff.workspace = true
+fs2.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+colored.workspace = true
+slug.workspace = true
+term_size.workspace = true
