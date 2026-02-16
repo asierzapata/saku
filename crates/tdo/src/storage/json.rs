@@ -429,7 +429,7 @@ mod tests {
         let storage = JsonFileStorage::new(path);
         let store = storage.load().expect("Migration should succeed");
 
-        assert_eq!(store.version, 2);
+        assert_eq!(store.version, 3);
         assert_eq!(store.next_task_number, 3);
 
         // "First task" (earlier created_at) gets task_number 1

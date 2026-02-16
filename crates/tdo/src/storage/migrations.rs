@@ -36,7 +36,13 @@ fn migrate_v1_to_v2(mut value: Value) -> Result<Value, StorageError> {
                 }
             }
 
-            let next = (tasks.len() as u64) + 1;
+            // Find the maximum task_number that was assigned
+            let max_task_number = tasks
+                .iter()
+                .filter_map(|t| t.get("task_number").and_then(|v| v.as_u64()))
+                .max()
+                .unwrap_or(0);
+            let next = max_task_number + 1;
             obj.insert("next_task_number".to_string(), Value::from(next));
         } else {
             obj.insert("next_task_number".to_string(), Value::from(1u64));
