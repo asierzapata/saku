@@ -1,1132 +1,1325 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Saku (作) - Terminal-first productivity suite. Fast, focused CLI tools built in Rust for task management, note-taking, and more.">
-    <title>Saku (作) - Terminal Productivity Suite</title>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+            name="description"
+            content="Saku (作) - Terminal-first productivity suite. Fast, focused CLI tools built in Rust for task management, note-taking, and more."
+        />
+        <title>Saku (作) - Terminal Productivity Suite</title>
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+        <!-- Fonts -->
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
 
-    <style>
-        /* ============================================
+        <style>
+            /* ============================================
            CSS CUSTOM PROPERTIES - THEMING SYSTEM
            ============================================ */
-        :root {
-            /* Backgrounds - Depth layers */
-            --bg-depth-1: #0a0e14;
-            --bg-depth-2: #151a23;
-            --bg-depth-3: #1f2633;
-            --bg-depth-4: #2a3342;
+            :root {
+                /* Backgrounds - Depth layers */
+                --bg-depth-1: #0a0e14;
+                --bg-depth-2: #151a23;
+                --bg-depth-3: #1f2633;
+                --bg-depth-4: #2a3342;
 
-            /* Text hierarchy */
-            --text-primary: #e6eaf0;
-            --text-secondary: #9199a8;
-            --text-tertiary: #525d6e;
+                /* Text hierarchy */
+                --text-primary: #e6eaf0;
+                --text-secondary: #9199a8;
+                --text-tertiary: #525d6e;
 
-            /* Accents from tdo glyphs */
-            --accent-complete: #7fd962;   /* Green ✓ */
-            --accent-pending: #5ccfe6;    /* Cyan ○ */
-            --accent-urgent: #f07178;     /* Red ● */
-            --accent-neutral: #ffae57;    /* Orange */
+                /* Accents from tdo glyphs */
+                --accent-complete: #7fd962; /* Green ✓ */
+                --accent-pending: #5ccfe6; /* Cyan ○ */
+                --accent-urgent: #f07178; /* Red ● */
+                --accent-neutral: #ffae57; /* Orange */
 
-            /* Glow effects */
-            --glow-cyan: rgba(92, 207, 230, 0.4);
-            --glow-green: rgba(127, 217, 98, 0.3);
-            --glow-red: rgba(240, 113, 120, 0.3);
+                /* Glow effects */
+                --glow-cyan: rgba(92, 207, 230, 0.4);
+                --glow-green: rgba(127, 217, 98, 0.3);
+                --glow-red: rgba(240, 113, 120, 0.3);
 
-            /* Fonts */
-            --font-serif: 'Spectral', Georgia, serif;
-            --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+                /* Fonts */
+                --font-serif: "Spectral", Georgia, serif;
+                --font-sans:
+                    "IBM Plex Sans", -apple-system, BlinkMacSystemFont,
+                    sans-serif;
+                --font-mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
 
-            /* Spacing */
-            --space-xs: 0.5rem;
-            --space-sm: 1rem;
-            --space-md: 2rem;
-            --space-lg: 4rem;
-            --space-xl: 6rem;
+                /* Spacing */
+                --space-xs: 0.5rem;
+                --space-sm: 1rem;
+                --space-md: 2rem;
+                --space-lg: 4rem;
+                --space-xl: 6rem;
 
-            /* Layout */
-            --container-width: 1200px;
-            --border-radius: 8px;
-        }
+                /* Layout */
+                --container-width: 1200px;
+                --border-radius: 8px;
+            }
 
-        /* ============================================
+            /* ============================================
            BASE STYLES & RESET
            ============================================ */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
 
-        html {
-            font-size: 16px;
-            scroll-behavior: smooth;
-        }
+            html {
+                font-size: 16px;
+                scroll-behavior: smooth;
+            }
 
-        body {
-            font-family: var(--font-sans);
-            background: var(--bg-depth-1);
-            color: var(--text-primary);
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
+            body {
+                font-family: var(--font-sans);
+                background: var(--bg-depth-1);
+                color: var(--text-primary);
+                line-height: 1.6;
+                overflow-x: hidden;
+            }
 
-        ::selection {
-            background: var(--accent-pending);
-            color: var(--bg-depth-1);
-        }
+            ::selection {
+                background: var(--accent-pending);
+                color: var(--bg-depth-1);
+            }
 
-        /* ============================================
+            /* ============================================
            TYPOGRAPHY
            ============================================ */
-        h1, h2, h3, h4 {
-            font-family: var(--font-serif);
-            font-weight: 600;
-            line-height: 1.2;
-        }
+            h1,
+            h2,
+            h3,
+            h4 {
+                font-family: var(--font-serif);
+                font-weight: 600;
+                line-height: 1.2;
+            }
 
-        h1 {
-            font-size: clamp(2.5rem, 5vw, 4rem);
-        }
+            h1 {
+                font-size: clamp(2.5rem, 5vw, 4rem);
+            }
 
-        h2 {
-            font-size: clamp(2rem, 4vw, 3rem);
-            margin-bottom: var(--space-md);
-        }
+            h2 {
+                font-size: clamp(2rem, 4vw, 3rem);
+                margin-bottom: var(--space-md);
+            }
 
-        h3 {
-            font-size: clamp(1.5rem, 3vw, 2rem);
-            margin-bottom: var(--space-sm);
-        }
+            h3 {
+                font-size: clamp(1.5rem, 3vw, 2rem);
+                margin-bottom: var(--space-sm);
+            }
 
-        p {
-            margin-bottom: var(--space-sm);
-            color: var(--text-secondary);
-        }
+            p {
+                margin-bottom: var(--space-sm);
+                color: var(--text-secondary);
+            }
 
-        code {
-            font-family: var(--font-mono);
-            font-size: 0.9em;
-        }
+            code {
+                font-family: var(--font-mono);
+                font-size: 0.9em;
+            }
 
-        /* ============================================
+            /* ============================================
            LAYOUT UTILITIES
            ============================================ */
-        .container {
-            max-width: var(--container-width);
-            margin: 0 auto;
-            padding: 0 var(--space-md);
-        }
+            .container {
+                max-width: var(--container-width);
+                margin: 0 auto;
+                padding: 0 var(--space-md);
+            }
 
-        section {
-            padding: var(--space-xl) 0;
-            position: relative;
-        }
+            section {
+                padding: var(--space-xl) 0;
+                position: relative;
+            }
 
-        /* ============================================
+            /* ============================================
            ANIMATIONS & KEYFRAMES
            ============================================ */
-        @keyframes fadeInUp {
-            from {
+            @keyframes fadeInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            @keyframes blink {
+                0%,
+                49% {
+                    opacity: 1;
+                }
+                50%,
+                100% {
+                    opacity: 0;
+                }
+            }
+
+            @keyframes typing {
+                from {
+                    width: 0;
+                }
+                to {
+                    width: 100%;
+                }
+            }
+
+            @keyframes float {
+                0%,
+                100% {
+                    transform: translateY(0px) rotate(0deg);
+                }
+                33% {
+                    transform: translateY(-20px) rotate(5deg);
+                }
+                66% {
+                    transform: translateY(-10px) rotate(-3deg);
+                }
+            }
+
+            @keyframes rotateIn {
+                from {
+                    opacity: 0;
+                    transform: rotate(-180deg) scale(0.5);
+                }
+                to {
+                    opacity: 1;
+                    transform: rotate(0deg) scale(1);
+                }
+            }
+
+            @keyframes glowPulse {
+                0%,
+                100% {
+                    box-shadow: 0 0 20px var(--glow-cyan);
+                }
+                50% {
+                    box-shadow:
+                        0 0 40px var(--glow-cyan),
+                        0 0 60px var(--glow-cyan);
+                }
+            }
+
+            .fade-in {
+                animation: fadeInUp 0.8s ease-out forwards;
                 opacity: 0;
-                transform: translateY(30px);
             }
-            to {
-                opacity: 1;
-                transform: translateY(0);
+
+            .delay-1 {
+                animation-delay: 0.1s;
             }
-        }
-
-        @keyframes blink {
-            0%, 49% { opacity: 1; }
-            50%, 100% { opacity: 0; }
-        }
-
-        @keyframes typing {
-            from { width: 0; }
-            to { width: 100%; }
-        }
-
-        @keyframes float {
-            0%, 100% { transform: translateY(0px) rotate(0deg); }
-            33% { transform: translateY(-20px) rotate(5deg); }
-            66% { transform: translateY(-10px) rotate(-3deg); }
-        }
-
-        @keyframes rotateIn {
-            from {
-                opacity: 0;
-                transform: rotate(-180deg) scale(0.5);
+            .delay-2 {
+                animation-delay: 0.2s;
             }
-            to {
-                opacity: 1;
-                transform: rotate(0deg) scale(1);
+            .delay-3 {
+                animation-delay: 0.3s;
             }
-        }
-
-        @keyframes glowPulse {
-            0%, 100% { box-shadow: 0 0 20px var(--glow-cyan); }
-            50% { box-shadow: 0 0 40px var(--glow-cyan), 0 0 60px var(--glow-cyan); }
-        }
-
-        .fade-in {
-            animation: fadeInUp 0.8s ease-out forwards;
-            opacity: 0;
-        }
-
-        .delay-1 { animation-delay: 0.1s; }
-        .delay-2 { animation-delay: 0.2s; }
-        .delay-3 { animation-delay: 0.3s; }
-        .delay-4 { animation-delay: 0.4s; }
-        .delay-5 { animation-delay: 0.5s; }
-        .delay-6 { animation-delay: 0.6s; }
-
-        /* Respect user's motion preferences */
-        @media (prefers-reduced-motion: reduce) {
-            *,
-            *::before,
-            *::after {
-                animation-duration: 0.01ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.01ms !important;
+            .delay-4 {
+                animation-delay: 0.4s;
             }
-        }
+            .delay-5 {
+                animation-delay: 0.5s;
+            }
+            .delay-6 {
+                animation-delay: 0.6s;
+            }
 
-        /* ============================================
+            /* Respect user's motion preferences */
+            @media (prefers-reduced-motion: reduce) {
+                *,
+                *::before,
+                *::after {
+                    animation-duration: 0.01ms !important;
+                    animation-iteration-count: 1 !important;
+                    transition-duration: 0.01ms !important;
+                }
+            }
+
+            /* ============================================
            HERO SECTION
            ============================================ */
-        .hero {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            background: radial-gradient(ellipse at top, var(--bg-depth-2) 0%, var(--bg-depth-1) 70%);
-            overflow: hidden;
-        }
+            .hero {
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+                background: radial-gradient(
+                    ellipse at top,
+                    var(--bg-depth-2) 0%,
+                    var(--bg-depth-1) 70%
+                );
+                overflow: hidden;
+            }
 
-        .hero::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-image:
-                repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(92, 207, 230, 0.02) 19px, rgba(92, 207, 230, 0.02) 20px),
-                repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(92, 207, 230, 0.02) 19px, rgba(92, 207, 230, 0.02) 20px);
-            pointer-events: none;
-        }
+            .hero::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-image:
+                    repeating-linear-gradient(
+                        0deg,
+                        transparent,
+                        transparent 19px,
+                        rgba(92, 207, 230, 0.02) 19px,
+                        rgba(92, 207, 230, 0.02) 20px
+                    ),
+                    repeating-linear-gradient(
+                        90deg,
+                        transparent,
+                        transparent 19px,
+                        rgba(92, 207, 230, 0.02) 19px,
+                        rgba(92, 207, 230, 0.02) 20px
+                    );
+                pointer-events: none;
+            }
 
-        .kanji {
-            position: absolute;
-            top: 10%;
-            right: 10%;
-            font-size: 240px;
-            font-family: var(--font-serif);
-            opacity: 0.08;
-            color: var(--accent-pending);
-            pointer-events: none;
-            user-select: none;
-            line-height: 1;
-        }
+            .kanji {
+                position: absolute;
+                top: 10%;
+                right: 10%;
+                font-size: 240px;
+                font-family: var(--font-serif);
+                opacity: 0.08;
+                color: var(--accent-pending);
+                pointer-events: none;
+                user-select: none;
+                line-height: 1;
+            }
 
-        .glyph-constellation {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            overflow: hidden;
-        }
+            .glyph-constellation {
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                overflow: hidden;
+            }
 
-        .floating-glyph {
-            position: absolute;
-            font-size: 48px;
-            opacity: 0.1;
-            animation: float 20s ease-in-out infinite;
-        }
+            .floating-glyph {
+                position: absolute;
+                font-size: 48px;
+                opacity: 0.1;
+                animation: float 20s ease-in-out infinite;
+            }
 
-        .floating-glyph:nth-child(1) {
-            top: 20%;
-            left: 15%;
-            color: var(--accent-complete);
-            animation-delay: 0s;
-        }
+            .floating-glyph:nth-child(1) {
+                top: 20%;
+                left: 15%;
+                color: var(--accent-complete);
+                animation-delay: 0s;
+            }
 
-        .floating-glyph:nth-child(2) {
-            top: 60%;
-            left: 80%;
-            color: var(--accent-pending);
-            animation-delay: 3s;
-        }
+            .floating-glyph:nth-child(2) {
+                top: 60%;
+                left: 80%;
+                color: var(--accent-pending);
+                animation-delay: 3s;
+            }
 
-        .floating-glyph:nth-child(3) {
-            top: 80%;
-            left: 20%;
-            color: var(--accent-urgent);
-            animation-delay: 6s;
-        }
+            .floating-glyph:nth-child(3) {
+                top: 80%;
+                left: 20%;
+                color: var(--accent-urgent);
+                animation-delay: 6s;
+            }
 
-        .hero-content {
-            text-align: center;
-            z-index: 10;
-            max-width: 800px;
-        }
+            .hero-content {
+                text-align: center;
+                z-index: 10;
+                max-width: 800px;
+            }
 
-        .terminal-prompt {
-            font-family: var(--font-mono);
-            font-size: 1.5rem;
-            color: var(--accent-pending);
-            margin-bottom: var(--space-md);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-        }
+            .terminal-prompt {
+                font-family: var(--font-mono);
+                font-size: 1.5rem;
+                color: var(--accent-pending);
+                margin-bottom: var(--space-md);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0.5rem;
+            }
 
-        .cursor {
-            display: inline-block;
-            width: 12px;
-            height: 24px;
-            background: var(--accent-pending);
-            animation: blink 530ms steps(1) infinite;
-        }
+            .cursor {
+                display: inline-block;
+                width: 12px;
+                height: 24px;
+                background: var(--accent-pending);
+                animation: blink 530ms steps(1) infinite;
+            }
 
-        .hero h1 {
-            margin-bottom: var(--space-sm);
-            color: var(--text-primary);
-        }
+            .hero h1 {
+                margin-bottom: var(--space-sm);
+                color: var(--text-primary);
+            }
 
-        .hero-subtitle {
-            font-size: 1.25rem;
-            color: var(--text-secondary);
-            margin-bottom: var(--space-lg);
-        }
+            .hero-subtitle {
+                font-size: 1.25rem;
+                color: var(--text-secondary);
+                margin-bottom: var(--space-lg);
+            }
 
-        .scroll-indicator {
-            position: absolute;
-            bottom: var(--space-lg);
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 2rem;
-            color: var(--accent-pending);
-            animation: float 2s ease-in-out infinite;
-            cursor: pointer;
-        }
+            .scroll-indicator {
+                position: absolute;
+                bottom: var(--space-lg);
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 2rem;
+                color: var(--accent-pending);
+                animation: float 2s ease-in-out infinite;
+                cursor: pointer;
+            }
 
-        /* ============================================
+            /* ============================================
            PHILOSOPHY SECTION
            ============================================ */
-        .philosophy {
-            background: var(--bg-depth-2);
-        }
+            .philosophy {
+                background: var(--bg-depth-2);
+            }
 
-        .philosophy h2 {
-            text-align: center;
-            color: var(--text-primary);
-        }
+            .philosophy h2 {
+                text-align: center;
+                color: var(--text-primary);
+            }
 
-        .pillars {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: var(--space-lg);
-            margin-top: var(--space-lg);
-        }
+            .pillars {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: var(--space-lg);
+                margin-top: var(--space-lg);
+            }
 
-        .pillar {
-            text-align: center;
-        }
+            .pillar {
+                text-align: center;
+            }
 
-        .pillar-icon {
-            font-size: 4rem;
-            margin-bottom: var(--space-sm);
-            animation: rotateIn 0.8s ease-out;
-        }
+            .pillar-icon {
+                font-size: 4rem;
+                margin-bottom: var(--space-sm);
+                animation: rotateIn 0.8s ease-out;
+            }
 
-        .pillar-icon.speed { color: var(--accent-complete); }
-        .pillar-icon.ownership { color: var(--accent-pending); }
-        .pillar-icon.focus { color: var(--accent-urgent); }
+            .pillar-icon.speed {
+                color: var(--accent-complete);
+            }
+            .pillar-icon.ownership {
+                color: var(--accent-pending);
+            }
+            .pillar-icon.focus {
+                color: var(--accent-urgent);
+            }
 
-        .pillar h3 {
-            color: var(--text-primary);
-            margin-bottom: var(--space-sm);
-        }
+            .pillar h3 {
+                color: var(--text-primary);
+                margin-bottom: var(--space-sm);
+            }
 
-        .pillar p {
-            color: var(--text-secondary);
-            line-height: 1.7;
-        }
+            .pillar p {
+                color: var(--text-secondary);
+                line-height: 1.7;
+            }
 
-        /* ============================================
+            /* ============================================
            TOOLS SECTION
            ============================================ */
-        .tools h2 {
-            text-align: center;
-            margin-bottom: var(--space-lg);
-        }
-
-        .tools-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: var(--space-md);
-            margin-top: var(--space-lg);
-        }
-
-        .tool-card {
-            background: linear-gradient(135deg, var(--bg-depth-2) 0%, var(--bg-depth-3) 100%);
-            border: 1px solid var(--bg-depth-4);
-            border-radius: var(--border-radius);
-            padding: var(--space-md);
-            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .tool-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, var(--accent-pending), var(--accent-complete));
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .tool-card:hover {
-            transform: translateY(-8px);
-            border-color: var(--accent-pending);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--accent-pending);
-        }
-
-        .tool-card:hover::before {
-            opacity: 1;
-        }
-
-        .tool-card.featured {
-            grid-column: span 2;
-        }
-
-        @media (max-width: 768px) {
-            .tool-card.featured {
-                grid-column: span 1;
+            .tools h2 {
+                text-align: center;
+                margin-bottom: var(--space-lg);
             }
-        }
 
-        .tool-card.planned {
-            opacity: 0.7;
-        }
+            .tools-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+                gap: var(--space-md);
+                margin-top: var(--space-lg);
+            }
 
-        .tool-card.planned:hover {
-            transform: translateY(-4px);
-        }
+            .tool-card {
+                background: linear-gradient(
+                    135deg,
+                    var(--bg-depth-2) 0%,
+                    var(--bg-depth-3) 100%
+                );
+                border: 1px solid var(--bg-depth-4);
+                border-radius: var(--border-radius);
+                padding: var(--space-md);
+                transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+                position: relative;
+                overflow: hidden;
+            }
 
-        .tool-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
-            margin-bottom: var(--space-sm);
-        }
+            .tool-card::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(
+                    90deg,
+                    var(--accent-pending),
+                    var(--accent-complete)
+                );
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            }
 
-        .tool-name {
-            font-family: var(--font-serif);
-            font-size: 2rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 0.25rem;
-        }
+            .tool-card:hover {
+                transform: translateY(-8px);
+                border-color: var(--accent-pending);
+                box-shadow:
+                    0 12px 40px rgba(0, 0, 0, 0.4),
+                    0 0 0 1px var(--accent-pending);
+            }
 
-        .tool-badge {
-            font-family: var(--font-mono);
-            font-size: 0.75rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
+            .tool-card:hover::before {
+                opacity: 1;
+            }
 
-        .badge-implemented {
-            background: rgba(127, 217, 98, 0.2);
-            color: var(--accent-complete);
-            border: 1px solid var(--accent-complete);
-        }
+            .tool-card.featured {
+                grid-column: span 2;
+            }
 
-        .badge-in-development {
-            background: rgba(255, 174, 87, 0.15);
-            color: var(--accent-neutral);
-            border: 1px solid var(--accent-neutral);
-        }
+            @media (max-width: 768px) {
+                .tool-card.featured {
+                    grid-column: span 1;
+                }
+            }
 
-        .badge-planned {
-            background: rgba(92, 207, 230, 0.1);
-            color: var(--accent-pending);
-            border: 1px solid var(--text-tertiary);
-        }
+            .tool-card.planned {
+                opacity: 0.7;
+            }
 
-        .tool-glyphs {
-            font-size: 1.5rem;
-            margin-bottom: var(--space-sm);
-            letter-spacing: 0.5rem;
-        }
+            .tool-card.planned:hover {
+                transform: translateY(-4px);
+            }
 
-        .tool-description {
-            color: var(--text-secondary);
-            margin-bottom: var(--space-md);
-            line-height: 1.7;
-        }
+            .tool-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: start;
+                margin-bottom: var(--space-sm);
+            }
 
-        .tool-features {
-            list-style: none;
-            margin-bottom: var(--space-md);
-        }
+            .tool-name {
+                font-family: var(--font-serif);
+                font-size: 2rem;
+                font-weight: 700;
+                color: var(--text-primary);
+                margin-bottom: 0.25rem;
+            }
 
-        .tool-features li {
-            color: var(--text-secondary);
-            padding-left: 1.5rem;
-            position: relative;
-            margin-bottom: var(--space-xs);
-        }
+            .tool-badge {
+                font-family: var(--font-mono);
+                font-size: 0.75rem;
+                padding: 0.25rem 0.75rem;
+                border-radius: 12px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
 
-        .tool-features li::before {
-            content: '✓';
-            position: absolute;
-            left: 0;
-            color: var(--accent-complete);
-            font-weight: bold;
-        }
+            .badge-implemented {
+                background: rgba(127, 217, 98, 0.2);
+                color: var(--accent-complete);
+                border: 1px solid var(--accent-complete);
+            }
 
-        .tool-demo {
-            background: var(--bg-depth-1);
-            border-radius: 6px;
-            padding: var(--space-sm);
-            font-family: var(--font-mono);
-            font-size: 0.85rem;
-            overflow-x: auto;
-            border: 1px solid var(--bg-depth-4);
-        }
+            .badge-in-development {
+                background: rgba(255, 174, 87, 0.15);
+                color: var(--accent-neutral);
+                border: 1px solid var(--accent-neutral);
+            }
 
-        .tool-demo .prompt {
-            color: var(--accent-pending);
-        }
+            .badge-planned {
+                background: rgba(92, 207, 230, 0.1);
+                color: var(--accent-pending);
+                border: 1px solid var(--text-tertiary);
+            }
 
-        .tool-demo .output {
-            color: var(--text-secondary);
-            margin-top: 0.5rem;
-            line-height: 1.6;
-        }
+            .tool-glyphs {
+                font-size: 1.5rem;
+                margin-bottom: var(--space-sm);
+                letter-spacing: 0.5rem;
+            }
 
-        /* ============================================
+            .tool-description {
+                color: var(--text-secondary);
+                margin-bottom: var(--space-md);
+                line-height: 1.7;
+            }
+
+            .tool-features {
+                list-style: none;
+                margin-bottom: var(--space-md);
+            }
+
+            .tool-features li {
+                color: var(--text-secondary);
+                padding-left: 1.5rem;
+                position: relative;
+                margin-bottom: var(--space-xs);
+            }
+
+            .tool-features li::before {
+                content: "✓";
+                position: absolute;
+                left: 0;
+                color: var(--accent-complete);
+                font-weight: bold;
+            }
+
+            .tool-demo {
+                background: var(--bg-depth-1);
+                border-radius: 6px;
+                padding: var(--space-sm);
+                font-family: var(--font-mono);
+                font-size: 0.85rem;
+                overflow-x: auto;
+                border: 1px solid var(--bg-depth-4);
+            }
+
+            .tool-demo .prompt {
+                color: var(--accent-pending);
+            }
+
+            .tool-demo .output {
+                color: var(--text-secondary);
+                margin-top: 0.5rem;
+                line-height: 1.6;
+            }
+
+            /* ============================================
            TERMINAL DEMO SECTION
            ============================================ */
-        .terminal-demo {
-            background: var(--bg-depth-1);
-        }
+            .terminal-demo {
+                background: var(--bg-depth-1);
+            }
 
-        .terminal-demo h2 {
-            text-align: center;
-            margin-bottom: var(--space-lg);
-        }
+            .terminal-demo h2 {
+                text-align: center;
+                margin-bottom: var(--space-lg);
+            }
 
-        .terminal-window {
-            max-width: 800px;
-            margin: 0 auto;
-            background: var(--bg-depth-2);
-            border-radius: var(--border-radius);
-            overflow: hidden;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-            border: 1px solid var(--bg-depth-4);
-        }
+            .terminal-window {
+                max-width: 800px;
+                margin: 0 auto;
+                background: var(--bg-depth-2);
+                border-radius: var(--border-radius);
+                overflow: hidden;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+                border: 1px solid var(--bg-depth-4);
+            }
 
-        .terminal-header {
-            background: var(--bg-depth-3);
-            padding: var(--space-sm);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            border-bottom: 1px solid var(--bg-depth-4);
-        }
+            .terminal-header {
+                background: var(--bg-depth-3);
+                padding: var(--space-sm);
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                border-bottom: 1px solid var(--bg-depth-4);
+            }
 
-        .terminal-button {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-        }
+            .terminal-button {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+            }
 
-        .terminal-button.red { background: #f07178; }
-        .terminal-button.yellow { background: #ffae57; }
-        .terminal-button.green { background: #7fd962; }
+            .terminal-button.red {
+                background: #f07178;
+            }
+            .terminal-button.yellow {
+                background: #ffae57;
+            }
+            .terminal-button.green {
+                background: #7fd962;
+            }
 
-        .terminal-content {
-            padding: var(--space-md);
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            line-height: 1.8;
-            color: var(--text-secondary);
-        }
+            .terminal-content {
+                padding: var(--space-md);
+                font-family: var(--font-mono);
+                font-size: 0.9rem;
+                line-height: 1.8;
+                color: var(--text-secondary);
+            }
 
-        .terminal-content .header {
-            color: var(--text-primary);
-            font-weight: 600;
-            margin-bottom: var(--space-sm);
-        }
+            .terminal-content .header {
+                color: var(--text-primary);
+                font-weight: 600;
+                margin-bottom: var(--space-sm);
+            }
 
-        .terminal-content .task-line {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 0.25rem 0;
-        }
+            .terminal-content .task-line {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0.25rem 0;
+            }
 
-        .terminal-content .task-left {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
+            .terminal-content .task-left {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+            }
 
-        .terminal-content .task-id {
-            color: var(--text-tertiary);
-            width: 2ch;
-            text-align: right;
-        }
+            .terminal-content .task-id {
+                color: var(--text-tertiary);
+                width: 2ch;
+                text-align: right;
+            }
 
-        .terminal-content .task-glyph {
-            font-size: 1.1rem;
-        }
+            .terminal-content .task-glyph {
+                font-size: 1.1rem;
+            }
 
-        .terminal-content .task-glyph.pending { color: var(--accent-pending); }
-        .terminal-content .task-glyph.overdue { color: var(--accent-urgent); }
-        .terminal-content .task-glyph.complete { color: var(--accent-complete); }
+            .terminal-content .task-glyph.pending {
+                color: var(--accent-pending);
+            }
+            .terminal-content .task-glyph.overdue {
+                color: var(--accent-urgent);
+            }
+            .terminal-content .task-glyph.complete {
+                color: var(--accent-complete);
+            }
 
-        .terminal-content .task-title {
-            color: var(--text-primary);
-        }
+            .terminal-content .task-title {
+                color: var(--text-primary);
+            }
 
-        .terminal-content .task-context {
-            color: var(--text-tertiary);
-            font-size: 0.85rem;
-        }
+            .terminal-content .task-context {
+                color: var(--text-tertiary);
+                font-size: 0.85rem;
+            }
 
-        .terminal-content .terminal-cursor {
-            display: inline-block;
-            width: 8px;
-            height: 16px;
-            background: var(--accent-pending);
-            animation: blink 530ms steps(1) infinite;
-            margin-left: 4px;
-        }
+            .terminal-content .terminal-cursor {
+                display: inline-block;
+                width: 8px;
+                height: 16px;
+                background: var(--accent-pending);
+                animation: blink 530ms steps(1) infinite;
+                margin-left: 4px;
+            }
 
-        /* ============================================
+            /* ============================================
            INSTALLATION SECTION
            ============================================ */
-        .installation {
-            background: var(--bg-depth-2);
-        }
-
-        .installation h2 {
-            text-align: center;
-            margin-bottom: var(--space-lg);
-        }
-
-        .install-methods {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: var(--space-lg);
-            margin-top: var(--space-lg);
-        }
-
-        @media (max-width: 768px) {
-            .install-methods {
-                grid-template-columns: 1fr;
+            .installation {
+                background: var(--bg-depth-2);
             }
-        }
 
-        .install-card {
-            background: var(--bg-depth-3);
-            border: 1px solid var(--bg-depth-4);
-            border-radius: var(--border-radius);
-            padding: var(--space-md);
-        }
+            .installation h2 {
+                text-align: center;
+                margin-bottom: var(--space-lg);
+            }
 
-        .install-card h3 {
-            color: var(--text-primary);
-            margin-bottom: var(--space-md);
-            display: flex;
-            align-items: center;
-            gap: var(--space-sm);
-        }
+            .install-methods {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+                gap: var(--space-lg);
+                margin-top: var(--space-lg);
+            }
 
-        .install-card h3::before {
-            content: '▸';
-            color: var(--accent-pending);
-            font-size: 1.5rem;
-        }
+            @media (max-width: 768px) {
+                .install-methods {
+                    grid-template-columns: 1fr;
+                }
+            }
 
-        .code-block {
-            background: var(--bg-depth-1);
-            border-radius: 6px;
-            padding: var(--space-sm);
-            margin-bottom: var(--space-sm);
-            position: relative;
-            border: 1px solid var(--bg-depth-4);
-            transition: all 0.3s ease;
-        }
+            .install-card {
+                background: var(--bg-depth-3);
+                border: 1px solid var(--bg-depth-4);
+                border-radius: var(--border-radius);
+                padding: var(--space-md);
+            }
 
-        .code-block:hover {
-            border-color: var(--accent-pending);
-            box-shadow: 0 0 20px var(--glow-cyan);
-        }
+            .install-card h3 {
+                color: var(--text-primary);
+                margin-bottom: var(--space-md);
+                display: flex;
+                align-items: center;
+                gap: var(--space-sm);
+            }
 
-        .code-block pre {
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-            overflow-x: auto;
-            margin: 0;
-        }
+            .install-card h3::before {
+                content: "▸";
+                color: var(--accent-pending);
+                font-size: 1.5rem;
+            }
 
-        .code-block .command {
-            color: var(--text-primary);
-        }
+            .code-block {
+                background: var(--bg-depth-1);
+                border-radius: 6px;
+                padding: var(--space-sm);
+                margin-bottom: var(--space-sm);
+                position: relative;
+                border: 1px solid var(--bg-depth-4);
+                transition: all 0.3s ease;
+            }
 
-        .code-block .comment {
-            color: var(--text-tertiary);
-        }
+            .code-block:hover {
+                border-color: var(--accent-pending);
+                box-shadow: 0 0 20px var(--glow-cyan);
+            }
 
-        .copy-btn {
-            position: absolute;
-            top: var(--space-xs);
-            right: var(--space-xs);
-            background: var(--bg-depth-3);
-            border: 1px solid var(--bg-depth-4);
-            color: var(--text-secondary);
-            padding: 0.25rem 0.75rem;
-            border-radius: 4px;
-            font-family: var(--font-mono);
-            font-size: 0.75rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
+            .code-block pre {
+                font-family: var(--font-mono);
+                font-size: 0.9rem;
+                color: var(--text-secondary);
+                overflow-x: auto;
+                margin: 0;
+            }
 
-        .copy-btn:hover {
-            background: var(--accent-pending);
-            color: var(--bg-depth-1);
-            border-color: var(--accent-pending);
-        }
+            .code-block .command {
+                color: var(--text-primary);
+            }
 
-        .copy-btn:active {
-            transform: scale(0.95);
-        }
+            .code-block .comment {
+                color: var(--text-tertiary);
+            }
 
-        .install-note {
-            color: var(--text-tertiary);
-            font-size: 0.9rem;
-            margin-top: var(--space-sm);
-            font-style: italic;
-        }
+            .copy-btn {
+                position: absolute;
+                top: var(--space-xs);
+                right: var(--space-xs);
+                background: var(--bg-depth-3);
+                border: 1px solid var(--bg-depth-4);
+                color: var(--text-secondary);
+                padding: 0.25rem 0.75rem;
+                border-radius: 4px;
+                font-family: var(--font-mono);
+                font-size: 0.75rem;
+                cursor: pointer;
+                transition: all 0.2s ease;
+            }
 
-        .github-link {
-            display: inline-flex;
-            align-items: center;
-            gap: var(--space-xs);
-            margin-top: var(--space-md);
-            padding: 0.75rem 1.5rem;
-            background: var(--bg-depth-1);
-            color: var(--accent-pending);
-            text-decoration: none;
-            border-radius: var(--border-radius);
-            border: 1px solid var(--accent-pending);
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
+            .copy-btn:hover {
+                background: var(--accent-pending);
+                color: var(--bg-depth-1);
+                border-color: var(--accent-pending);
+            }
 
-        .github-link:hover {
-            background: var(--accent-pending);
-            color: var(--bg-depth-1);
-            box-shadow: 0 0 30px var(--glow-cyan);
-            transform: translateY(-2px);
-        }
+            .copy-btn:active {
+                transform: scale(0.95);
+            }
 
-        /* ============================================
+            .install-note {
+                color: var(--text-tertiary);
+                font-size: 0.9rem;
+                margin-top: var(--space-sm);
+                font-style: italic;
+            }
+
+            .github-link {
+                display: inline-flex;
+                align-items: center;
+                gap: var(--space-xs);
+                margin-top: var(--space-md);
+                padding: 0.75rem 1.5rem;
+                background: var(--bg-depth-1);
+                color: var(--accent-pending);
+                text-decoration: none;
+                border-radius: var(--border-radius);
+                border: 1px solid var(--accent-pending);
+                font-weight: 500;
+                transition: all 0.3s ease;
+            }
+
+            .github-link:hover {
+                background: var(--accent-pending);
+                color: var(--bg-depth-1);
+                box-shadow: 0 0 30px var(--glow-cyan);
+                transform: translateY(-2px);
+            }
+
+            /* ============================================
            FOOTER
            ============================================ */
-        .footer {
-            background: var(--bg-depth-1);
-            border-top: 1px solid var(--bg-depth-4);
-            padding: var(--space-lg) 0;
-            text-align: center;
-        }
+            .footer {
+                background: var(--bg-depth-1);
+                border-top: 1px solid var(--bg-depth-4);
+                padding: var(--space-lg) 0;
+                text-align: center;
+            }
 
-        .footer-content {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: var(--space-md);
-        }
+            .footer-content {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: var(--space-md);
+            }
 
-        .footer-links {
-            display: flex;
-            gap: var(--space-md);
-            flex-wrap: wrap;
-            justify-content: center;
-        }
+            .footer-links {
+                display: flex;
+                gap: var(--space-md);
+                flex-wrap: wrap;
+                justify-content: center;
+            }
 
-        .footer-links a {
-            color: var(--text-secondary);
-            text-decoration: none;
-            transition: color 0.3s ease;
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-        }
+            .footer-links a {
+                color: var(--text-secondary);
+                text-decoration: none;
+                transition: color 0.3s ease;
+                font-family: var(--font-mono);
+                font-size: 0.9rem;
+            }
 
-        .footer-links a:hover {
-            color: var(--accent-pending);
-        }
+            .footer-links a:hover {
+                color: var(--accent-pending);
+            }
 
-        .footer-tagline {
-            color: var(--text-tertiary);
-            font-size: 0.85rem;
-            font-family: var(--font-mono);
-        }
+            .footer-tagline {
+                color: var(--text-tertiary);
+                font-size: 0.85rem;
+                font-family: var(--font-mono);
+            }
 
-        .footer-tagline strong {
-            color: var(--accent-complete);
-        }
-    </style>
-</head>
-<body>
-    <!-- HERO SECTION -->
-    <section class="hero">
-        <div class="kanji">作</div>
+            .footer-tagline strong {
+                color: var(--accent-complete);
+            }
+        </style>
+    </head>
+    <body>
+        <!-- HERO SECTION -->
+        <section class="hero">
+            <div class="kanji">作</div>
 
-        <div class="glyph-constellation">
-            <div class="floating-glyph">✓</div>
-            <div class="floating-glyph">○</div>
-            <div class="floating-glyph">●</div>
-        </div>
-
-        <div class="hero-content">
-            <div class="terminal-prompt fade-in">
-                <span>$ saku</span>
-                <span class="cursor"></span>
+            <div class="glyph-constellation">
+                <div class="floating-glyph">✓</div>
+                <div class="floating-glyph">○</div>
+                <div class="floating-glyph">●</div>
             </div>
-            <h1 class="fade-in delay-1">Terminal productivity<br>redefined</h1>
-            <p class="hero-subtitle fade-in delay-2">
-                Fast, focused CLI tools built in Rust.<br>
-                Own your data. Master your workflow.
-            </p>
-        </div>
 
-        <div class="scroll-indicator fade-in delay-3">↓</div>
-    </section>
-
-    <!-- PHILOSOPHY SECTION -->
-    <section class="philosophy">
-        <div class="container">
-            <h2 class="fade-in">Why Saku?</h2>
-            <div class="pillars">
-                <div class="pillar fade-in delay-1">
-                    <div class="pillar-icon speed">✓</div>
-                    <h3>Speed</h3>
-                    <p>
-                        Built in Rust for instant feedback. No loading screens, no lag—just pure terminal velocity.
-                        Your tasks, notes, and workflows respond as fast as you think.
-                    </p>
+            <div class="hero-content">
+                <div class="terminal-prompt fade-in">
+                    <span>$ saku</span>
+                    <span class="cursor"></span>
                 </div>
-                <div class="pillar fade-in delay-2">
-                    <div class="pillar-icon ownership">○</div>
-                    <h3>Ownership</h3>
-                    <p>
-                        Human-readable JSON storage. No cloud lock-in, no proprietary formats.
-                        Your data lives in simple files you can inspect, backup, and control. AGPL-3.0 licensed.
-                    </p>
-                </div>
-                <div class="pillar fade-in delay-3">
-                    <div class="pillar-icon focus">●</div>
-                    <h3>Focus</h3>
-                    <p>
-                        Minimal, composable tools that do one thing exceptionally well.
-                        Terminal-first design means zero distractions and keyboard-driven efficiency.
-                    </p>
-                </div>
+                <h1 class="fade-in delay-1">
+                    Terminal productivity<br />redefined
+                </h1>
+                <p class="hero-subtitle fade-in delay-2">
+                    Fast, focused CLI tools built in Rust.<br />
+                    Own your data. Master your workflow.
+                </p>
             </div>
-        </div>
-    </section>
 
-    <!-- TOOLS SECTION -->
-    <section class="tools">
-        <div class="container">
-            <h2 class="fade-in">The Suite</h2>
-            <div class="tools-grid">
-                <!-- TDO - Featured -->
-                <div class="tool-card featured fade-in delay-1">
-                    <div class="tool-header">
-                        <div>
-                            <div class="tool-name">tdo</div>
-                            <div class="tool-glyphs">○ ● ✓</div>
-                        </div>
-                        <span class="tool-badge badge-implemented">Implemented</span>
-                    </div>
-                    <p class="tool-description">
-                        Task management that thinks like you do. Flexible scheduling modes (Today, Inbox, Upcoming, Anytime, Someday),
-                        Areas & Projects for organization, and lightning-fast Rust performance.
-                    </p>
-                    <ul class="tool-features">
-                        <li>Flexible scheduling: Today/Inbox/Upcoming/Anytime/Someday/Logbook</li>
-                        <li>Areas & Projects for hierarchical organization</li>
-                        <li>Simple JSON storage with automatic backups</li>
-                    </ul>
-                    <div class="tool-demo">
-                        <div class="prompt">$ tdo today</div>
-                        <div class="output">
-  Today (Feb 16)                                5 tasks
+            <div class="scroll-indicator fade-in delay-3">↓</div>
+        </section>
 
-  1  <span style="color: var(--accent-urgent)">●</span>  Submit expense report                    Work / Admin
-  2  <span style="color: var(--accent-pending)">○</span>  Review PR for auth refactor              Work / rust-24m
-  3  <span style="color: var(--accent-pending)">○</span>  Buy milk                                 Personal / Errands
-  4  <span style="color: var(--accent-pending)">○</span>  Write landing page for Saku              Side Projects / tdo
-                        </div>
+        <!-- PHILOSOPHY SECTION -->
+        <section class="philosophy">
+            <div class="container">
+                <h2 class="fade-in">Why Saku?</h2>
+                <div class="pillars">
+                    <div class="pillar fade-in delay-1">
+                        <div class="pillar-icon speed">✓</div>
+                        <h3>Speed</h3>
+                        <p>
+                            Built in Rust for instant feedback. No loading
+                            screens, no lag—just pure terminal velocity. Your
+                            tasks, notes, and workflows respond as fast as you
+                            think.
+                        </p>
                     </div>
-                </div>
-
-                <!-- NTE - In Development -->
-                <div class="tool-card fade-in delay-2">
-                    <div class="tool-header">
-                        <div>
-                            <div class="tool-name">nte</div>
-                        </div>
-                        <span class="tool-badge badge-in-development">In Development</span>
+                    <div class="pillar fade-in delay-2">
+                        <div class="pillar-icon ownership">○</div>
+                        <h3>Ownership</h3>
+                        <p>
+                            Human-readable JSON storage. No cloud lock-in, no
+                            proprietary formats. Your data lives in simple files
+                            you can inspect, backup, and control. AGPL-3.0
+                            licensed.
+                        </p>
                     </div>
-                    <p class="tool-description">
-                        Agent-friendly note-taking with structured mutations. YAML frontmatter + Markdown content.
-                        Humans get <code>note edit</code>, agents get verbs like <code>append</code>, <code>replace</code>, <code>set</code>.
-                    </p>
-                </div>
-
-                <!-- CAL - Planned -->
-                <div class="tool-card planned fade-in delay-3">
-                    <div class="tool-header">
-                        <div>
-                            <div class="tool-name">cal</div>
-                        </div>
-                        <span class="tool-badge badge-planned">Planned</span>
+                    <div class="pillar fade-in delay-3">
+                        <div class="pillar-icon focus">●</div>
+                        <h3>Focus</h3>
+                        <p>
+                            Minimal, composable tools that do one thing
+                            exceptionally well. Terminal-first design means zero
+                            distractions and keyboard-driven efficiency.
+                        </p>
                     </div>
-                    <p class="tool-description">
-                        Calendar and events management. Natural language scheduling, recurring events, and integration with tdo tasks.
-                    </p>
-                </div>
-
-                <!-- HBT - Planned -->
-                <div class="tool-card planned fade-in delay-4">
-                    <div class="tool-header">
-                        <div>
-                            <div class="tool-name">hbt</div>
-                        </div>
-                        <span class="tool-badge badge-planned">Planned</span>
-                    </div>
-                    <p class="tool-description">
-                        Habit tracking with streaks, momentum, and insights. Build consistency with data-driven feedback loops.
-                    </p>
-                </div>
-
-                <!-- TMR - Planned -->
-                <div class="tool-card planned fade-in delay-5">
-                    <div class="tool-header">
-                        <div>
-                            <div class="tool-name">tmr</div>
-                        </div>
-                        <span class="tool-badge badge-planned">Planned</span>
-                    </div>
-                    <p class="tool-description">
-                        Time tracking and pomodoro timers. Focus sessions, productivity analytics, and deep work optimization.
-                    </p>
-                </div>
-
-                <!-- BKM - Planned -->
-                <div class="tool-card planned fade-in delay-6">
-                    <div class="tool-header">
-                        <div>
-                            <div class="tool-name">bkm</div>
-                        </div>
-                        <span class="tool-badge badge-planned">Planned</span>
-                    </div>
-                    <p class="tool-description">
-                        Bookmark management for the terminal. Tag, search, and organize links without leaving your workflow.
-                    </p>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- TERMINAL DEMO SECTION -->
-    <section class="terminal-demo">
-        <div class="container">
-            <h2 class="fade-in">See It In Action</h2>
-            <div class="terminal-window fade-in delay-1">
-                <div class="terminal-header">
-                    <div class="terminal-button red"></div>
-                    <div class="terminal-button yellow"></div>
-                    <div class="terminal-button green"></div>
-                </div>
-                <div class="terminal-content">
-                    <div class="header">Today (Feb 16)                                5 tasks</div>
-                    <div style="height: 0.5rem;"></div>
-                    <div class="task-line">
-                        <div class="task-left">
-                            <span class="task-id">1</span>
-                            <span class="task-glyph overdue">●</span>
-                            <span class="task-title">Submit expense report</span>
+        <!-- TOOLS SECTION -->
+        <section class="tools">
+            <div class="container">
+                <h2 class="fade-in">The Suite</h2>
+                <div class="tools-grid">
+                    <!-- TDO - Featured -->
+                    <div class="tool-card featured fade-in delay-1">
+                        <div class="tool-header">
+                            <div>
+                                <div class="tool-name">tdo</div>
+                                <div class="tool-glyphs">○ ● ✓</div>
+                            </div>
+                            <span class="tool-badge badge-implemented"
+                                >Implemented</span
+                            >
                         </div>
-                        <span class="task-context">Work / Admin</span>
-                    </div>
-                    <div class="task-line">
-                        <div class="task-left">
-                            <span class="task-id">2</span>
-                            <span class="task-glyph pending">○</span>
-                            <span class="task-title">Review PR for auth refactor</span>
+                        <p class="tool-description">
+                            Task management that thinks like you do. Flexible
+                            scheduling modes (Today, Inbox, Upcoming, Anytime,
+                            Someday), Areas & Projects for organization, and
+                            lightning-fast Rust performance.
+                        </p>
+                        <ul class="tool-features">
+                            <li>
+                                Flexible scheduling:
+                                Today/Inbox/Upcoming/Anytime/Someday/Logbook
+                            </li>
+                            <li>
+                                Areas & Projects for hierarchical organization
+                            </li>
+                            <li>Simple JSON storage with automatic backups</li>
+                        </ul>
+                        <div class="tool-demo">
+                            <div class="prompt">$ tdo today</div>
+                            <div class="output">
+                                Today (Feb 16) 5 tasks 1
+                                <span style="color: var(--accent-urgent)"
+                                    >●</span
+                                >
+                                Submit expense report Work / Admin 2
+                                <span style="color: var(--accent-pending)"
+                                    >○</span
+                                >
+                                Review PR for auth refactor Work / rust-24m 3
+                                <span style="color: var(--accent-pending)"
+                                    >○</span
+                                >
+                                Buy milk Personal / Errands 4
+                                <span style="color: var(--accent-pending)"
+                                    >○</span
+                                >
+                                Write landing page for Saku Side Projects / tdo
+                            </div>
                         </div>
-                        <span class="task-context">Work / rust-24m</span>
                     </div>
-                    <div class="task-line">
-                        <div class="task-left">
-                            <span class="task-id">3</span>
-                            <span class="task-glyph pending">○</span>
-                            <span class="task-title">Call dentist to reschedule</span>
+
+                    <!-- NTE - In Development -->
+                    <div class="tool-card fade-in delay-2">
+                        <div class="tool-header">
+                            <div>
+                                <div class="tool-name">nte</div>
+                            </div>
+                            <span class="tool-badge badge-in-development"
+                                >In Development</span
+                            >
                         </div>
-                        <span class="task-context">Personal</span>
+                        <p class="tool-description">
+                            Agent-friendly note-taking with structured
+                            mutations. YAML frontmatter + Markdown content.
+                            Humans get <code>note edit</code>, agents get verbs
+                            like <code>append</code>, <code>replace</code>,
+                            <code>set</code>.
+                        </p>
                     </div>
-                    <div class="task-line">
-                        <div class="task-left">
-                            <span class="task-id">4</span>
-                            <span class="task-glyph pending">○</span>
-                            <span class="task-title">Buy milk</span>
+
+                    <!-- CAL - Planned -->
+                    <div class="tool-card planned fade-in delay-3">
+                        <div class="tool-header">
+                            <div>
+                                <div class="tool-name">cal</div>
+                            </div>
+                            <span class="tool-badge badge-planned"
+                                >Planned</span
+                            >
                         </div>
-                        <span class="task-context">Personal / Errands</span>
+                        <p class="tool-description">
+                            Calendar and events management. Natural language
+                            scheduling, recurring events, and integration with
+                            tdo tasks.
+                        </p>
                     </div>
-                    <div class="task-line">
-                        <div class="task-left">
-                            <span class="task-id">5</span>
-                            <span class="task-glyph pending">○</span>
-                            <span class="task-title">Write landing page for Saku</span>
+
+                    <!-- HBT - Planned -->
+                    <div class="tool-card planned fade-in delay-4">
+                        <div class="tool-header">
+                            <div>
+                                <div class="tool-name">hbt</div>
+                            </div>
+                            <span class="tool-badge badge-planned"
+                                >Planned</span
+                            >
                         </div>
-                        <span class="task-context">Side Projects / tdo</span>
+                        <p class="tool-description">
+                            Habit tracking with streaks, momentum, and insights.
+                            Build consistency with data-driven feedback loops.
+                        </p>
                     </div>
-                    <div style="height: 1rem;"></div>
-                    <span class="terminal-cursor"></span>
+
+                    <!-- TMR - Planned -->
+                    <div class="tool-card planned fade-in delay-5">
+                        <div class="tool-header">
+                            <div>
+                                <div class="tool-name">tmr</div>
+                            </div>
+                            <span class="tool-badge badge-planned"
+                                >Planned</span
+                            >
+                        </div>
+                        <p class="tool-description">
+                            Time tracking and pomodoro timers. Focus sessions,
+                            productivity analytics, and deep work optimization.
+                        </p>
+                    </div>
+
+                    <!-- BKM - Planned -->
+                    <div class="tool-card planned fade-in delay-6">
+                        <div class="tool-header">
+                            <div>
+                                <div class="tool-name">bkm</div>
+                            </div>
+                            <span class="tool-badge badge-planned"
+                                >Planned</span
+                            >
+                        </div>
+                        <p class="tool-description">
+                            Bookmark management for the terminal. Tag, search,
+                            and organize links without leaving your workflow.
+                        </p>
+                    </div>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- INSTALLATION SECTION -->
-    <section class="installation">
-        <div class="container">
-            <h2 class="fade-in">Get Started</h2>
-            <div class="install-methods">
-                <div class="install-card fade-in delay-1">
-                    <h3>Quick Start</h3>
-                    <div class="code-block">
-                        <button class="copy-btn" data-copy="cargo install --path crates/tdo">Copy</button>
-                        <pre><code><span class="comment"># Install tdo</span>
+        <!-- TERMINAL DEMO SECTION -->
+        <section class="terminal-demo">
+            <div class="container">
+                <h2 class="fade-in">See It In Action</h2>
+                <div class="terminal-window fade-in delay-1">
+                    <div class="terminal-header">
+                        <div class="terminal-button red"></div>
+                        <div class="terminal-button yellow"></div>
+                        <div class="terminal-button green"></div>
+                    </div>
+                    <div class="terminal-content">
+                        <div class="header">Today (Feb 16) 5 tasks</div>
+                        <div style="height: 0.5rem"></div>
+                        <div class="task-line">
+                            <div class="task-left">
+                                <span class="task-id">1</span>
+                                <span class="task-glyph overdue">●</span>
+                                <span class="task-title"
+                                    >Submit expense report</span
+                                >
+                            </div>
+                            <span class="task-context">Work / Admin</span>
+                        </div>
+                        <div class="task-line">
+                            <div class="task-left">
+                                <span class="task-id">2</span>
+                                <span class="task-glyph pending">○</span>
+                                <span class="task-title"
+                                    >Review PR for auth refactor</span
+                                >
+                            </div>
+                            <span class="task-context">Work / rust-24m</span>
+                        </div>
+                        <div class="task-line">
+                            <div class="task-left">
+                                <span class="task-id">3</span>
+                                <span class="task-glyph pending">○</span>
+                                <span class="task-title"
+                                    >Call dentist to reschedule</span
+                                >
+                            </div>
+                            <span class="task-context">Personal</span>
+                        </div>
+                        <div class="task-line">
+                            <div class="task-left">
+                                <span class="task-id">4</span>
+                                <span class="task-glyph pending">○</span>
+                                <span class="task-title">Buy milk</span>
+                            </div>
+                            <span class="task-context">Personal / Errands</span>
+                        </div>
+                        <div class="task-line">
+                            <div class="task-left">
+                                <span class="task-id">5</span>
+                                <span class="task-glyph pending">○</span>
+                                <span class="task-title"
+                                    >Write landing page for Saku</span
+                                >
+                            </div>
+                            <span class="task-context"
+                                >Side Projects / tdo</span
+                            >
+                        </div>
+                        <div style="height: 1rem"></div>
+                        <span class="terminal-cursor"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- INSTALLATION SECTION -->
+        <section class="installation">
+            <div class="container">
+                <h2 class="fade-in">Get Started</h2>
+                <div class="install-methods">
+                    <div class="install-card fade-in delay-1">
+                        <h3>Quick Start</h3>
+                        <div class="code-block">
+                            <button
+                                class="copy-btn"
+                                data-copy="cargo install --path crates/tdo"
+                            >
+                                Copy
+                            </button>
+                            <pre><code><span class="comment"># Install tdo</span>
 <span class="command">cargo install --path crates/tdo</span></code></pre>
-                    </div>
-                    <div class="code-block">
-                        <button class="copy-btn" data-copy="tdo today">Copy</button>
-                        <pre><code><span class="comment"># Try it out</span>
+                        </div>
+                        <div class="code-block">
+                            <button class="copy-btn" data-copy="tdo today">
+                                Copy
+                            </button>
+                            <pre><code><span class="comment"># Try it out</span>
 <span class="command">tdo today</span></code></pre>
+                        </div>
+                        <p class="install-note">
+                            Requires Rust 1.83+ with edition 2024 support
+                        </p>
                     </div>
-                    <p class="install-note">Requires Rust 1.83+ with edition 2024 support</p>
-                </div>
 
-                <div class="install-card fade-in delay-2">
-                    <h3>Build From Source</h3>
-                    <div class="code-block">
-                        <button class="copy-btn" data-copy="git clone https://github.com/asierzapata/tdo.git
-cd tdo
-cargo build --release --workspace">Copy</button>
-                        <pre><code><span class="comment"># Clone the repository</span>
-<span class="command">git clone https://github.com/asierzapata/tdo.git</span>
+                    <div class="install-card fade-in delay-2">
+                        <h3>Build From Source</h3>
+                        <div class="code-block">
+                            <button
+                                class="copy-btn"
+                                data-copy="git clone https://github.com/asierzapata/saku.git
+cd saku
+cargo build --release --workspace"
+                            >
+                                Copy
+                            </button>
+                            <pre><code><span class="comment"># Clone the repository</span>
+<span class="command">git clone https://github.com/asierzapata/saku.git</span>
 <span class="command">cd tdo</span>
 
 <span class="comment"># Build all tools</span>
 <span class="command">cargo build --release --workspace</span></code></pre>
+                        </div>
+                        <p class="install-note">
+                            Binaries will be in <code>target/release/</code>
+                        </p>
+                        <a
+                            href="https://github.com/asierzapata/tdo"
+                            class="github-link"
+                            target="_blank"
+                            rel="noopener"
+                        >
+                            View on GitHub →
+                        </a>
                     </div>
-                    <p class="install-note">Binaries will be in <code>target/release/</code></p>
-                    <a href="https://github.com/asierzapata/tdo" class="github-link" target="_blank" rel="noopener">
-                        View on GitHub →
-                    </a>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- FOOTER -->
-    <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-links">
-                    <a href="https://github.com/asierzapata/tdo" target="_blank" rel="noopener">GitHub</a>
-                    <a href="https://github.com/asierzapata/tdo/blob/main/LICENSE" target="_blank" rel="noopener">AGPL-3.0 License</a>
-                    <a href="https://github.com/asierzapata/tdo/tree/main/documentation" target="_blank" rel="noopener">Documentation</a>
+        <!-- FOOTER -->
+        <footer class="footer">
+            <div class="container">
+                <div class="footer-content">
+                    <div class="footer-links">
+                        <a
+                            href="https://github.com/asierzapata/tdo"
+                            target="_blank"
+                            rel="noopener"
+                            >GitHub</a
+                        >
+                        <a
+                            href="https://github.com/asierzapata/tdo/blob/main/LICENSE"
+                            target="_blank"
+                            rel="noopener"
+                            >AGPL-3.0 License</a
+                        >
+                        <a
+                            href="https://github.com/asierzapata/tdo/tree/main/documentation"
+                            target="_blank"
+                            rel="noopener"
+                            >Documentation</a
+                        >
+                    </div>
+                    <p class="footer-tagline">
+                        Built with <strong>Rust</strong> · Designed for terminal
+                        artisans
+                    </p>
                 </div>
-                <p class="footer-tagline">Built with <strong>Rust</strong> · Designed for terminal artisans</p>
             </div>
-        </div>
-    </footer>
+        </footer>
 
-    <!-- MINIMAL JAVASCRIPT - COPY TO CLIPBOARD -->
-    <script>
-        // Copy to clipboard functionality
-        document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const code = btn.getAttribute('data-copy') || btn.parentElement.querySelector('code').textContent.trim();
-                try {
-                    await navigator.clipboard.writeText(code);
-                    const originalText = btn.textContent;
-                    btn.textContent = 'Copied!';
-                    btn.style.background = 'var(--accent-complete)';
-                    btn.style.color = 'var(--bg-depth-1)';
-                    setTimeout(() => {
-                        btn.textContent = originalText;
-                        btn.style.background = '';
-                        btn.style.color = '';
-                    }, 2000);
-                } catch (err) {
-                    console.error('Failed to copy:', err);
-                }
+        <!-- MINIMAL JAVASCRIPT - COPY TO CLIPBOARD -->
+        <script>
+            // Copy to clipboard functionality
+            document.querySelectorAll(".copy-btn").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    const code =
+                        btn.getAttribute("data-copy") ||
+                        btn.parentElement
+                            .querySelector("code")
+                            .textContent.trim();
+                    try {
+                        await navigator.clipboard.writeText(code);
+                        const originalText = btn.textContent;
+                        btn.textContent = "Copied!";
+                        btn.style.background = "var(--accent-complete)";
+                        btn.style.color = "var(--bg-depth-1)";
+                        setTimeout(() => {
+                            btn.textContent = originalText;
+                            btn.style.background = "";
+                            btn.style.color = "";
+                        }, 2000);
+                    } catch (err) {
+                        console.error("Failed to copy:", err);
+                    }
+                });
             });
-        });
 
-        // Smooth scroll for scroll indicator
-        document.querySelector('.scroll-indicator')?.addEventListener('click', () => {
-            document.querySelector('.philosophy').scrollIntoView({ behavior: 'smooth' });
-        });
+            // Smooth scroll for scroll indicator
+            document
+                .querySelector(".scroll-indicator")
+                ?.addEventListener("click", () => {
+                    document
+                        .querySelector(".philosophy")
+                        .scrollIntoView({ behavior: "smooth" });
+                });
 
-        // Add fade-in animation on scroll
-        const observerOptions = {
-            threshold: 0.1,
-            rootMargin: '0px 0px -50px 0px'
-        };
+            // Add fade-in animation on scroll
+            const observerOptions = {
+                threshold: 0.1,
+                rootMargin: "0px 0px -50px 0px",
+            };
 
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.style.opacity = '1';
-                    entry.target.style.transform = 'translateY(0)';
-                }
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.style.opacity = "1";
+                        entry.target.style.transform = "translateY(0)";
+                    }
+                });
+            }, observerOptions);
+
+            document.querySelectorAll(".fade-in").forEach((el) => {
+                observer.observe(el);
             });
-        }, observerOptions);
-
-        document.querySelectorAll('.fade-in').forEach(el => {
-            observer.observe(el);
-        });
-    </script>
-</body>
+        </script>
+    </body>
 </html>
