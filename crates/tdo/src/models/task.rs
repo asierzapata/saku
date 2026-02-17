@@ -1,5 +1,7 @@
 // src/model.rs
 
+use std::cmp::Ordering;
+
 use jiff::Timestamp;
 use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
@@ -124,11 +126,124 @@ pub struct ChecklistItem {
     pub completed: bool,
 }
 
-// For now we order them by task number, but we will implement
-// more sophisticated ordering within each group later
-// (for example with by areas, projects, tags or priorities)
 pub fn order_tasks(tasks: Vec<&Task>) -> Vec<&Task> {
-    let mut ordered_tasks = tasks.clone();
-    ordered_tasks.sort_by_key(|t| t.task_number);
-    ordered_tasks
+    let mut ordered = tasks;
+    ordered.sort_by(|a, b| {
+        // 1. Deadline urgency: sooner deadlines first, no deadline last
+        let deadline_ord = match (a.deadline, b.deadline) {
+            (None, None) => Ordering::Equal,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(da), Some(db)) => da.cmp(&db),
+        };
+        if deadline_ord != Ordering::Equal {
+            return deadline_ord;
+        }
+        // 2. Project grouping: same project adjacent, no project last
+        let project_ord = match (a.project_id, b.project_id) {
+            (None, None) => Ordering::Equal,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(pa), Some(pb)) => pa.cmp(&pb),
+        };
+        if project_ord != Ordering::Equal {
+            return project_ord;
+        }
+        // 3. Area grouping: same area adjacent, no area last
+        let area_ord = match (a.area_id, b.area_id) {
+            (None, None) => Ordering::Equal,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(aa), Some(ab)) => aa.cmp(&ab),
+        };
+        if area_ord != Ordering::Equal {
+            return area_ord;
+        }
+        // 4. Task number within each group
+        a.task_number.cmp(&b.task_number)
+    });
+    ordered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jiff::civil::date;
+
+    fn make_task(task_number: u64, deadline: Option<Date>, project_id: Option<Uuid>, area_id: Option<Uuid>) -> Task {
+        Task {
+            task_number,
+            deadline,
+            project_id,
+            area_id,
+            ..Task::default()
+        }
+    }
+
+    #[test]
+    fn deadline_sorts_before_no_deadline() {
+        let with_deadline = make_task(2, Some(date(2025, 6, 1)), None, None);
+        let no_deadline = make_task(1, None, None, None);
+
+        let tasks = vec![&no_deadline, &with_deadline];
+        let ordered = order_tasks(tasks);
+
+        assert_eq!(ordered[0].task_number, 2, "task with deadline should be first");
+        assert_eq!(ordered[1].task_number, 1, "task without deadline should be last");
+    }
+
+    #[test]
+    fn earlier_deadline_sorts_first() {
+        let earlier = make_task(2, Some(date(2025, 1, 10)), None, None);
+        let later = make_task(1, Some(date(2025, 1, 20)), None, None);
+
+        let tasks = vec![&later, &earlier];
+        let ordered = order_tasks(tasks);
+
+        assert_eq!(ordered[0].task_number, 2, "earlier deadline should be first");
+        assert_eq!(ordered[1].task_number, 1, "later deadline should be second");
+    }
+
+    #[test]
+    fn same_deadline_groups_by_project() {
+        let deadline = Some(date(2025, 6, 1));
+        let project_a = Uuid::new_v4();
+        let with_project = make_task(2, deadline, Some(project_a), None);
+        let no_project = make_task(1, deadline, None, None);
+
+        let tasks = vec![&no_project, &with_project];
+        let ordered = order_tasks(tasks);
+
+        assert_eq!(ordered[0].task_number, 2, "task with project should be first");
+        assert_eq!(ordered[1].task_number, 1, "task without project should be last");
+    }
+
+    #[test]
+    fn same_project_groups_by_area() {
+        let project_id = Some(Uuid::new_v4());
+        let area_a = Uuid::new_v4();
+        let with_area = make_task(2, None, project_id, Some(area_a));
+        let no_area = make_task(1, None, project_id, None);
+
+        let tasks = vec![&no_area, &with_area];
+        let ordered = order_tasks(tasks);
+
+        assert_eq!(ordered[0].task_number, 2, "task with area should be first");
+        assert_eq!(ordered[1].task_number, 1, "task without area should be last");
+    }
+
+    #[test]
+    fn same_group_orders_by_task_number() {
+        let project_id = Some(Uuid::new_v4());
+        let t1 = make_task(1, None, project_id, None);
+        let t3 = make_task(3, None, project_id, None);
+        let t2 = make_task(2, None, project_id, None);
+
+        let tasks = vec![&t3, &t1, &t2];
+        let ordered = order_tasks(tasks);
+
+        assert_eq!(ordered[0].task_number, 1);
+        assert_eq!(ordered[1].task_number, 2);
+        assert_eq!(ordered[2].task_number, 3);
+    }
 }

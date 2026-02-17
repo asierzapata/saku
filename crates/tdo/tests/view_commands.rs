@@ -320,6 +320,22 @@ fn inbox_tasks_appear_in_number_order() {
 }
 
 #[test]
+fn inbox_tasks_with_deadlines_appear_first() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "NO_DEADLINE"]).assert().success();
+    tdo(&temp)
+        .args(["add", "WITH_DEADLINE", "--deadline", "2030-01-01"])
+        .assert()
+        .success();
+
+    let assert = tdo(&temp).args(["inbox"]).assert().success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert_order(&stdout, "WITH_DEADLINE", "NO_DEADLINE");
+}
+
+#[test]
 fn today_tasks_appear_in_number_order() {
     let temp = TempDir::new().unwrap();
 
