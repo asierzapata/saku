@@ -28,6 +28,14 @@ pub fn create_project(
     storage: &impl Storage,
     parameters: CreateProjectParameters,
 ) -> Result<Project, CreateProjectError> {
+    let already_exists = store
+        .get_active_projects()
+        .any(|p| p.name.to_lowercase() == parameters.name.to_lowercase());
+
+    if already_exists {
+        return Err(CreateProjectError::ProjectAlreadyExists(parameters.name));
+    }
+
     let project_slug = slugify(&parameters.name);
 
     let area_id = match parameters.area {

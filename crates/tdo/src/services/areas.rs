@@ -23,9 +23,18 @@ pub fn create_area(
     storage: &impl Storage,
     parameters: CreateAreaParameters,
 ) -> Result<Area, CreateAreaError> {
+    let already_exists = store
+        .get_active_areas()
+        .any(|a| a.name.to_lowercase() == parameters.name.to_lowercase());
+
+    if already_exists {
+        return Err(CreateAreaError::AreaAlreadyExists(parameters.name));
+    }
+
     let area_slug = slugify(&parameters.name);
 
     let area = Area {
+        id: uuid::Uuid::new_v4(),
         name: parameters.name,
         slug: area_slug,
         ..Area::default()

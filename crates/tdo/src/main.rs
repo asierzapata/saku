@@ -222,9 +222,13 @@ fn main() {
     let cli = Cli::parse();
 
     // Initialize storage
-    let storage_path = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("tdo")
+    let storage_path = std::env::var_os("TDO_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("tdo")
+        })
         .join("store.json");
 
     // Create parent directory if it doesn't exist
@@ -250,20 +254,22 @@ fn main() {
             let today = jiff::Zoned::now().date();
 
             // Collect today tasks
-            let mut today_regular: Vec<_> = store
+            let today_regular: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Today { evening: false }))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let today_regular = saku_tdo::models::task::order_tasks(today_regular);
 
-            let mut today_evening: Vec<_> = store
+            let today_evening: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Today { evening: true }))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let today_evening = saku_tdo::models::task::order_tasks(today_evening);
 
             // Collect overdue tasks
-            let mut overdue_tasks: Vec<_> = store
+            let overdue_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
                     if let When::Scheduled { date } = t.when {
@@ -273,18 +279,17 @@ fn main() {
                     }
                 })
                 .collect();
-
-            // Sort by task number
-            today_regular.sort_by_key(|t| t.task_number);
-            today_evening.sort_by_key(|t| t.task_number);
-            overdue_tasks.sort_by_key(|t| t.task_number);
+            let overdue_tasks = saku_tdo::models::task::order_tasks(overdue_tasks);
 
             let total = today_regular.len() + today_evening.len() + overdue_tasks.len();
 
             if total == 0 {
                 println!("No tasks for today");
             } else {
-                saku_tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
+                saku_tdo::ui::render_view_header(
+                    &format!("Today ({})", today.strftime("%b %d")),
+                    total,
+                );
 
                 // Show overdue first if any
                 if !overdue_tasks.is_empty() {
@@ -317,6 +322,7 @@ fn main() {
                 .filter(|t| matches!(t.when, When::Inbox))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let inbox_tasks = saku_tdo::models::task::order_tasks(inbox_tasks);
 
             // Display
             if inbox_tasks.is_empty() {
@@ -335,6 +341,7 @@ fn main() {
                 .filter(|t| matches!(t.when, When::Anytime))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let anytime_tasks = saku_tdo::models::task::order_tasks(anytime_tasks);
 
             // Display
             if anytime_tasks.is_empty() {
@@ -353,6 +360,7 @@ fn main() {
                 .filter(|t| matches!(t.when, When::Someday))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let someday_tasks = saku_tdo::models::task::order_tasks(someday_tasks);
 
             // Display
             if someday_tasks.is_empty() {
@@ -369,12 +377,14 @@ fn main() {
 
             // Collect all active, incomplete tasks
             let all_tasks: Vec<_> = store.get_active_tasks().collect();
+            let all_tasks = saku_tdo::models::task::order_tasks(all_tasks);
 
             if all_tasks.is_empty() {
                 println!("No active tasks");
             } else {
                 // Group tasks by When variant
-                let mut grouped: HashMap<String, Vec<&saku_tdo::models::task::Task>> = HashMap::new();
+                let mut grouped: HashMap<String, Vec<&saku_tdo::models::task::Task>> =
+                    HashMap::new();
 
                 for task in &all_tasks {
                     let group = match &task.when {
@@ -431,7 +441,8 @@ fn main() {
                 println!("No upcoming tasks");
             } else {
                 // Group by date
-                let mut grouped: BTreeMap<Date, Vec<&saku_tdo::models::task::Task>> = BTreeMap::new();
+                let mut grouped: BTreeMap<Date, Vec<&saku_tdo::models::task::Task>> =
+                    BTreeMap::new();
 
                 for task in &upcoming_tasks {
                     if let When::Scheduled { date } = task.when {
@@ -516,7 +527,10 @@ fn main() {
 
                 // Show deleted tasks
                 if !deleted_tasks.is_empty() {
-                    saku_tdo::ui::render_section_header(&format!("Tasks ({})", deleted_tasks.len()));
+                    saku_tdo::ui::render_section_header(&format!(
+                        "Tasks ({})",
+                        deleted_tasks.len()
+                    ));
                     for task in deleted_tasks {
                         saku_tdo::ui::render_task_line(task, &store, false);
                     }
@@ -535,7 +549,10 @@ fn main() {
 
                 // Show deleted areas
                 if !deleted_areas.is_empty() {
-                    saku_tdo::ui::render_section_header(&format!("Areas ({})", deleted_areas.len()));
+                    saku_tdo::ui::render_section_header(&format!(
+                        "Areas ({})",
+                        deleted_areas.len()
+                    ));
                     for area in deleted_areas {
                         println!("  {} {}", "•".dimmed(), area.name.dimmed());
                     }
@@ -1444,20 +1461,22 @@ fn main() {
             let today = jiff::Zoned::now().date();
 
             // Collect today tasks
-            let mut today_regular: Vec<_> = store
+            let today_regular: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Today { evening: false }))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let today_regular = saku_tdo::models::task::order_tasks(today_regular);
 
-            let mut today_evening: Vec<_> = store
+            let today_evening: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Today { evening: true }))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
+            let today_evening = saku_tdo::models::task::order_tasks(today_evening);
 
             // Collect overdue tasks
-            let mut overdue_tasks: Vec<_> = store
+            let overdue_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
                     if let When::Scheduled { date } = t.when {
@@ -1467,18 +1486,17 @@ fn main() {
                     }
                 })
                 .collect();
-
-            // Sort by task number
-            today_regular.sort_by_key(|t| t.task_number);
-            today_evening.sort_by_key(|t| t.task_number);
-            overdue_tasks.sort_by_key(|t| t.task_number);
+            let overdue_tasks = saku_tdo::models::task::order_tasks(overdue_tasks);
 
             let total = today_regular.len() + today_evening.len() + overdue_tasks.len();
 
             if total == 0 {
                 println!("No tasks for today");
             } else {
-                saku_tdo::ui::render_view_header(&format!("Today ({})", today.strftime("%b %d")), total);
+                saku_tdo::ui::render_view_header(
+                    &format!("Today ({})", today.strftime("%b %d")),
+                    total,
+                );
 
                 // Show overdue first if any
                 if !overdue_tasks.is_empty() {
