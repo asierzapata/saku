@@ -1,0 +1,76 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'saku-tdo-v*'
+      - 'saku-nte-v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Determine crate to publish
+        id: determine-crate
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          if [[ $TAG == saku-tdo-v* ]]; then
+            echo "crate=saku-tdo" >> $GITHUB_OUTPUT
+            echo "package_path=crates/tdo" >> $GITHUB_OUTPUT
+            echo "version=${TAG#saku-tdo-v}" >> $GITHUB_OUTPUT
+          elif [[ $TAG == saku-nte-v* ]]; then
+            echo "crate=saku-nte" >> $GITHUB_OUTPUT
+            echo "package_path=crates/nte" >> $GITHUB_OUTPUT
+            echo "version=${TAG#saku-nte-v}" >> $GITHUB_OUTPUT
+          else
+            echo "Unknown tag format: $TAG"
+            exit 1
+          fi
+
+      - name: Verify version matches tag
+        run: |
+          CARGO_VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "${{ steps.determine-crate.outputs.crate }}") | .version')
+          if [ "$CARGO_VERSION" != "${{ steps.determine-crate.outputs.version }}" ]; then
+            echo "Error: Tag version (${{ steps.determine-crate.outputs.version }}) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+
+      - name: Build
+        run: cargo build --release --verbose -p ${{ steps.determine-crate.outputs.crate }}
+
+      - name: Run tests
+        run: cargo test --verbose -p ${{ steps.determine-crate.outputs.crate }}
+
+      - name: Run clippy
+        run: cargo clippy -p ${{ steps.determine-crate.outputs.crate }} -- -D warnings
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p ${{ steps.determine-crate.outputs.crate }} --token $CARGO_REGISTRY_TOKEN
