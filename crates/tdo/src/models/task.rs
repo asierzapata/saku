@@ -123,3 +123,12 @@ pub struct ChecklistItem {
     pub title: String,
     pub completed: bool,
 }
+
+// For now we order them by task number, but we will implement
+// more sophisticated ordering within each group later
+// (for example with by areas, projects, tags or priorities)
+pub fn order_tasks(tasks: Vec<&Task>) -> Vec<&Task> {
+    let mut ordered_tasks = tasks.clone();
+    ordered_tasks.sort_by_key(|t| t.task_number);
+    ordered_tasks
+}
