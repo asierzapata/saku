@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - `gh` CLI authenticated (`gh auth login`)
-- `CRATES_IO_TOKEN` set in GitHub repository secrets (Settings → Secrets → Actions)
+- `cargo` authenticated (`cargo login`)
 
 ## Releasing a crate
 
@@ -21,12 +21,12 @@
 
 The script will:
 1. Verify the working tree is clean and `main` is up to date
-2. Bump the version in `Cargo.toml` and update `Cargo.lock`
-3. Commit and push directly to `main`
-4. Create and push the version tag (e.g. `saku-tdo-v0.2.1`)
-5. Create a GitHub Release with an auto-generated changelog
-
-The `publish.yml` workflow then triggers automatically on the pushed tag and publishes the crate to crates.io.
+2. Build, test, and run clippy (fails fast before touching anything)
+3. Bump the version in `Cargo.toml` and update `Cargo.lock`
+4. Commit and push directly to `main`
+5. Create and push the version tag (e.g. `saku-tdo-v0.2.1`)
+6. Create a GitHub Release with an auto-generated changelog
+7. Publish to crates.io
 
 ## Tag format
 
@@ -36,5 +36,5 @@ The `publish.yml` workflow then triggers automatically on the pushed tag and pub
 ## Troubleshooting
 
 - **Dirty working tree**: commit or stash changes before running the script
-- **401 Unauthorized on publish**: check `CRATES_IO_TOKEN` in GitHub Secrets
-- **Version mismatch on publish**: the tag version must match `Cargo.toml` — this is handled automatically by the script
+- **Publish fails (not logged in)**: run `cargo login` with your crates.io token
+- **Build/test/clippy failure**: fix the issues — the script aborts before making any changes
