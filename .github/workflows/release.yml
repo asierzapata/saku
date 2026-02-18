@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -77,6 +78,13 @@ jobs:
           echo "tag=${{ steps.crate-info.outputs.tag_prefix }}${NEW_VERSION}" >> $GITHUB_OUTPUT
           echo "New version: $NEW_VERSION"
 
+      - name: Create release branch
+        id: release-branch
+        run: |
+          BRANCH="release/${{ inputs.crate }}-v${{ steps.new-version.outputs.version }}"
+          git checkout -b "$BRANCH"
+          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+
       - name: Bump version in Cargo.toml
         run: |
           sed -i 's/^version = "${{ steps.current-version.outputs.version }}"/version = "${{ steps.new-version.outputs.version }}"/' \
@@ -122,16 +130,33 @@ jobs:
 
           cat changelog.md
 
-      - name: Commit version bump
+      - name: Commit and push release branch
         run: |
           git add ${{ steps.crate-info.outputs.path }}/Cargo.toml Cargo.lock
           git commit -m "chore(release): bump ${{ inputs.crate }} to v${{ steps.new-version.outputs.version }}"
+          git push origin "${{ steps.release-branch.outputs.name }}"
 
-      - name: Create and push tag
+      - name: Create and merge PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PR_URL=$(gh pr create \
+            --title "chore(release): bump ${{ inputs.crate }} to v${{ steps.new-version.outputs.version }}" \
+            --body "Automated release PR for ${{ steps.new-version.outputs.tag }}" \
+            --base main \
+            --head "${{ steps.release-branch.outputs.name }}")
+
+          echo "PR created: $PR_URL"
+          gh pr merge "$PR_URL" --squash --delete-branch
+
+      - name: Tag release on main
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull origin main
+
           TAG="${{ steps.new-version.outputs.tag }}"
           git tag -a "$TAG" -m "Release $TAG"
-          git push origin main
           git push origin "$TAG"
 
       - name: Create GitHub Release
