@@ -95,7 +95,7 @@ fn add_task_with_project() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
 
@@ -110,7 +110,7 @@ fn add_task_with_project() {
 fn add_task_with_area() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
+    tdo(&temp).args(["create", "area", "Work"]).assert().success();
 
     tdo(&temp)
         .args(["add", "Report", "--area", "work"])
@@ -129,7 +129,7 @@ fn add_task_with_tags() {
         .success();
 
     tdo(&temp)
-        .args(["tag", "list"])
+        .args(["list", "tags"])
         .assert()
         .success()
         .stdout(predicate::str::contains("urgent"))
@@ -230,7 +230,7 @@ fn move_task_to_project() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
     tdo(&temp).args(["add", "Fix bug"]).assert().success();

@@ -13,7 +13,7 @@ fn area_new_creates_area() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["area", "new", "Work"])
+        .args(["create", "area", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Work"));
@@ -24,17 +24,17 @@ fn area_new_second_area_does_not_override_first() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["area", "new", "Work"])
+        .args(["create", "area", "Work"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["area", "new", "Personal"])
+        .args(["create", "area", "Personal"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["area", "list"])
+        .args(["list", "areas"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Work"))
@@ -46,12 +46,12 @@ fn area_new_duplicate_name_returns_error() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["area", "new", "Work"])
+        .args(["create", "area", "Work"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["area", "new", "Work"])
+        .args(["create", "area", "Work"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
@@ -62,7 +62,7 @@ fn area_list_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["area", "list"])
+        .args(["list", "areas"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No areas found"));
@@ -72,9 +72,12 @@ fn area_list_empty() {
 fn area_list_shows_areas_with_counts() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Proj", "--area", "Work"])
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
+    tdo(&temp)
+        .args(["create", "project", "Proj", "--area", "Work"])
         .assert()
         .success();
     tdo(&temp)
@@ -83,7 +86,7 @@ fn area_list_shows_areas_with_counts() {
         .success();
 
     tdo(&temp)
-        .args(["area", "list"])
+        .args(["list", "areas"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Work"))
@@ -95,16 +98,19 @@ fn area_list_shows_areas_with_counts() {
 fn area_delete_removes_area() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
+    tdo(&temp)
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
 
     tdo(&temp)
-        .args(["area", "delete", "Work"])
+        .args(["remove", "area", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Area deleted: Work"));
 
     tdo(&temp)
-        .args(["area", "list"])
+        .args(["list", "areas"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No areas found"));
@@ -114,9 +120,12 @@ fn area_delete_removes_area() {
 fn area_delete_cascades_projects_and_tasks() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Proj", "--area", "Work"])
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
+    tdo(&temp)
+        .args(["create", "project", "Proj", "--area", "Work"])
         .assert()
         .success();
     tdo(&temp)
@@ -125,7 +134,7 @@ fn area_delete_cascades_projects_and_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["area", "delete", "Work"])
+        .args(["remove", "area", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("1 project(s) also deleted"))
@@ -136,14 +145,21 @@ fn area_delete_cascades_projects_and_tasks() {
 fn area_view_shows_projects() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Proj", "--area", "Work"])
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
+    tdo(&temp)
+        .args(["create", "project", "Proj", "--area", "Work"])
+        .assert()
+        .success();
+    tdo(&temp)
+        .args(["add", "My task", "--project", "proj"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["area", "view", "Work"])
+        .args(["show", "area", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Work"))
@@ -154,11 +170,14 @@ fn area_view_shows_projects() {
 fn area_view_empty_area() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
+    tdo(&temp)
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
 
     tdo(&temp)
-        .args(["area", "view", "Work"])
+        .args(["show", "area", "Work"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("No projects in area 'Work'"));
+        .stdout(predicate::str::contains("No tasks in area 'Work'"));
 }

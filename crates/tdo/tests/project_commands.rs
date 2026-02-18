@@ -13,7 +13,7 @@ fn project_new_creates_project() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Website"));
@@ -23,16 +23,16 @@ fn project_new_creates_project() {
 fn project_new_with_area() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
+    tdo(&temp).args(["create", "area", "Work"]).assert().success();
 
     tdo(&temp)
-        .args(["project", "new", "Sprint", "--area", "Work"])
+        .args(["create", "project", "Sprint", "--area", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Sprint"));
 
     tdo(&temp)
-        .args(["project", "list"])
+        .args(["list", "projects"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Area: Work"));
@@ -43,12 +43,12 @@ fn project_new_duplicate_returns_error() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
@@ -59,7 +59,7 @@ fn project_list_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "list"])
+        .args(["list", "projects"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No projects found"));
@@ -69,14 +69,14 @@ fn project_list_empty() {
 fn project_list_shows_project_info() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["area", "new", "Work"]).assert().success();
+    tdo(&temp).args(["create", "area", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Sprint", "--area", "Work"])
+        .args(["create", "project", "Sprint", "--area", "Work"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["project", "list"])
+        .args(["list", "projects"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Sprint"))
@@ -88,18 +88,18 @@ fn project_delete_removes_project() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["project", "delete", "Website"])
+        .args(["remove", "project", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Project deleted: Website"));
 
     tdo(&temp)
-        .args(["project", "list"])
+        .args(["list", "projects"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No projects found"));
@@ -110,7 +110,7 @@ fn project_delete_cascades_to_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
     tdo(&temp)
@@ -119,7 +119,7 @@ fn project_delete_cascades_to_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["project", "delete", "Website"])
+        .args(["remove", "project", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("1 task(s) also deleted"));
@@ -130,7 +130,7 @@ fn project_view_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
     tdo(&temp)
@@ -139,7 +139,7 @@ fn project_view_shows_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["project", "view", "Website"])
+        .args(["show", "project", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Website"))
@@ -151,12 +151,12 @@ fn project_view_empty_project() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["project", "new", "Website"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["project", "view", "Website"])
+        .args(["show", "project", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No tasks in project 'Website'"));

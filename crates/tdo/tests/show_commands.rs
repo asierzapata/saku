@@ -115,7 +115,7 @@ fn tag_list_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["tag", "list"])
+        .args(["list", "tags"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No tags found"));
@@ -266,7 +266,7 @@ fn tag_list_shows_tags() {
         .success();
 
     tdo(&temp)
-        .args(["tag", "list"])
+        .args(["list", "tags"])
         .assert()
         .success()
         .stdout(predicate::str::contains("urgent"));
@@ -282,7 +282,7 @@ fn tag_view_shows_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["tag", "view", "urgent"])
+        .args(["show", "tag", "urgent"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Fix bug"));

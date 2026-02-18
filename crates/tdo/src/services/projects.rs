@@ -154,6 +154,115 @@ pub fn delete_project(
 }
 
 #[derive(Debug, Error)]
+pub enum EditProjectError {
+    #[error("Project '{0}' not found")]
+    ProjectNotFound(String),
+
+    #[error("Ambiguous project name '{name}'. Multiple projects found: {names}", name = .0, names = .1.join(", "))]
+    AmbiguousProjectName(String, Vec<String>),
+
+    #[error("Project with name '{0}' already exists")]
+    ProjectAlreadyExists(String),
+
+    #[error("Area '{0}' not found")]
+    AreaNotFound(String),
+
+    #[error("Ambiguous area name '{name}'. Multiple areas found: {names}", name = .0, names = .1.join(", "))]
+    AmbiguousAreaName(String, Vec<String>),
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+}
+
+pub struct EditProjectParameters {
+    pub name: String,
+    pub new_name: Option<String>,
+    pub area: Option<String>,
+}
+
+pub fn edit_project(
+    store: &mut Store,
+    storage: &impl Storage,
+    parameters: EditProjectParameters,
+) -> Result<Project, EditProjectError> {
+    // Fuzzy match to find project
+    let matching_projects: Vec<_> = store
+        .get_active_projects()
+        .filter(|p| {
+            p.name
+                .to_lowercase()
+                .contains(&parameters.name.to_lowercase())
+        })
+        .collect();
+
+    let project = match matching_projects.len() {
+        0 => return Err(EditProjectError::ProjectNotFound(parameters.name)),
+        1 => matching_projects[0],
+        _ => {
+            let names: Vec<String> = matching_projects.iter().map(|p| p.name.clone()).collect();
+            return Err(EditProjectError::AmbiguousProjectName(
+                parameters.name,
+                names,
+            ));
+        }
+    };
+
+    let project_id = project.id;
+
+    // If new_name provided, check it doesn't already exist (case-insensitive, excluding current project)
+    if let Some(ref new_name) = parameters.new_name {
+        let name_conflict = store
+            .get_active_projects()
+            .any(|p| p.id != project_id && p.name.to_lowercase() == new_name.to_lowercase());
+
+        if name_conflict {
+            return Err(EditProjectError::ProjectAlreadyExists(new_name.clone()));
+        }
+    }
+
+    // If area provided, resolve area name to area_id
+    let new_area_id = if let Some(area_name) = parameters.area {
+        if area_name.is_empty() {
+            // Empty string means remove area assignment
+            None
+        } else {
+            let matching_areas: Vec<_> = store
+                .get_active_areas()
+                .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
+                .collect();
+
+            match matching_areas.len() {
+                0 => return Err(EditProjectError::AreaNotFound(area_name)),
+                1 => Some(Some(matching_areas[0].id)),
+                _ => {
+                    let names: Vec<String> =
+                        matching_areas.iter().map(|a| a.name.clone()).collect();
+                    return Err(EditProjectError::AmbiguousAreaName(area_name, names));
+                }
+            }
+        }
+    } else {
+        // None means don't change area assignment
+        Some(project.area_id)
+    };
+
+    // Update project
+    if let Some(project) = store.get_project_mut(project_id) {
+        if let Some(new_name) = parameters.new_name {
+            project.name = new_name;
+        }
+        if let Some(area_id) = new_area_id {
+            project.area_id = area_id;
+        }
+    }
+
+    // Persist to storage
+    storage.save(store)?;
+
+    Ok(store.get_project(project_id).unwrap().clone())
+}
+
+#[derive(Debug, Error)]
 pub enum RestoreProjectError {
     #[error("Project '{0}' not found")]
     ProjectNotFound(String),

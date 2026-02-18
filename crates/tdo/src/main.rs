@@ -8,11 +8,12 @@ use saku_tdo::{
     services::{
         areas::{
             CreateAreaError, CreateAreaParameters, DeleteAreaError, DeleteAreaParameters,
-            create_area, delete_area,
+            EditAreaError, EditAreaParameters, create_area, delete_area, edit_area,
         },
         projects::{
             CreateProjectError, CreateProjectParameters, DeleteProjectError,
-            DeleteProjectParameters, create_project, delete_project,
+            DeleteProjectParameters, EditProjectError, EditProjectParameters, create_project,
+            delete_project, edit_project,
         },
         tasks::{
             AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
@@ -158,67 +159,129 @@ enum Commands {
     /// Complete a task
     Done { task_number_or_fuzzy_name: String },
 
-    /// Edit a task in your editor
-    Edit { task_number_or_fuzzy_name: String },
-
     /// Delete a task (move to trash)
     Delete { task_number_or_fuzzy_name: String },
 
     /// Restore a task from trash
     Restore { task_number: String },
 
-    /// Manage areas
-    #[command(subcommand)]
-    Area(AreaCommands),
+    /// Create a new area or project
+    Create {
+        #[command(subcommand)]
+        entity: CreateEntity,
+    },
 
-    /// Manage projects
-    #[command(subcommand)]
-    Project(ProjectCommands),
+    /// Show details of an area, project, or tag
+    Show {
+        #[command(subcommand)]
+        entity: ShowEntity,
+    },
 
-    /// Manage tags
-    #[command(subcommand)]
-    Tag(TagCommands),
+    /// Remove an area or project
+    Remove {
+        #[command(subcommand)]
+        entity: RemoveEntity,
+    },
+
+    /// Edit an area, project, or task
+    Edit {
+        #[command(subcommand)]
+        entity: EditEntity,
+    },
+
+    /// List all areas, projects, or tags
+    List {
+        #[command(subcommand)]
+        entity: ListEntity,
+    },
 }
 
 #[derive(Debug, Subcommand)]
-enum AreaCommands {
+enum CreateEntity {
     /// Create a new area
-    New {
+    Area {
         /// Name of the area
         name: String,
     },
-    /// Delete an area
-    Delete { name: String },
-    /// List all areas
-    List,
-    /// View projects in an area
-    View { name: String },
-}
-
-#[derive(Debug, Subcommand)]
-enum ProjectCommands {
     /// Create a new project
-    New {
+    Project {
         /// Name of the project
         name: String,
         /// Assign to an area
         #[arg(short, long)]
         area: Option<String>,
     },
-    /// Delete an project
-    Delete { name: String },
-    /// List all projects
-    List,
-    /// View tasks in a project
-    View { name: String },
 }
 
 #[derive(Debug, Subcommand)]
-enum TagCommands {
+enum ShowEntity {
+    /// Show projects in an area
+    Area {
+        /// Name of the area
+        name: String,
+    },
+    /// Show tasks in a project
+    Project {
+        /// Name of the project
+        name: String,
+    },
+    /// Show tasks with a specific tag
+    Tag {
+        /// Name of the tag
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RemoveEntity {
+    /// Remove an area (and all its projects/tasks)
+    Area {
+        /// Name of the area
+        name: String,
+    },
+    /// Remove a project (and all its tasks)
+    Project {
+        /// Name of the project
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum EditEntity {
+    /// Edit an area
+    Area {
+        /// Current name of the area
+        name: String,
+        /// New name for the area
+        #[arg(long)]
+        new_name: String,
+    },
+    /// Edit a project
+    Project {
+        /// Current name of the project
+        name: String,
+        /// New name for the project
+        #[arg(long)]
+        new_name: Option<String>,
+        /// Assign to a different area (or empty string to remove area)
+        #[arg(long)]
+        area: Option<String>,
+    },
+    /// Edit a task in your editor
+    Task {
+        /// Task number or fuzzy name
+        task_number_or_fuzzy_name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ListEntity {
+    /// List all areas
+    Areas,
+    /// List all projects
+    Projects,
     /// List all tags
-    List,
-    /// View tasks with a specific tag
-    View { name: String },
+    Tags,
 }
 
 fn main() {
@@ -728,9 +791,101 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Edit {
+        Some(Commands::Edit { entity: EditEntity::Area { name, new_name } }) => {
+            let params = EditAreaParameters { name, new_name };
+            match edit_area(&mut store, &storage, params) {
+                Ok(area) => {
+                    println!("✓ Area updated: {}", area.name);
+                }
+                Err(EditAreaError::AreaNotFound(name)) => {
+                    eprintln!("Error: Area '{}' not found", name);
+
+                    let areas: Vec<_> = store.get_active_areas().collect();
+                    if !areas.is_empty() {
+                        eprintln!("\nAvailable areas:");
+                        for area in areas {
+                            eprintln!("  - {}", area.name);
+                        }
+                    }
+                    std::process::exit(1);
+                }
+                Err(EditAreaError::AmbiguousAreaName(query, names)) => {
+                    eprintln!("Error: Area name '{}' is ambiguous. Multiple areas found:", query);
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(EditAreaError::AreaAlreadyExists(name)) => {
+                    eprintln!("Error: Area with name '{}' already exists", name);
+                    std::process::exit(1);
+                }
+                Err(EditAreaError::Storage(e)) => {
+                    eprintln!("Error: Failed to update area: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Edit { entity: EditEntity::Project { name, new_name, area } }) => {
+            let params = EditProjectParameters { name, new_name, area };
+            match edit_project(&mut store, &storage, params) {
+                Ok(project) => {
+                    println!("✓ Project updated: {}", project.name);
+                }
+                Err(EditProjectError::ProjectNotFound(name)) => {
+                    eprintln!("Error: Project '{}' not found", name);
+
+                    let projects: Vec<_> = store.get_active_projects().collect();
+                    if !projects.is_empty() {
+                        eprintln!("\nAvailable projects:");
+                        for project in projects {
+                            eprintln!("  - {}", project.name);
+                        }
+                    }
+                    std::process::exit(1);
+                }
+                Err(EditProjectError::AmbiguousProjectName(query, names)) => {
+                    eprintln!("Error: Project name '{}' is ambiguous. Multiple projects found:", query);
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(EditProjectError::ProjectAlreadyExists(name)) => {
+                    eprintln!("Error: Project with name '{}' already exists", name);
+                    std::process::exit(1);
+                }
+                Err(EditProjectError::AreaNotFound(area)) => {
+                    eprintln!("Error: Area '{}' not found", area);
+                    
+                    let areas: Vec<_> = store.get_active_areas().collect();
+                    if !areas.is_empty() {
+                        eprintln!("\nAvailable areas:");
+                        for a in areas {
+                            eprintln!("  - {}", a.name);
+                        }
+                    }
+                    std::process::exit(1);
+                }
+                Err(EditProjectError::AmbiguousAreaName(query, names)) => {
+                    eprintln!("Error: Area name '{}' is ambiguous. Multiple areas found:", query);
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+                Err(EditProjectError::Storage(e)) => {
+                    eprintln!("Error: Failed to update project: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Edit { entity: EditEntity::Task {
             task_number_or_fuzzy_name,
-        }) => {
+        } }) => {
             let params = EditTaskParameters {
                 task_number_or_fuzzy_name,
             };
@@ -767,7 +922,7 @@ fn main() {
                 }
                 Err(EditTaskError::ProjectNotFound(name)) => {
                     eprintln!("Error: Project '{}' not found", name);
-                    eprintln!("\nUse 'tdo project list' to see available projects.");
+                    eprintln!("\nUse 'tdo list projects' to see available projects.");
                     std::process::exit(1);
                 }
                 Err(EditTaskError::AmbiguousProjectName(names)) => {
@@ -780,7 +935,7 @@ fn main() {
                 }
                 Err(EditTaskError::AreaNotFound(name)) => {
                     eprintln!("Error: Area '{}' not found", name);
-                    eprintln!("\nUse 'tdo area list' to see available areas.");
+                    eprintln!("\nUse 'tdo list areas' to see available areas.");
                     std::process::exit(1);
                 }
                 Err(EditTaskError::AmbiguousAreaName(names)) => {
@@ -1047,7 +1202,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Area(AreaCommands::New { name })) => {
+        Some(Commands::Create { entity: CreateEntity::Area { name } }) => {
             let params = CreateAreaParameters { name };
             match create_area(&mut store, &storage, params) {
                 Ok(area) => {
@@ -1063,7 +1218,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Area(AreaCommands::Delete { name })) => {
+        Some(Commands::Remove { entity: RemoveEntity::Area { name } }) => {
             let params = DeleteAreaParameters { name };
 
             match delete_area(&mut store, &storage, params) {
@@ -1097,7 +1252,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Area(AreaCommands::List)) => {
+        Some(Commands::List { entity: ListEntity::Areas }) => {
             // Collect all active areas
             let mut areas: Vec<_> = store.get_active_areas().collect();
 
@@ -1171,7 +1326,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Project(ProjectCommands::New { name, area })) => {
+        Some(Commands::Create { entity: CreateEntity::Project { name, area } }) => {
             let params = CreateProjectParameters { name, area };
             match create_project(&mut store, &storage, params) {
                 Ok(project) => {
@@ -1199,7 +1354,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Project(ProjectCommands::Delete { name })) => {
+        Some(Commands::Remove { entity: RemoveEntity::Project { name } }) => {
             let params = DeleteProjectParameters { name };
 
             match delete_project(&mut store, &storage, params) {
@@ -1239,7 +1394,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Project(ProjectCommands::List)) => {
+        Some(Commands::List { entity: ListEntity::Projects }) => {
             // Collect all active projects
             let mut projects: Vec<_> = store.get_active_projects().collect();
 
@@ -1290,7 +1445,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Project(ProjectCommands::View { name })) => {
+        Some(Commands::Show { entity: ShowEntity::Project { name } }) => {
             let matching: Vec<_> = store
                 .get_active_projects()
                 .filter(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
@@ -1349,7 +1504,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Area(AreaCommands::View { name })) => {
+        Some(Commands::Show { entity: ShowEntity::Area { name } }) => {
             let matching: Vec<_> = store
                 .get_active_areas()
                 .filter(|a| a.name.to_lowercase().contains(&name.to_lowercase()))
@@ -1444,7 +1599,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Tag(TagCommands::List)) => {
+        Some(Commands::List { entity: ListEntity::Tags }) => {
             // Collect all unique tags from active tasks
             use std::collections::HashMap;
 
@@ -1483,7 +1638,7 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Tag(TagCommands::View { name })) => {
+        Some(Commands::Show { entity: ShowEntity::Tag { name } }) => {
             // Find tasks with this tag (case-insensitive)
             let mut tasks: Vec<_> = store
                 .get_active_tasks()

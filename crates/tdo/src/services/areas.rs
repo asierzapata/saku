@@ -155,6 +155,73 @@ pub fn delete_area(
 }
 
 #[derive(Debug, Error)]
+pub enum EditAreaError {
+    #[error("Area '{0}' not found")]
+    AreaNotFound(String),
+
+    #[error("Ambiguous area name '{name}'. Multiple areas found: {names}", name = .0, names = .1.join(", "))]
+    AmbiguousAreaName(String, Vec<String>),
+
+    #[error("Area with name '{0}' already exists")]
+    AreaAlreadyExists(String),
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+}
+
+pub struct EditAreaParameters {
+    pub name: String,
+    pub new_name: String,
+}
+
+pub fn edit_area(
+    store: &mut Store,
+    storage: &impl Storage,
+    parameters: EditAreaParameters,
+) -> Result<Area, EditAreaError> {
+    // Fuzzy match to find area
+    let matching_areas: Vec<_> = store
+        .get_active_areas()
+        .filter(|a| {
+            a.name
+                .to_lowercase()
+                .contains(&parameters.name.to_lowercase())
+        })
+        .collect();
+
+    let area = match matching_areas.len() {
+        0 => return Err(EditAreaError::AreaNotFound(parameters.name)),
+        1 => matching_areas[0],
+        _ => {
+            // Multiple matches - return error with all matching names
+            let names: Vec<String> = matching_areas.iter().map(|a| a.name.clone()).collect();
+            return Err(EditAreaError::AmbiguousAreaName(parameters.name, names));
+        }
+    };
+
+    // Check if new name already exists (case-insensitive, excluding current area)
+    let name_conflict = store
+        .get_active_areas()
+        .any(|a| a.id != area.id && a.name.to_lowercase() == parameters.new_name.to_lowercase());
+
+    if name_conflict {
+        return Err(EditAreaError::AreaAlreadyExists(parameters.new_name));
+    }
+
+    let area_id = area.id;
+
+    // Update area name
+    if let Some(area) = store.get_area_mut(area_id) {
+        area.name = parameters.new_name;
+    }
+
+    // Persist to storage
+    storage.save(store)?;
+
+    Ok(store.get_area(area_id).unwrap().clone())
+}
+
+#[derive(Debug, Error)]
 pub enum RestoreAreaError {
     #[error("Area '{0}' not found")]
     AreaNotFound(String),
