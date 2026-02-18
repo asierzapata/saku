@@ -1361,42 +1361,68 @@ fn main() {
                 }
             };
 
+            // Get tasks directly assigned to this area (no project)
+            let mut direct_tasks: Vec<_> = store
+                .get_tasks_for_area(area.id)
+                .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                .collect();
+            direct_tasks.sort_by_key(|t| t.task_number);
+
             // Get projects in this area
             let mut projects: Vec<_> = store
                 .get_projects_for_area(area.id)
                 .filter(|p| p.deleted_at.is_none())
                 .collect();
-
             projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-            if projects.is_empty() {
-                println!("No projects in area '{}'", area.name);
+            // For each project, collect its tasks
+            let project_tasks: Vec<_> = projects
+                .iter()
+                .map(|p| {
+                    let mut tasks: Vec<_> = store
+                        .get_tasks_for_project(p.id)
+                        .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                        .collect();
+                    tasks.sort_by_key(|t| t.task_number);
+                    (*p, tasks)
+                })
+                .filter(|(_, tasks)| !tasks.is_empty())
+                .collect();
+
+            // Calculate total task count
+            let total_tasks = direct_tasks.len()
+                + project_tasks
+                    .iter()
+                    .map(|(_, tasks)| tasks.len())
+                    .sum::<usize>();
+
+            if total_tasks == 0 {
+                println!("No tasks in area '{}'", area.name);
             } else {
-                println!(
-                    "\n  {} ({} {})\n",
-                    area.name.cyan().bold(),
-                    projects.len(),
-                    if projects.len() == 1 {
-                        "project"
+                // Display header with total task count
+                saku_tdo::ui::render_view_header(&area.name, total_tasks);
+
+                // Display direct area tasks (without section header)
+                for task in &direct_tasks {
+                    let is_overdue = saku_tdo::ui::is_overdue(task);
+                    saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                }
+
+                // Display tasks grouped by project
+                for (i, (project, tasks)) in project_tasks.iter().enumerate() {
+                    // Only add spacing before section header if there were direct tasks
+                    // or if this isn't the first project section
+                    if !direct_tasks.is_empty() || i > 0 {
+                        saku_tdo::ui::render_section_header(&project.name);
                     } else {
-                        "projects"
+                        // First section with no direct tasks - print without leading newline
+                        println!("  ─── {} ───\n", project.name.bold());
                     }
-                );
-
-                for project in projects {
-                    // Count active tasks in this project
-                    let task_count = store
-                        .get_tasks_for_project(project.id)
-                        .filter(|t| t.deleted_at.is_none() && t.completed_at.is_none())
-                        .count();
-
-                    println!("  {} {}", "•".green(), project.name.bold());
-                    println!(
-                        "    {} {}",
-                        task_count.to_string().dimmed(),
-                        if task_count == 1 { "task" } else { "tasks" }.dimmed()
-                    );
-                    println!();
+                    
+                    for task in tasks {
+                        let is_overdue = saku_tdo::ui::is_overdue(task);
+                        saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                    }
                 }
             }
         }
