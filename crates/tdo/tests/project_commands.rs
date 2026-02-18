@@ -16,8 +16,7 @@ fn project_new_creates_project() {
         .args(["project", "new", "Website"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Website"))
-        .stdout(predicate::str::contains("website"));
+        .stdout(predicate::str::contains("Website"));
 }
 
 #[test]
@@ -27,7 +26,7 @@ fn project_new_with_area() {
     tdo(&temp).args(["area", "new", "Work"]).assert().success();
 
     tdo(&temp)
-        .args(["project", "new", "Sprint", "--area", "work"])
+        .args(["project", "new", "Sprint", "--area", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Sprint"));
@@ -72,7 +71,7 @@ fn project_list_shows_project_info() {
 
     tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Sprint", "--area", "work"])
+        .args(["project", "new", "Sprint", "--area", "Work"])
         .assert()
         .success();
 
@@ -140,7 +139,7 @@ fn project_view_shows_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["project", "view", "website"])
+        .args(["project", "view", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Website"))
@@ -157,7 +156,7 @@ fn project_view_empty_project() {
         .success();
 
     tdo(&temp)
-        .args(["project", "view", "website"])
+        .args(["project", "view", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No tasks in project 'Website'"));

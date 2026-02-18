@@ -2,7 +2,6 @@ use crate::{
     models::{project::Project, store::Store},
     storage::{Storage, StorageError},
 };
-use slug::slugify;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -10,6 +9,9 @@ use uuid::Uuid;
 pub enum CreateProjectError {
     #[error("Area with name '{}' not found", .0)]
     AreaNotFound(String),
+
+    #[error("Area name is ambiguous. Multiple areas found: {}", .0.join(", "))]
+    AmbiguousAreaName(Vec<String>),
 
     #[error("Project with name '{}' already exists", .0)]
     ProjectAlreadyExists(String),
@@ -36,22 +38,27 @@ pub fn create_project(
         return Err(CreateProjectError::ProjectAlreadyExists(parameters.name));
     }
 
-    let project_slug = slugify(&parameters.name);
-
     let area_id = match parameters.area {
-        Some(area_slug) => Some(
-            store
-                .get_area_by_slug(&area_slug)
-                .ok_or(CreateProjectError::AreaNotFound(area_slug))?
-                .id,
-        ),
+        Some(area_name) => {
+            let matching: Vec<_> = store
+                .get_active_areas()
+                .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
+                .collect();
+            Some(match matching.len() {
+                0 => return Err(CreateProjectError::AreaNotFound(area_name)),
+                1 => matching[0].id,
+                _ => {
+                    let names = matching.iter().map(|a| a.name.clone()).collect();
+                    return Err(CreateProjectError::AmbiguousAreaName(names));
+                }
+            })
+        }
         None => None,
     };
 
     let project = Project {
         id: Uuid::new_v4(),
         name: parameters.name,
-        slug: project_slug,
         created_at: jiff::Timestamp::now(),
         area_id,
         ..Project::default()
@@ -238,7 +245,6 @@ mod tests {
         let area = Area {
             id: Uuid::new_v4(),
             name: name.to_string(),
-            slug: slugify(name),
             deleted_at: None,
         };
         store.add_area(area.clone());
@@ -297,32 +303,13 @@ mod tests {
             &storage,
             CreateProjectParameters {
                 name: "Work Project".to_string(),
-                area: Some(area.slug.clone()),
+                area: Some(area.name.clone()),
             },
         );
 
         assert!(result.is_ok());
         let project = result.unwrap();
         assert_eq!(project.area_id, Some(area.id));
-    }
-
-    #[test]
-    fn test_create_project_generates_slug() {
-        let storage = MockStorage::new();
-        let mut store = Store::default();
-
-        let result = create_project(
-            &mut store,
-            &storage,
-            CreateProjectParameters {
-                name: "My Cool Project".to_string(),
-                area: None,
-            },
-        );
-
-        assert!(result.is_ok());
-        let project = result.unwrap();
-        assert_eq!(project.slug, "my-cool-project");
     }
 
     #[test]

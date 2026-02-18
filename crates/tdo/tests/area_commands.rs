@@ -74,7 +74,7 @@ fn area_list_shows_areas_with_counts() {
 
     tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Proj", "--area", "work"])
+        .args(["project", "new", "Proj", "--area", "Work"])
         .assert()
         .success();
     tdo(&temp)
@@ -116,7 +116,7 @@ fn area_delete_cascades_projects_and_tasks() {
 
     tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Proj", "--area", "work"])
+        .args(["project", "new", "Proj", "--area", "Work"])
         .assert()
         .success();
     tdo(&temp)
@@ -138,12 +138,12 @@ fn area_view_shows_projects() {
 
     tdo(&temp).args(["area", "new", "Work"]).assert().success();
     tdo(&temp)
-        .args(["project", "new", "Proj", "--area", "work"])
+        .args(["project", "new", "Proj", "--area", "Work"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["area", "view", "work"])
+        .args(["area", "view", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Work"))
@@ -157,7 +157,7 @@ fn area_view_empty_area() {
     tdo(&temp).args(["area", "new", "Work"]).assert().success();
 
     tdo(&temp)
-        .args(["area", "view", "work"])
+        .args(["area", "view", "Work"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No projects in area 'Work'"));

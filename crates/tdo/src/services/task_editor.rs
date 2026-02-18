@@ -402,7 +402,6 @@ mod tests {
         let area = Area {
             id: Uuid::new_v4(),
             name: "Work".to_string(),
-            slug: "work".to_string(),
             deleted_at: None,
         };
         store.add_area(area.clone());
@@ -410,7 +409,6 @@ mod tests {
         let project = Project {
             id: Uuid::new_v4(),
             name: "Backend API".to_string(),
-            slug: "backend-api".to_string(),
             area_id: Some(area.id),
             notes: None,
             deadline: None,

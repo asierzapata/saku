@@ -117,18 +117,9 @@ impl Store {
         self.projects.get(&id)
     }
 
-    /// Get a project by slug
-    pub fn get_project_by_slug(&self, slug: &str) -> Option<&Project> {
-        self.projects.values().find(|p| p.slug == slug)
-    }
-
     /// Get an area by ID
     pub fn get_area(&self, id: Uuid) -> Option<&Area> {
         self.areas.get(&id)
-    }
-
-    pub fn get_area_by_slug(&self, slug: &str) -> Option<&Area> {
-        self.areas.values().find(|a| a.slug == slug)
     }
 
     /// Get all active (non-deleted) tasks

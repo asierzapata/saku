@@ -9,8 +9,6 @@ pub struct Project {
     pub id: Uuid,
     /// Name of the project
     pub name: String,
-    /// Slug of the project
-    pub slug: String,
     /// Area ID of the project
     pub area_id: Option<Uuid>,
     /// Notes of the project

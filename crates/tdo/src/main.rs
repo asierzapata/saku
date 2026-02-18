@@ -189,7 +189,7 @@ enum AreaCommands {
     /// List all areas
     List,
     /// View projects in an area
-    View { slug: String },
+    View { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -207,7 +207,7 @@ enum ProjectCommands {
     /// List all projects
     List,
     /// View tasks in a project
-    View { slug: String },
+    View { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1033,7 +1033,7 @@ fn main() {
             let params = CreateAreaParameters { name };
             match create_area(&mut store, &storage, params) {
                 Ok(area) => {
-                    println!("✓ Area {} created with slug {}", area.name, area.slug);
+                    println!("✓ Area {} created", area.name);
                 }
                 Err(CreateAreaError::AreaAlreadyExists(name)) => {
                     eprintln!("Error: Area with name '{}' already exists", name);
@@ -1157,13 +1157,18 @@ fn main() {
             let params = CreateProjectParameters { name, area };
             match create_project(&mut store, &storage, params) {
                 Ok(project) => {
-                    println!(
-                        "✓ Project {} created with slug {}",
-                        project.name, project.slug
-                    );
+                    println!("✓ Project {} created", project.name);
                 }
                 Err(CreateProjectError::AreaNotFound(area)) => {
                     eprintln!("Error: Area with name '{}' not found", area);
+                    std::process::exit(1);
+                }
+                Err(CreateProjectError::AmbiguousAreaName(names)) => {
+                    eprintln!("Error: Area name is ambiguous. Multiple areas found:");
+                    for name in names {
+                        eprintln!("  - {}", name);
+                    }
+                    eprintln!("\nPlease be more specific.");
                     std::process::exit(1);
                 }
                 Err(CreateProjectError::ProjectAlreadyExists(name)) => {
@@ -1267,115 +1272,131 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Project(ProjectCommands::View { slug })) => {
-            // Find project by slug (case-insensitive)
-            let project = store
+        Some(Commands::Project(ProjectCommands::View { name })) => {
+            let matching: Vec<_> = store
                 .get_active_projects()
-                .find(|p| p.slug.to_lowercase() == slug.to_lowercase());
+                .filter(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
+                .collect();
 
-            match project {
-                None => {
-                    eprintln!("Error: Project '{}' not found", slug);
+            let project = match matching.len() {
+                0 => {
+                    eprintln!("Error: Project '{}' not found", name);
 
                     let projects: Vec<_> = store.get_active_projects().collect();
                     if !projects.is_empty() {
                         eprintln!("\nAvailable projects:");
                         for p in projects {
-                            eprintln!("  - {} ({})", p.name, p.slug);
+                            eprintln!("  - {}", p.name);
                         }
                     }
                     std::process::exit(1);
                 }
-                Some(project) => {
-                    // Get tasks for this project
-                    let mut tasks: Vec<_> = store
-                        .get_tasks_for_project(project.id)
-                        .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
-                        .collect();
-
-                    tasks.sort_by_key(|t| t.task_number);
-
-                    // Display header with project name and area if applicable
-                    let header = if let Some(area_id) = project.area_id {
-                        if let Some(area) = store.get_area(area_id) {
-                            format!("{} ({})", project.name, area.name)
-                        } else {
-                            project.name.clone()
-                        }
-                    } else {
-                        project.name.clone()
-                    };
-
-                    if tasks.is_empty() {
-                        println!("No tasks in project '{}'", header);
-                    } else {
-                        saku_tdo::ui::render_view_header(&header, tasks.len());
-                        for task in tasks {
-                            let is_overdue = saku_tdo::ui::is_overdue(task);
-                            saku_tdo::ui::render_task_line(task, &store, is_overdue);
-                        }
+                1 => matching[0],
+                _ => {
+                    eprintln!("Error: Project name is ambiguous. Multiple projects found:");
+                    for p in &matching {
+                        eprintln!("  - {}", p.name);
                     }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+            };
+
+            // Get tasks for this project
+            let mut tasks: Vec<_> = store
+                .get_tasks_for_project(project.id)
+                .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                .collect();
+
+            tasks.sort_by_key(|t| t.task_number);
+
+            // Display header with project name and area if applicable
+            let header = if let Some(area_id) = project.area_id {
+                if let Some(area) = store.get_area(area_id) {
+                    format!("{} ({})", project.name, area.name)
+                } else {
+                    project.name.clone()
+                }
+            } else {
+                project.name.clone()
+            };
+
+            if tasks.is_empty() {
+                println!("No tasks in project '{}'", header);
+            } else {
+                saku_tdo::ui::render_view_header(&header, tasks.len());
+                for task in tasks {
+                    let is_overdue = saku_tdo::ui::is_overdue(task);
+                    saku_tdo::ui::render_task_line(task, &store, is_overdue);
                 }
             }
         }
-        Some(Commands::Area(AreaCommands::View { slug })) => {
-            // Find area by slug (case-insensitive)
-            let area = store
+        Some(Commands::Area(AreaCommands::View { name })) => {
+            let matching: Vec<_> = store
                 .get_active_areas()
-                .find(|a| a.slug.to_lowercase() == slug.to_lowercase());
+                .filter(|a| a.name.to_lowercase().contains(&name.to_lowercase()))
+                .collect();
 
-            match area {
-                None => {
-                    eprintln!("Error: Area '{}' not found", slug);
+            let area = match matching.len() {
+                0 => {
+                    eprintln!("Error: Area '{}' not found", name);
 
                     let areas: Vec<_> = store.get_active_areas().collect();
                     if !areas.is_empty() {
                         eprintln!("\nAvailable areas:");
                         for a in areas {
-                            eprintln!("  - {} ({})", a.name, a.slug);
+                            eprintln!("  - {}", a.name);
                         }
                     }
                     std::process::exit(1);
                 }
-                Some(area) => {
-                    // Get projects in this area
-                    let mut projects: Vec<_> = store
-                        .get_projects_for_area(area.id)
-                        .filter(|p| p.deleted_at.is_none())
-                        .collect();
-
-                    projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-                    if projects.is_empty() {
-                        println!("No projects in area '{}'", area.name);
-                    } else {
-                        println!(
-                            "\n  {} ({} {})\n",
-                            area.name.cyan().bold(),
-                            projects.len(),
-                            if projects.len() == 1 {
-                                "project"
-                            } else {
-                                "projects"
-                            }
-                        );
-
-                        for project in projects {
-                            // Count active tasks in this project
-                            let task_count = store
-                                .get_tasks_for_project(project.id)
-                                .filter(|t| t.deleted_at.is_none() && t.completed_at.is_none())
-                                .count();
-
-                            println!("  {} {}", "•".green(), project.name.bold());
-                            println!(
-                                "    {} {}",
-                                task_count.to_string().dimmed(),
-                                if task_count == 1 { "task" } else { "tasks" }.dimmed()
-                            );
-                            println!();
-                        }
+                1 => matching[0],
+                _ => {
+                    eprintln!("Error: Area name is ambiguous. Multiple areas found:");
+                    for a in &matching {
+                        eprintln!("  - {}", a.name);
                     }
+                    eprintln!("\nPlease be more specific.");
+                    std::process::exit(1);
+                }
+            };
+
+            // Get projects in this area
+            let mut projects: Vec<_> = store
+                .get_projects_for_area(area.id)
+                .filter(|p| p.deleted_at.is_none())
+                .collect();
+
+            projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+            if projects.is_empty() {
+                println!("No projects in area '{}'", area.name);
+            } else {
+                println!(
+                    "\n  {} ({} {})\n",
+                    area.name.cyan().bold(),
+                    projects.len(),
+                    if projects.len() == 1 {
+                        "project"
+                    } else {
+                        "projects"
+                    }
+                );
+
+                for project in projects {
+                    // Count active tasks in this project
+                    let task_count = store
+                        .get_tasks_for_project(project.id)
+                        .filter(|t| t.deleted_at.is_none() && t.completed_at.is_none())
+                        .count();
+
+                    println!("  {} {}", "•".green(), project.name.bold());
+                    println!(
+                        "    {} {}",
+                        task_count.to_string().dimmed(),
+                        if task_count == 1 { "task" } else { "tasks" }.dimmed()
+                    );
+                    println!();
                 }
             }
         }

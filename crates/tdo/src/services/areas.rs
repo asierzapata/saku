@@ -2,7 +2,6 @@ use crate::{
     models::{area::Area, store::Store},
     storage::{Storage, StorageError},
 };
-use slug::slugify;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -31,12 +30,9 @@ pub fn create_area(
         return Err(CreateAreaError::AreaAlreadyExists(parameters.name));
     }
 
-    let area_slug = slugify(&parameters.name);
-
     let area = Area {
         id: uuid::Uuid::new_v4(),
         name: parameters.name,
-        slug: area_slug,
         ..Area::default()
     };
 
@@ -250,7 +246,6 @@ mod tests {
         let project = Project {
             id: uuid::Uuid::new_v4(),
             name: name.to_string(),
-            slug: slugify(name),
             area_id,
             created_at: jiff::Timestamp::now(),
             ..Project::default()
@@ -303,24 +298,6 @@ mod tests {
         assert_eq!(area.name, "Work");
         assert!(area.deleted_at.is_none());
         assert_eq!(storage.save_count(), 1);
-    }
-
-    #[test]
-    fn test_create_area_generates_slug() {
-        let storage = MockStorage::new();
-        let mut store = Store::default();
-
-        let result = create_area(
-            &mut store,
-            &storage,
-            CreateAreaParameters {
-                name: "Personal Life".to_string(),
-            },
-        );
-
-        assert!(result.is_ok());
-        let area = result.unwrap();
-        assert_eq!(area.slug, "personal-life");
     }
 
     // ============================================================================

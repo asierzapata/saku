@@ -697,7 +697,6 @@ mod tests {
         let area = Area {
             id: Uuid::new_v4(),
             name: name.to_string(),
-            slug: slug::slugify(name),
             deleted_at: None,
         };
         store.add_area(area.clone());
@@ -708,7 +707,6 @@ mod tests {
         let project = Project {
             id: Uuid::new_v4(),
             name: name.to_string(),
-            slug: slug::slugify(name),
             area_id,
             created_at: jiff::Timestamp::now(),
             ..Project::default()
