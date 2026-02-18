@@ -24,6 +24,9 @@ use saku_tdo::{
     storage::{Storage, json::JsonFileStorage},
 };
 
+#[cfg(feature = "logging")]
+use saku_tdo::logging;
+
 #[derive(Parser)]
 #[command(
     name = "tdo",
@@ -219,6 +222,21 @@ enum TagCommands {
 }
 
 fn main() {
+    // Initialize logging if feature is enabled
+    #[cfg(feature = "logging")]
+    {
+        if let Err(e) = logging::init() {
+            eprintln!("Warning: Failed to initialize logging: {}", e);
+        }
+    }
+
+    // Create root span for the entire application
+    #[cfg(feature = "logging")]
+    let _span = tracing::info_span!(
+        "tdo_app",
+        version = env!("CARGO_PKG_VERSION")
+    ).entered();
+
     let cli = Cli::parse();
 
     // Initialize storage

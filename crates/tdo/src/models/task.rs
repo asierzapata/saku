@@ -2,8 +2,8 @@
 
 use std::cmp::Ordering;
 
-use jiff::Timestamp;
 use jiff::civil::Date;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -39,7 +39,7 @@ pub struct Task {
     pub created_at: Timestamp,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum When {
     #[default]
@@ -170,7 +170,12 @@ mod tests {
     use super::*;
     use jiff::civil::date;
 
-    fn make_task(task_number: u64, deadline: Option<Date>, project_id: Option<Uuid>, area_id: Option<Uuid>) -> Task {
+    fn make_task(
+        task_number: u64,
+        deadline: Option<Date>,
+        project_id: Option<Uuid>,
+        area_id: Option<Uuid>,
+    ) -> Task {
         Task {
             task_number,
             deadline,
@@ -188,8 +193,14 @@ mod tests {
         let tasks = vec![&no_deadline, &with_deadline];
         let ordered = order_tasks(tasks);
 
-        assert_eq!(ordered[0].task_number, 2, "task with deadline should be first");
-        assert_eq!(ordered[1].task_number, 1, "task without deadline should be last");
+        assert_eq!(
+            ordered[0].task_number, 2,
+            "task with deadline should be first"
+        );
+        assert_eq!(
+            ordered[1].task_number, 1,
+            "task without deadline should be last"
+        );
     }
 
     #[test]
@@ -200,7 +211,10 @@ mod tests {
         let tasks = vec![&later, &earlier];
         let ordered = order_tasks(tasks);
 
-        assert_eq!(ordered[0].task_number, 2, "earlier deadline should be first");
+        assert_eq!(
+            ordered[0].task_number, 2,
+            "earlier deadline should be first"
+        );
         assert_eq!(ordered[1].task_number, 1, "later deadline should be second");
     }
 
@@ -214,8 +228,14 @@ mod tests {
         let tasks = vec![&no_project, &with_project];
         let ordered = order_tasks(tasks);
 
-        assert_eq!(ordered[0].task_number, 2, "task with project should be first");
-        assert_eq!(ordered[1].task_number, 1, "task without project should be last");
+        assert_eq!(
+            ordered[0].task_number, 2,
+            "task with project should be first"
+        );
+        assert_eq!(
+            ordered[1].task_number, 1,
+            "task without project should be last"
+        );
     }
 
     #[test]
@@ -229,7 +249,10 @@ mod tests {
         let ordered = order_tasks(tasks);
 
         assert_eq!(ordered[0].task_number, 2, "task with area should be first");
-        assert_eq!(ordered[1].task_number, 1, "task without area should be last");
+        assert_eq!(
+            ordered[1].task_number, 1,
+            "task without area should be last"
+        );
     }
 
     #[test]

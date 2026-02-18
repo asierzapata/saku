@@ -10,6 +10,9 @@ use crate::{
     storage::{Storage, StorageError},
 };
 
+#[cfg(feature = "logging")]
+use tracing::{error, info, instrument};
+
 #[derive(Debug, Error)]
 pub enum AddTaskError {
     #[error("Project '{0}' not found")]
@@ -31,6 +34,7 @@ pub enum AddTaskError {
     Storage(#[from] StorageError),
 }
 
+#[derive(Debug)]
 pub struct AddTaskParameters {
     pub title: String,
     pub notes: Option<String>,
@@ -41,11 +45,15 @@ pub struct AddTaskParameters {
     pub tags: Vec<String>,
 }
 
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number, task.uuid)))]
 pub fn add_task(
     store: &mut Store,
     storage: &impl Storage,
     parameters: AddTaskParameters,
 ) -> Result<Task, AddTaskError> {
+    #[cfg(feature = "logging")]
+    info!(title = %parameters.title, when = ?parameters.when, "Adding new task");
+
     // 1. Validate and resolve project name to project ID
     let project_id = if let Some(project_name) = parameters.project {
         let matching_projects: Vec<_> = store
@@ -54,10 +62,16 @@ pub fn add_task(
             .collect();
 
         match matching_projects.len() {
-            0 => return Err(AddTaskError::ProjectNotFound(project_name)),
+            0 => {
+                #[cfg(feature = "logging")]
+                error!(project = %project_name, "Project not found");
+                return Err(AddTaskError::ProjectNotFound(project_name));
+            }
             1 => Some(matching_projects[0].id),
             _ => {
                 let names: Vec<String> = matching_projects.iter().map(|p| p.name.clone()).collect();
+                #[cfg(feature = "logging")]
+                error!(project = %project_name, matching = ?names, "Ambiguous project name");
                 return Err(AddTaskError::AmbiguousProjectName(names));
             }
         }
@@ -73,10 +87,16 @@ pub fn add_task(
             .collect();
 
         match matching_areas.len() {
-            0 => return Err(AddTaskError::AreaNotFound(area_name)),
+            0 => {
+                #[cfg(feature = "logging")]
+                error!(area = %area_name, "Area not found");
+                return Err(AddTaskError::AreaNotFound(area_name));
+            }
             1 => Some(matching_areas[0].id),
             _ => {
                 let names: Vec<String> = matching_areas.iter().map(|a| a.name.clone()).collect();
+                #[cfg(feature = "logging")]
+                error!(area = %area_name, matching = ?names, "Ambiguous area name");
                 return Err(AddTaskError::AmbiguousAreaName(names));
             }
         }
@@ -86,11 +106,11 @@ pub fn add_task(
 
     // 3. Parse deadline if provided
     let deadline = if let Some(deadline_str) = parameters.deadline {
-        Some(
-            deadline_str
-                .parse::<Date>()
-                .map_err(|e| AddTaskError::InvalidDeadline(deadline_str.clone(), e.to_string()))?,
-        )
+        Some(deadline_str.parse::<Date>().map_err(|e| {
+            #[cfg(feature = "logging")]
+            error!(deadline = %deadline_str, error = %e, "Invalid deadline date");
+            AddTaskError::InvalidDeadline(deadline_str.clone(), e.to_string())
+        })?)
     } else {
         None
     };
@@ -122,7 +142,20 @@ pub fn add_task(
     storage.save(store)?;
 
     // 7. Return the created task (with the assigned task_number)
-    Ok(store.get_task(task_id).unwrap().clone())
+    let created_task = store.get_task(task_id).unwrap().clone();
+
+    #[cfg(feature = "logging")]
+    {
+        let span = tracing::Span::current();
+        span.record("task.number", created_task.task_number);
+        span.record("task.uuid", created_task.id.to_string());
+        info!(
+            task_number = created_task.task_number,
+            "Task added successfully"
+        );
+    }
+
+    Ok(created_task)
 }
 
 #[derive(Debug, Error)]
@@ -158,6 +191,7 @@ pub enum MoveTaskError {
     Storage(#[from] StorageError),
 }
 
+#[derive(Debug)]
 pub struct MoveTaskParameters {
     pub task_number: u64,
     pub notes: Option<String>,
@@ -168,6 +202,7 @@ pub struct MoveTaskParameters {
     pub tags: Vec<String>,
 }
 
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
 pub fn move_task(
     store: &mut Store,
     storage: &impl Storage,
@@ -264,19 +299,26 @@ pub enum CompleteTaskError {
     Storage(#[from] StorageError),
 }
 
+#[derive(Debug)]
 pub struct CompleteTaskParameters {
     pub task_number_or_fuzzy_name: String,
 }
 
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
 pub fn complete_task(
     store: &mut Store,
     storage: &impl Storage,
     parameters: CompleteTaskParameters,
 ) -> Result<Task, CompleteTaskError> {
+    #[cfg(feature = "logging")]
+    info!(identifier = %parameters.task_number_or_fuzzy_name, "Completing task");
+
     // Try to parse as task number first
     let task = if let Ok(task_number) = parameters.task_number_or_fuzzy_name.parse::<u64>() {
         // Look up by task number
         store.get_task_by_number(task_number).ok_or_else(|| {
+            #[cfg(feature = "logging")]
+            error!(task_number = task_number, "Task not found");
             CompleteTaskError::TaskNotFound(parameters.task_number_or_fuzzy_name.clone())
         })?
     } else {
@@ -293,6 +335,8 @@ pub fn complete_task(
 
         match matching_tasks.len() {
             0 => {
+                #[cfg(feature = "logging")]
+                error!(identifier = %parameters.task_number_or_fuzzy_name, "Task not found");
                 return Err(CompleteTaskError::TaskNotFound(
                     parameters.task_number_or_fuzzy_name,
                 ));
@@ -300,10 +344,15 @@ pub fn complete_task(
             1 => matching_tasks[0],
             _ => {
                 let titles: Vec<String> = matching_tasks.iter().map(|t| t.title.clone()).collect();
+                #[cfg(feature = "logging")]
+                error!(identifier = %parameters.task_number_or_fuzzy_name, matching = ?titles, "Ambiguous task name");
                 return Err(CompleteTaskError::AmbiguousTaskName(titles));
             }
         }
     };
+
+    #[cfg(feature = "logging")]
+    tracing::Span::current().record("task.number", task.task_number);
 
     // Mark task as completed
     let mut updated_task = task.clone();
@@ -314,6 +363,12 @@ pub fn complete_task(
 
     // Persist to storage
     storage.save(store)?;
+
+    #[cfg(feature = "logging")]
+    info!(
+        task_number = updated_task.task_number,
+        "Task completed successfully"
+    );
 
     Ok(updated_task)
 }
@@ -333,10 +388,12 @@ pub enum DeleteTaskError {
     Storage(#[from] StorageError),
 }
 
+#[derive(Debug)]
 pub struct DeleteTaskParameters {
     pub task_number_or_fuzzy_name: String,
 }
 
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
 pub fn delete_task(
     store: &mut Store,
     storage: &impl Storage,
@@ -403,10 +460,12 @@ pub enum RestoreTaskError {
     Storage(#[from] StorageError),
 }
 
+#[derive(Debug)]
 pub struct RestoreTaskParameters {
     pub task_number: u64,
 }
 
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number = parameters.task_number)))]
 pub fn restore_task(
     store: &mut Store,
     storage: &impl Storage,
@@ -476,10 +535,12 @@ pub enum EditTaskError {
     Storage(#[from] StorageError),
 }
 
+#[derive(Debug)]
 pub struct EditTaskParameters {
     pub task_number_or_fuzzy_name: String,
 }
 
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
 pub fn edit_task(
     store: &mut Store,
     storage: &impl Storage,

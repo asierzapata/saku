@@ -15,7 +15,15 @@ license.workspace = true
 name = "tdo"
 path = "src/main.rs"
 
+[features]
+default = []  # No logging by default for zero overhead in release builds
+logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
+
 [dependencies]
+# Logging dependencies - optional, disabled by default
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+tracing-appender = { workspace = true, optional = true }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

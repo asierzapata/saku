@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, OpenOptions, rename, write},
+    fs::{self, rename, write, OpenOptions},
     path::{Path, PathBuf},
 };
 
@@ -11,6 +11,9 @@ use crate::{
     models::store::{Store, StoredStore},
     storage::{Storage, StorageError},
 };
+
+#[cfg(feature = "logging")]
+use tracing::{debug, error, info, instrument};
 
 pub struct JsonFileStorage {
     path: PathBuf,
@@ -112,25 +115,44 @@ impl JsonFileStorage {
 }
 
 impl Storage for JsonFileStorage {
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(path = %self.path.display())))]
     fn load(&self) -> Result<Store, StorageError> {
         use crate::models::store::CURRENT_VERSION;
         use crate::storage::migrations::{apply_migrations, detect_version};
+
+        #[cfg(feature = "logging")]
+        debug!("Loading store from disk");
 
         match std::fs::read_to_string(&self.path) {
             Ok(content) => {
                 let file_version = detect_version(&content)?;
 
                 if file_version > CURRENT_VERSION {
+                    #[cfg(feature = "logging")]
+                    error!(
+                        file_version = file_version,
+                        current_version = CURRENT_VERSION,
+                        "Store file is from a future version"
+                    );
                     return Err(StorageError::FutureVersion(file_version));
                 }
 
-                let mut data: serde_json::Value =
-                    serde_json::from_str(&content).map_err(|e| StorageError::ParseFailed {
+                let mut data: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                    #[cfg(feature = "logging")]
+                    error!(error = %e, "Failed to parse store JSON");
+                    StorageError::ParseFailed {
                         path: self.path.clone(),
                         source: e,
-                    })?;
+                    }
+                })?;
 
                 if file_version < CURRENT_VERSION {
+                    #[cfg(feature = "logging")]
+                    info!(
+                        from_version = file_version,
+                        to_version = CURRENT_VERSION,
+                        "Applying migrations"
+                    );
                     data = apply_migrations(data, file_version, CURRENT_VERSION)?;
                 }
 
@@ -138,36 +160,76 @@ impl Storage for JsonFileStorage {
                     obj.insert("version".to_string(), serde_json::json!(CURRENT_VERSION));
                 }
 
-                let stored_store: StoredStore =
-                    serde_json::from_value(data).map_err(|e| StorageError::ParseFailed {
+                let stored_store: StoredStore = serde_json::from_value(data).map_err(|e| {
+                    #[cfg(feature = "logging")]
+                    error!(error = %e, "Failed to deserialize store");
+                    StorageError::ParseFailed {
                         path: self.path.clone(),
                         source: e,
-                    })?;
+                    }
+                })?;
 
                 // Convert from storage format to working format
-                Ok(Store::from_stored(stored_store))
+                let store = Store::from_stored(stored_store);
+
+                #[cfg(feature = "logging")]
+                info!(
+                    tasks = store.tasks.len(),
+                    projects = store.projects.len(),
+                    areas = store.areas.len(),
+                    "Store loaded successfully"
+                );
+
+                Ok(store)
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Store::default()),
-            Err(e) => Err(StorageError::LoadFailed {
-                path: self.path.clone(),
-                source: e,
-            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                #[cfg(feature = "logging")]
+                info!("Store file not found, creating new store");
+                Ok(Store::default())
+            }
+            Err(e) => {
+                #[cfg(feature = "logging")]
+                error!(error = %e, "Failed to read store file");
+                Err(StorageError::LoadFailed {
+                    path: self.path.clone(),
+                    source: e,
+                })
+            }
         }
     }
 
+    #[cfg_attr(feature = "logging", instrument(skip(self, store), fields(path = %self.path.display())))]
     fn save(&self, store: &Store) -> Result<(), StorageError> {
+        #[cfg(feature = "logging")]
+        debug!(
+            tasks = store.tasks.len(),
+            projects = store.projects.len(),
+            areas = store.areas.len(),
+            "Saving store to disk"
+        );
+
         // Convert from working format to storage format
         let stored_store = store.to_stored();
 
-        let json = to_string_pretty(&stored_store)
-            .map_err(|e| StorageError::SerializeFailed { source: e })?;
+        let json = to_string_pretty(&stored_store).map_err(|e| {
+            #[cfg(feature = "logging")]
+            error!(error = %e, "Failed to serialize store");
+            StorageError::SerializeFailed { source: e }
+        })?;
 
         let unique_temp = format!("{}.tmp.{}", self.path.display(), Uuid::new_v4());
         let temp_path = PathBuf::from(&unique_temp);
-        write(&temp_path, json).map_err(|e| StorageError::SaveFailed {
-            path: temp_path.clone(),
-            source: e,
+        write(&temp_path, json).map_err(|e| {
+            #[cfg(feature = "logging")]
+            error!(error = %e, temp_path = %temp_path.display(), "Failed to write temp file");
+            StorageError::SaveFailed {
+                path: temp_path.clone(),
+                source: e,
+            }
         })?;
+
+        #[cfg(feature = "logging")]
+        debug!("Acquiring file lock");
 
         let lock_file_path = self.path.with_extension("lock");
         let lock_file = OpenOptions::new()
@@ -175,29 +237,52 @@ impl Storage for JsonFileStorage {
             .create(true)
             .truncate(true)
             .open(&lock_file_path)
-            .map_err(|e| StorageError::SaveFailed {
-                path: lock_file_path.clone(),
-                source: e,
+            .map_err(|e| {
+                #[cfg(feature = "logging")]
+                error!(error = %e, lock_path = %lock_file_path.display(), "Failed to open lock file");
+                StorageError::SaveFailed {
+                    path: lock_file_path.clone(),
+                    source: e,
+                }
             })?;
-        lock_file
-            .lock_exclusive()
-            .map_err(|e| StorageError::SaveFailed {
+        lock_file.lock_exclusive().map_err(|e| {
+            #[cfg(feature = "logging")]
+            error!(error = %e, "Failed to acquire exclusive lock");
+            StorageError::SaveFailed {
                 path: lock_file_path,
                 source: e,
-            })?;
+            }
+        })?;
+
+        #[cfg(feature = "logging")]
+        debug!("Creating backup");
 
         self.create_backup()?;
         self.cleanup_old_backups()?;
 
-        rename(&temp_path, &self.path).map_err(|e| StorageError::SaveFailed {
-            path: self.path.clone(),
-            source: e,
+        #[cfg(feature = "logging")]
+        debug!("Renaming temp file to final location");
+
+        rename(&temp_path, &self.path).map_err(|e| {
+            #[cfg(feature = "logging")]
+            error!(error = %e, "Failed to rename temp file");
+            StorageError::SaveFailed {
+                path: self.path.clone(),
+                source: e,
+            }
         })?;
 
-        lock_file.unlock().map_err(|e| StorageError::SaveFailed {
-            path: self.path.clone(),
-            source: e,
+        lock_file.unlock().map_err(|e| {
+            #[cfg(feature = "logging")]
+            error!(error = %e, "Failed to release lock");
+            StorageError::SaveFailed {
+                path: self.path.clone(),
+                source: e,
+            }
         })?;
+
+        #[cfg(feature = "logging")]
+        info!("Store saved successfully");
 
         Ok(())
     }
