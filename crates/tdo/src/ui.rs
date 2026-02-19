@@ -8,11 +8,11 @@ const MAX_CONTENT_WIDTH: usize = 100;
 /// Represents the urgency level of a task based on its deadline or scheduled date
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TaskUrgency {
-    Completed,              // Task is done
-    OnTrack,                // Deadline >3 days away
-    ApproachingDeadline,    // Deadline 1-3 days away
-    DueToday,               // Deadline is today
-    Overdue,                // Past deadline or scheduled date
+    Completed,           // Task is done
+    OnTrack,             // Deadline >3 days away
+    ApproachingDeadline, // Deadline 1-3 days away
+    DueToday,            // Deadline is today
+    Overdue,             // Past deadline or scheduled date
 }
 
 /// Get the terminal width, defaulting to 80 if unavailable
@@ -92,38 +92,38 @@ fn format_date_compact(date: Date, today: Date, is_completion: bool) -> String {
 }
 
 /// Get the date badge string and urgency for a task
-/// Returns None if task has no date to display
-pub fn get_task_date_badge(task: &Task) -> Option<(String, TaskUrgency)> {
+/// Always returns a badge - either a date or dot placeholder
+pub fn get_task_date_badge(task: &Task) -> (String, TaskUrgency) {
     let today = jiff::Zoned::now().date();
 
     // Completed tasks: show completion date
     if let Some(completed_at) = task.completed_at {
         let completion_date = jiff::Zoned::new(completed_at, jiff::tz::TimeZone::system()).date();
         let formatted = format_date_compact(completion_date, today, true);
-        return Some((formatted, TaskUrgency::Completed));
+        return (formatted, TaskUrgency::Completed);
     }
 
     // Priority 1: Deadline
     if let Some(deadline) = task.deadline {
         let urgency = calculate_urgency_from_date(deadline, today);
         let formatted = format_date_compact(deadline, today, false);
-        return Some((formatted, urgency));
+        return (formatted, urgency);
     }
 
     // Priority 2: Scheduled date
     if let crate::models::task::When::Scheduled { date } = task.when {
         let urgency = calculate_urgency_from_date(date, today);
         let formatted = format_date_compact(date, today, false);
-        return Some((formatted, urgency));
+        return (formatted, urgency);
     }
 
     // Priority 3: Someday tasks (show placeholder)
     if let crate::models::task::When::Someday = task.when {
-        return Some(("······".to_string(), TaskUrgency::OnTrack));
+        return ("······".to_string(), TaskUrgency::OnTrack);
     }
 
-    // No date to show
-    None
+    // Default: No specific date (Inbox, Anytime, etc.) - show placeholder
+    ("······".to_string(), TaskUrgency::OnTrack)
 }
 
 /// Apply styling to date badge - just dimmed text, no background
@@ -134,11 +134,11 @@ fn style_date_badge(text: &str, _urgency: TaskUrgency) -> ColoredString {
 /// Get the appropriate status glyph for a task based on urgency
 pub fn get_status_glyph(urgency: TaskUrgency) -> ColoredString {
     match urgency {
-        TaskUrgency::Completed => "✔".dimmed(),  // U+2714 - Heavy Check Mark
-        TaskUrgency::OnTrack => "▢".green(),  // U+25A2 - Empty square
-        TaskUrgency::ApproachingDeadline => "▢".yellow(),  // U+25A2 - Empty square
-        TaskUrgency::DueToday => "▢".truecolor(255, 140, 0),  // U+25A2 - Orange square
-        TaskUrgency::Overdue => "▢".red(),  // U+25A2 - Empty square
+        TaskUrgency::Completed => "✔".dimmed(), // U+2714 - Heavy Check Mark
+        TaskUrgency::OnTrack => "▢".green(),    // U+25A2 - Empty square
+        TaskUrgency::ApproachingDeadline => "▢".yellow(), // U+25A2 - Empty square
+        TaskUrgency::DueToday => "▢".truecolor(255, 140, 0), // U+25A2 - Orange square
+        TaskUrgency::Overdue => "▢".red(),      // U+25A2 - Empty square
     }
 }
 
@@ -186,66 +186,50 @@ fn render_task_line_with_options(
     let terminal_width = get_terminal_width();
 
     let id_str = format!("{:>3}", task.task_number);
-    
+
     // Calculate urgency
     let urgency = calculate_task_urgency(task);
-    
+
     // Get status glyph
     let glyph = get_status_glyph(urgency);
-    
-    // Get date badge (if applicable)
-    let date_badge = get_task_date_badge(task);
-    
+
+    // Get date badge (always present now)
+    let (date_str, badge_urgency) = get_task_date_badge(task);
+
     // Style task title
     let styled_title = if task.completed_at.is_some() {
         task.title.dimmed()
     } else {
         task.title.white()
     };
-    
-    // Build left section with optional date badge
-    let has_date_badge = date_badge.is_some();
-    let left_section = if let Some((date_str, badge_urgency)) = date_badge {
-        let styled_badge = style_date_badge(&date_str, badge_urgency);
-        format!(
-            " {}  {}  {}  {}",
-            id_str.italic().dimmed(),
-            glyph,
-            styled_badge,
-            styled_title
-        )
-    } else {
-        format!(
-            " {}  {}  {}",
-            id_str.italic().dimmed(),
-            glyph,
-            styled_title
-        )
-    };
-    
+
+    // Build left section with date badge
+    let styled_badge = style_date_badge(&date_str, badge_urgency);
+    let left_section = format!(
+        " {}  {}  {}  {}",
+        id_str.italic().dimmed(),
+        glyph,
+        styled_badge,
+        styled_title
+    );
+
     let styled_left = left_section;
-    
+
     // Get context for right-aligned section
     let context = get_task_context(task, store);
-    let right_section = context.unwrap_or_default();
-    
+
+    // Calculate visible lengths
+    // ID (3) + spaces (2) + glyph (1) + spaces (2) + badge (6) + spaces (2) + title
+    let left_visible_len = format!("  {}    {}  {}", id_str, "      ", task.title).len();
+
+    let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
+
     // Render with dotted separator
-    if !right_section.is_empty() {
+    if let Some(right_section) = context {
         let right_dimmed = right_section.dimmed();
-        
-        // Calculate visible lengths
-        let left_visible_len = if has_date_badge {
-            // ID (3) + spaces (2) + glyph (1) + spaces (2) + badge (6) + spaces (2) + title
-            format!("  {}    {}  {}", id_str, "      ", task.title).len()
-        } else {
-            // ID (3) + spaces (2) + glyph (1) + spaces (2) + title
-            format!("  {}    {}", id_str, task.title).len()
-        };
-        
         let right_visible_len = right_section.len();
-        let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
         let total_content = left_visible_len + right_visible_len;
-        
+
         if total_content + 4 < effective_width {
             let gap = effective_width - total_content - 2;
             let dots = format!(" {}{}", "·".repeat(gap - 2), " ");
@@ -255,7 +239,13 @@ fn render_task_line_with_options(
             println!("{}  {}  {}", styled_left, "·".dimmed(), right_dimmed);
         }
     } else {
-        println!("{}", styled_left);
+        if left_visible_len + 2 < effective_width {
+            let gap = effective_width - left_visible_len - 1;
+            let dots = format!(" {}", "·".repeat(gap - 2));
+            println!("{}{}", styled_left, dots.dimmed());
+        } else {
+            println!("{}", styled_left);
+        }
     }
 }
 
@@ -280,7 +270,8 @@ pub fn render_view_header(title: &str, count: usize) {
     let task_word = if count == 1 { "task" } else { "tasks" };
     let count_str = format!("({} {})", count, task_word);
     println!(
-        "\n  {} {}\n",
+        "\n  {} {} {}\n",
+        "▌".cyan().bold(),
         title.cyan().bold(),
         count_str.dimmed().italic()
     );
@@ -288,7 +279,12 @@ pub fn render_view_header(title: &str, count: usize) {
 
 /// Render a section header (e.g., "Evening", "Tomorrow")
 pub fn render_section_header(title: &str) {
-    println!("\n  ─── {} ───\n", title.bold());
+    // Pastel green using truecolor
+    println!(
+        "\n  {} {}\n",
+        "▌".truecolor(144, 238, 144).bold(),  // Light green
+        title.truecolor(144, 238, 144).bold()
+    );
 }
 
 /// Render a section separator

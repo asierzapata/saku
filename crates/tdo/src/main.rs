@@ -488,7 +488,7 @@ fn main() {
 
                 for group_name in order {
                     if let Some(tasks) = grouped.get(group_name) {
-                        saku_tdo::ui::render_section_header(group_name);
+                        saku_tdo::ui::render_view_header(group_name, tasks.len());
                         for task in tasks {
                             saku_tdo::ui::render_task_line(task, &store);
                         }
