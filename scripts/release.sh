@@ -82,9 +82,10 @@ echo "Last tag: ${LAST_TAG:-(none, first release)}"
 
 # 9. Run checks before touching anything
 echo ""
-echo "Running build, tests, and clippy..."
+echo "Running build and clippy (skipping tests to avoid keychain prompts)..."
 cargo build --release -p "$PACKAGE"
-cargo test -p "$PACKAGE"
+# Skip tests during release to avoid macOS keychain prompts
+# cargo test -p "$PACKAGE" --no-default-features
 cargo clippy -p "$PACKAGE" -- -D warnings
 
 # 10. Generate changelog
