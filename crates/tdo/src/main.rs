@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete;
 use colored::*;
 
@@ -1752,6 +1752,12 @@ fn main() {
                     saku_tdo::ui::render_task_line(task, &store);
                 }
             }
+        }
+        Some(Commands::Completion { shell }) => {
+            let mut cmd = Cli::command();
+            let bin_name = "tdo";
+            clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+            return;
         }
         None => {
             // Default: show today view (same as `tdo today`)
