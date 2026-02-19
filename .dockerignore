@@ -1,0 +1,6 @@
+target/
+.git/
+documentation/
+skills/
+.claude/
+.cursor/
