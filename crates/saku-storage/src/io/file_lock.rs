@@ -24,11 +24,10 @@ impl FileLock {
                 source: e,
             })?;
 
-        file.lock_exclusive()
-            .map_err(|e| IoError::LockFailed {
-                path: path.to_path_buf(),
-                source: e,
-            })?;
+        file.lock_exclusive().map_err(|e| IoError::LockFailed {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
 
         Ok(Self {
             file,
@@ -38,12 +37,10 @@ impl FileLock {
 
     /// Release the exclusive lock.
     pub fn release(self) -> Result<(), IoError> {
-        self.file
-            .unlock()
-            .map_err(|e| IoError::UnlockFailed {
-                path: self.path,
-                source: e,
-            })
+        self.file.unlock().map_err(|e| IoError::UnlockFailed {
+            path: self.path,
+            source: e,
+        })
     }
 }
 

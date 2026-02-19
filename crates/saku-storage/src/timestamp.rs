@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct HybridTimestamp {
     pub wall_ms: i64,
     pub lamport: u64,
@@ -25,41 +24,6 @@ impl HybridTimestamp {
             lamport,
             device_id,
         }
-    }
-}
-
-impl Default for HybridTimestamp {
-    fn default() -> Self {
-        Self {
-            wall_ms: 0,
-            lamport: 0,
-            device_id: String::new(),
-        }
-    }
-}
-
-impl PartialEq for HybridTimestamp {
-    fn eq(&self, other: &Self) -> bool {
-        self.wall_ms == other.wall_ms
-            && self.lamport == other.lamport
-            && self.device_id == other.device_id
-    }
-}
-
-impl Eq for HybridTimestamp {}
-
-impl PartialOrd for HybridTimestamp {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for HybridTimestamp {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.wall_ms
-            .cmp(&other.wall_ms)
-            .then_with(|| self.lamport.cmp(&other.lamport))
-            .then_with(|| self.device_id.cmp(&other.device_id))
     }
 }
 
