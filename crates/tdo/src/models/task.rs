@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 
 use jiff::civil::Date;
 use jiff::Timestamp;
+use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -37,6 +38,8 @@ pub struct Task {
     pub deleted_at: Option<Timestamp>,
     /// When the task was created
     pub created_at: Timestamp,
+    /// Hybrid logical clock timestamp for sync conflict resolution
+    pub modified_at: HybridTimestamp,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]

@@ -299,6 +299,11 @@ fn main() {
 
     let cli = Cli::parse();
 
+    // Ensure device_id exists (created on first run, used by sync in the future)
+    if let Err(e) = saku_storage::device::get_or_create_device_id() {
+        eprintln!("Warning: Failed to initialize device ID: {}", e);
+    }
+
     // Initialize storage
     let storage_path = std::env::var_os("TDO_DATA_DIR")
         .map(PathBuf::from)

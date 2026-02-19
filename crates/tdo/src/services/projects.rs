@@ -355,6 +355,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: name.to_string(),
             deleted_at: None,
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
         store.add_area(area.clone());
         area

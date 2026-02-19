@@ -1,5 +1,6 @@
 use jiff::Timestamp;
 use jiff::civil::Date;
+use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,4 +22,6 @@ pub struct Project {
     pub deleted_at: Option<Timestamp>,
     /// Created at timestamp of the project
     pub created_at: Timestamp,
+    /// Hybrid logical clock timestamp for sync conflict resolution
+    pub modified_at: HybridTimestamp,
 }

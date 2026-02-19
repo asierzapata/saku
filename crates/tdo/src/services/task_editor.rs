@@ -385,6 +385,7 @@ mod tests {
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
 
         let serialized = serialize_task_for_edit(&task, &store);
@@ -403,6 +404,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "Work".to_string(),
             deleted_at: None,
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
         store.add_area(area.clone());
 
@@ -415,6 +417,7 @@ mod tests {
             created_at: jiff::Timestamp::now(),
             completed_at: None,
             deleted_at: None,
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
         store.add_project(project.clone());
 
@@ -444,6 +447,7 @@ mod tests {
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
 
         let serialized = serialize_task_for_edit(&task, &store);
@@ -600,6 +604,7 @@ Checklist:
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
 
         let parsed = ParsedTaskEdit {
@@ -635,6 +640,7 @@ Checklist:
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
 
         let parsed = ParsedTaskEdit {

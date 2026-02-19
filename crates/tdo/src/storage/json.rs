@@ -1,11 +1,12 @@
-use std::{
-    fs::{self, rename, write, OpenOptions},
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
-use fs2::FileExt;
 use serde_json::to_string_pretty;
-use uuid::Uuid;
+
+use saku_storage::io::{
+    atomic_writer::atomic_write,
+    backup::{create_backup, cleanup_old_backups},
+    file_lock::FileLock,
+};
 
 use crate::{
     models::store::{Store, StoredStore},
@@ -22,95 +23,6 @@ pub struct JsonFileStorage {
 impl JsonFileStorage {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    fn create_backup_dir(&self) -> Result<(), StorageError> {
-        let backups_dir = self.get_backup_dir();
-        fs::create_dir(&backups_dir).map_err(|e| StorageError::BackupFailed {
-            path: backups_dir,
-            source: e,
-        })?;
-        Ok(())
-    }
-
-    fn create_backup(&self) -> Result<u64, StorageError> {
-        let file_exists = fs::exists(&self.path).map_err(|e| StorageError::BackupFailed {
-            path: self.path.clone(),
-            source: e,
-        })?;
-        if !file_exists {
-            return Ok(0);
-        }
-
-        let backup_path = self.get_backup_path();
-        let copy_result = fs::copy(&self.path, &backup_path);
-        match copy_result {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.create_backup_dir()?;
-                self.create_backup()
-            }
-            Err(e) => Err(StorageError::BackupFailed {
-                path: backup_path,
-                source: e,
-            }),
-            Ok(bytes) => Ok(bytes),
-        }
-    }
-
-    fn cleanup_old_backups(&self) -> Result<(), StorageError> {
-        let backup_dir = self.get_backup_dir();
-        let backup_dir_exists =
-            fs::exists(&backup_dir).map_err(|e| StorageError::CleanupFailed {
-                dir: backup_dir.clone(),
-                source: e,
-            })?;
-        if !backup_dir_exists {
-            return Ok(());
-        }
-
-        let mut file_entries = fs::read_dir(&backup_dir)
-            .map_err(|e| StorageError::CleanupFailed {
-                dir: backup_dir.clone(),
-                source: e,
-            })?
-            .flatten()
-            .filter(|entry| entry.metadata().map(|m| m.is_file()).unwrap_or(false))
-            .map(|entry| entry.path())
-            .collect::<Vec<_>>();
-
-        file_entries.sort();
-
-        let number_of_files_to_delete = match file_entries.len() {
-            x if x > 5 => x - 5,
-            _ => 0,
-        };
-
-        if number_of_files_to_delete == 0 {
-            return Ok(());
-        }
-
-        for file_path in &file_entries[0..number_of_files_to_delete] {
-            fs::remove_file(file_path).map_err(|e| StorageError::CleanupFailed {
-                dir: backup_dir.clone(),
-                source: e,
-            })?;
-        }
-
-        Ok(())
-    }
-
-    fn get_backup_dir(&self) -> PathBuf {
-        let parent_store_path = self.path.parent().unwrap_or(Path::new("."));
-        parent_store_path.join("backups")
-    }
-
-    fn get_backup_path(&self) -> PathBuf {
-        let backups_dir = self.get_backup_dir();
-
-        let timestamp = jiff::Timestamp::now().to_string();
-        let filename = format!("{:?}-{}", self.path.file_name(), timestamp);
-
-        backups_dir.join(filename)
     }
 }
 
@@ -217,67 +129,67 @@ impl Storage for JsonFileStorage {
             StorageError::SerializeFailed { source: e }
         })?;
 
-        let unique_temp = format!("{}.tmp.{}", self.path.display(), Uuid::new_v4());
-        let temp_path = PathBuf::from(&unique_temp);
-        write(&temp_path, json).map_err(|e| {
-            #[cfg(feature = "logging")]
-            error!(error = %e, temp_path = %temp_path.display(), "Failed to write temp file");
-            StorageError::SaveFailed {
-                path: temp_path.clone(),
-                source: e,
-            }
-        })?;
-
         #[cfg(feature = "logging")]
         debug!("Acquiring file lock");
 
         let lock_file_path = self.path.with_extension("lock");
-        let lock_file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&lock_file_path)
-            .map_err(|e| {
-                #[cfg(feature = "logging")]
-                error!(error = %e, lock_path = %lock_file_path.display(), "Failed to open lock file");
-                StorageError::SaveFailed {
-                    path: lock_file_path.clone(),
-                    source: e,
-                }
-            })?;
-        lock_file.lock_exclusive().map_err(|e| {
+        let lock = FileLock::acquire(&lock_file_path).map_err(|e| {
             #[cfg(feature = "logging")]
-            error!(error = %e, "Failed to acquire exclusive lock");
+            error!(error = %e, "Failed to acquire lock");
             StorageError::SaveFailed {
-                path: lock_file_path,
-                source: e,
+                path: lock_file_path.clone(),
+                source: match e {
+                    saku_storage::error::IoError::LockFailed { source, .. } => source,
+                    _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                },
             }
         })?;
 
         #[cfg(feature = "logging")]
         debug!("Creating backup");
 
-        self.create_backup()?;
-        self.cleanup_old_backups()?;
+        create_backup(&self.path).map_err(|e| StorageError::BackupFailed {
+            path: self.path.clone(),
+            source: match e {
+                saku_storage::error::IoError::BackupFailed { source, .. } => source,
+                _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+            },
+        })?;
+
+        cleanup_old_backups(&self.path, 5).map_err(|e| StorageError::CleanupFailed {
+            dir: self.path.clone(),
+            source: match e {
+                saku_storage::error::IoError::CleanupFailed { source, .. } => source,
+                _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+            },
+        })?;
 
         #[cfg(feature = "logging")]
-        debug!("Renaming temp file to final location");
+        debug!("Writing store file atomically");
 
-        rename(&temp_path, &self.path).map_err(|e| {
+        // Atomic write: write to temp file + rename
+        atomic_write(&self.path, &json).map_err(|e| {
             #[cfg(feature = "logging")]
-            error!(error = %e, "Failed to rename temp file");
+            error!(error = %e, "Failed atomic write");
             StorageError::SaveFailed {
                 path: self.path.clone(),
-                source: e,
+                source: match e {
+                    saku_storage::error::IoError::WriteFailed { source, .. } => source,
+                    saku_storage::error::IoError::RenameFailed { source, .. } => source,
+                    _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                },
             }
         })?;
 
-        lock_file.unlock().map_err(|e| {
+        lock.release().map_err(|e| {
             #[cfg(feature = "logging")]
             error!(error = %e, "Failed to release lock");
             StorageError::SaveFailed {
                 path: self.path.clone(),
-                source: e,
+                source: match e {
+                    saku_storage::error::IoError::UnlockFailed { source, .. } => source,
+                    _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                },
             }
         })?;
 
@@ -291,6 +203,7 @@ impl Storage for JsonFileStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     use crate::{
@@ -514,7 +427,7 @@ mod tests {
         let storage = JsonFileStorage::new(path);
         let store = storage.load().expect("Migration should succeed");
 
-        assert_eq!(store.version, 3);
+        assert_eq!(store.version, 4);
         assert_eq!(store.next_task_number, 3);
 
         // "First task" (earlier created_at) gets task_number 1

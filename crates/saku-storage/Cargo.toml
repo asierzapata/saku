@@ -1,0 +1,20 @@
+[package]
+name = "saku-storage"
+version = "0.1.0"
+description = "Shared storage infrastructure for the saku ecosystem"
+repository = "https://github.com/asierzapata/saku"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+jiff.workspace = true
+fs2.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

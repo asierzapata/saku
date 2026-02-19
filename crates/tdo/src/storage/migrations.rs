@@ -7,7 +7,7 @@ use crate::storage::StorageError;
 type MigrationFn = fn(Value) -> Result<Value, StorageError>;
 
 fn get_migrations() -> Vec<MigrationFn> {
-    vec![migrate_v1_to_v2, migrate_v2_to_v3]
+    vec![migrate_v1_to_v2, migrate_v2_to_v3, migrate_v3_to_v4]
 }
 
 fn migrate_v1_to_v2(mut value: Value) -> Result<Value, StorageError> {
@@ -70,6 +70,76 @@ fn migrate_v2_to_v3(mut value: Value) -> Result<Value, StorageError> {
             for area in areas {
                 if let Some(area_obj) = area.as_object_mut() {
                     area_obj.insert("deleted_at".to_string(), Value::Null);
+                }
+            }
+        }
+    }
+
+    Ok(value)
+}
+
+fn migrate_v3_to_v4(mut value: Value) -> Result<Value, StorageError> {
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("version".to_string(), Value::from(4));
+
+        // Add modified_at to all tasks, seeded from created_at
+        if let Some(tasks) = obj.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+            for task in tasks {
+                if let Some(task_obj) = task.as_object_mut() {
+                    let wall_ms = task_obj
+                        .get("created_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<jiff::Timestamp>().ok())
+                        .map(|ts| ts.as_millisecond())
+                        .unwrap_or(0);
+
+                    task_obj.insert(
+                        "modified_at".to_string(),
+                        serde_json::json!({
+                            "wall_ms": wall_ms,
+                            "lamport": 0,
+                            "device_id": ""
+                        }),
+                    );
+                }
+            }
+        }
+
+        // Add modified_at to all projects, seeded from created_at
+        if let Some(projects) = obj.get_mut("projects").and_then(|p| p.as_array_mut()) {
+            for project in projects {
+                if let Some(project_obj) = project.as_object_mut() {
+                    let wall_ms = project_obj
+                        .get("created_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<jiff::Timestamp>().ok())
+                        .map(|ts| ts.as_millisecond())
+                        .unwrap_or(0);
+
+                    project_obj.insert(
+                        "modified_at".to_string(),
+                        serde_json::json!({
+                            "wall_ms": wall_ms,
+                            "lamport": 0,
+                            "device_id": ""
+                        }),
+                    );
+                }
+            }
+        }
+
+        // Add modified_at to all areas (areas lack created_at, so use 0)
+        if let Some(areas) = obj.get_mut("areas").and_then(|a| a.as_array_mut()) {
+            for area in areas {
+                if let Some(area_obj) = area.as_object_mut() {
+                    area_obj.insert(
+                        "modified_at".to_string(),
+                        serde_json::json!({
+                            "wall_ms": 0,
+                            "lamport": 0,
+                            "device_id": ""
+                        }),
+                    );
                 }
             }
         }
@@ -156,5 +226,73 @@ mod tests {
         let data = serde_json::json!({"version": 5});
         let result = apply_migrations(data, 5, 1);
         assert!(matches!(result, Err(StorageError::FutureVersion(5))));
+    }
+
+    #[test]
+    fn test_migrate_v3_to_v4_adds_modified_at() {
+        let v3_json = serde_json::json!({
+            "version": 3,
+            "next_task_number": 2,
+            "tasks": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "task_number": 1,
+                    "title": "Test task",
+                    "notes": null, "project_id": null, "area_id": null,
+                    "tags": [], "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "checklist": [], "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T12:00:00Z"
+                }
+            ],
+            "projects": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "name": "Test project",
+                    "area_id": null, "notes": null, "deadline": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-05-01T00:00:00Z"
+                }
+            ],
+            "areas": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000003",
+                    "name": "Test area",
+                    "deleted_at": null
+                }
+            ]
+        });
+
+        let result = migrate_v3_to_v4(v3_json).unwrap();
+
+        // Check version bumped
+        assert_eq!(result["version"], 4);
+
+        // Check task modified_at
+        let task_modified = &result["tasks"][0]["modified_at"];
+        // 2025-06-01T12:00:00Z in milliseconds
+        let expected_ms: i64 = "2025-06-01T12:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        assert_eq!(task_modified["wall_ms"], expected_ms);
+        assert_eq!(task_modified["lamport"], 0);
+        assert_eq!(task_modified["device_id"], "");
+
+        // Check project modified_at
+        let project_modified = &result["projects"][0]["modified_at"];
+        let expected_project_ms: i64 = "2025-05-01T00:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        assert_eq!(project_modified["wall_ms"], expected_project_ms);
+        assert_eq!(project_modified["lamport"], 0);
+        assert_eq!(project_modified["device_id"], "");
+
+        // Check area modified_at (no created_at, so wall_ms should be 0)
+        let area_modified = &result["areas"][0]["modified_at"];
+        assert_eq!(area_modified["wall_ms"], 0);
+        assert_eq!(area_modified["lamport"], 0);
+        assert_eq!(area_modified["device_id"], "");
     }
 }

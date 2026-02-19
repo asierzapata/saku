@@ -131,6 +131,7 @@ pub fn add_task(
         completed_at: None,
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
+        modified_at: saku_storage::timestamp::HybridTimestamp::default(),
     };
 
     let task_id = task.id;
@@ -276,6 +277,7 @@ pub fn move_task(
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
+        modified_at: task.modified_at.clone(),
     };
 
     let task_id = task.id;
@@ -685,6 +687,7 @@ pub fn edit_task(
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
+        modified_at: task.modified_at.clone(),
     };
 
     let task_id = task.id;
@@ -759,6 +762,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: name.to_string(),
             deleted_at: None,
+            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
         };
         store.add_area(area.clone());
         area

@@ -667,6 +667,20 @@ name = "saku-nte"
 version = "0.1.0"
 
 [[package]]
+name = "saku-storage"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "fs2",
+ "jiff",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "saku-tdo"
 version = "0.4.0"
 dependencies = [
@@ -678,6 +692,7 @@ dependencies = [
  "fs2",
  "jiff",
  "predicates",
+ "saku-storage",
  "serde",
  "serde_json",
  "tempfile",
