@@ -54,7 +54,15 @@ impl Default for Store {
 impl Store {
     /// Convert from storage format (Vec) to working format (HashMap)
     pub fn from_stored(stored: StoredStore) -> Self {
-        let tasks: HashMap<_, _> = stored.tasks.into_iter().map(|t| (t.id, t)).collect();
+        let tasks: HashMap<_, _> = stored
+            .tasks
+            .into_iter()
+            .map(|mut t| {
+                // Normalize legacy When variants during load
+                t.when = t.when.normalize();
+                (t.id, t)
+            })
+            .collect();
 
         let projects: HashMap<_, _> = stored.projects.into_iter().map(|p| (p.id, p)).collect();
 

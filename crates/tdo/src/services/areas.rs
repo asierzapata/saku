@@ -33,7 +33,8 @@ pub fn create_area(
     let area = Area {
         id: uuid::Uuid::new_v4(),
         name: parameters.name,
-        ..Area::default()
+        deleted_at: None,
+        modified_at: crate::sync_clock::next_modified_at(),
     };
 
     let area_id = area.id;
@@ -113,6 +114,7 @@ pub fn delete_area(
         for task_id in task_ids {
             if let Some(task) = store.get_task_mut(task_id) {
                 task.deleted_at = Some(now);
+                task.modified_at = crate::sync_clock::next_modified_at();
             }
         }
     }
@@ -121,6 +123,7 @@ pub fn delete_area(
     for project_id in &project_ids_to_delete {
         if let Some(project) = store.get_project_mut(*project_id) {
             project.deleted_at = Some(now);
+            project.modified_at = crate::sync_clock::next_modified_at();
         }
     }
 
@@ -136,12 +139,14 @@ pub fn delete_area(
     for task_id in direct_task_ids {
         if let Some(task) = store.get_task_mut(task_id) {
             task.deleted_at = Some(now);
+            task.modified_at = crate::sync_clock::next_modified_at();
         }
     }
 
     // Mark area as deleted
     if let Some(area) = store.get_area_mut(area_id) {
         area.deleted_at = Some(now);
+        area.modified_at = crate::sync_clock::next_modified_at();
     }
 
     // Persist to storage
@@ -213,6 +218,7 @@ pub fn edit_area(
     // Update area name
     if let Some(area) = store.get_area_mut(area_id) {
         area.name = parameters.new_name;
+        area.modified_at = crate::sync_clock::next_modified_at();
     }
 
     // Persist to storage
@@ -263,6 +269,7 @@ pub fn restore_area(
     // Restore area (does NOT auto-restore projects/tasks - user must restore them separately)
     if let Some(area) = store.get_area_mut(area_id) {
         area.deleted_at = None;
+        area.modified_at = crate::sync_clock::next_modified_at();
     }
 
     // Persist to storage

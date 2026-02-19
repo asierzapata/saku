@@ -46,13 +46,19 @@ pub fn calculate_task_urgency(task: &Task) -> TaskUrgency {
 
     let today = jiff::Zoned::now().date();
 
-    // Priority 1: Check deadline (if exists)
-    if let Some(deadline) = task.deadline {
-        return calculate_urgency_from_date(deadline, today);
-    }
+    // Use the earliest date between deadline and scheduled for urgency calculation
+    let scheduled_date = match task.when {
+        crate::models::task::When::Scheduled { date, .. } => Some(date),
+        _ => None,
+    };
+    
+    let earliest_date = match (task.deadline, scheduled_date) {
+        (Some(d1), Some(d2)) => Some(d1.min(d2)),
+        (Some(d), None) | (None, Some(d)) => Some(d),
+        (None, None) => None,
+    };
 
-    // Priority 2: Check scheduled date
-    if let crate::models::task::When::Scheduled { date } = task.when {
+    if let Some(date) = earliest_date {
         return calculate_urgency_from_date(date, today);
     }
 
@@ -93,6 +99,7 @@ fn format_date_compact(date: Date, today: Date, is_completion: bool) -> String {
 
 /// Get the date badge string and urgency for a task
 /// Always returns a badge - either a date or dot placeholder
+/// Format: "Mar 15" (scheduled only), "⚑ Mar 20" (deadline only), "Mar 15 | ⚑ Mar 20" (both)
 pub fn get_task_date_badge(task: &Task) -> (String, TaskUrgency) {
     let today = jiff::Zoned::now().date();
 
@@ -103,27 +110,43 @@ pub fn get_task_date_badge(task: &Task) -> (String, TaskUrgency) {
         return (formatted, TaskUrgency::Completed);
     }
 
-    // Priority 1: Deadline
-    if let Some(deadline) = task.deadline {
-        let urgency = calculate_urgency_from_date(deadline, today);
-        let formatted = format_date_compact(deadline, today, false);
-        return (formatted, urgency);
-    }
+    let scheduled_date = match task.when {
+        crate::models::task::When::Scheduled { date, .. } => Some(date),
+        _ => None,
+    };
+    let deadline = task.deadline;
 
-    // Priority 2: Scheduled date
-    if let crate::models::task::When::Scheduled { date } = task.when {
-        let urgency = calculate_urgency_from_date(date, today);
-        let formatted = format_date_compact(date, today, false);
-        return (formatted, urgency);
-    }
+    // Calculate urgency based on earliest date
+    let urgency = calculate_task_urgency(task);
 
-    // Priority 3: Someday tasks (show placeholder)
-    if let crate::models::task::When::Someday = task.when {
-        return ("······".to_string(), TaskUrgency::OnTrack);
+    // Format badge based on what dates we have
+    match (scheduled_date, deadline) {
+        (Some(sched), Some(dead)) => {
+            // Both dates: "Mar 15 | ⚑ Mar 20"
+            let sched_str = format_date_compact(sched, today, false).trim().to_string();
+            let dead_str = format_date_compact(dead, today, false).trim().to_string();
+            (format!("{} | ⚑ {}", sched_str, dead_str), urgency)
+        }
+        (Some(sched), None) => {
+            // Scheduled only: "Mar 15"
+            let formatted = format_date_compact(sched, today, false);
+            (formatted, urgency)
+        }
+        (None, Some(dead)) => {
+            // Deadline only: "⚑ Mar 20"
+            let formatted = format_date_compact(dead, today, false).trim().to_string();
+            (format!("⚑ {}", formatted), urgency)
+        }
+        (None, None) => {
+            // No dates
+            if let crate::models::task::When::Someday = task.when {
+                ("······".to_string(), TaskUrgency::OnTrack)
+            } else {
+                // Inbox or other: show placeholder
+                ("······".to_string(), TaskUrgency::OnTrack)
+            }
+        }
     }
-
-    // Default: No specific date (Inbox, Anytime, etc.) - show placeholder
-    ("······".to_string(), TaskUrgency::OnTrack)
 }
 
 /// Apply styling to date badge - just dimmed text, no background
@@ -298,7 +321,7 @@ pub fn is_overdue(task: &Task) -> bool {
         return false;
     }
 
-    if let crate::models::task::When::Scheduled { date } = task.when {
+    if let crate::models::task::When::Scheduled { date, .. } = task.when {
         let today = jiff::Zoned::now().date();
         return date < today;
     }

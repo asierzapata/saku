@@ -59,27 +59,11 @@ fn add_task_someday() {
 }
 
 #[test]
-fn add_task_anytime() {
+fn add_task_with_on_date() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["add", "Read a book", "--anytime"])
-        .assert()
-        .success();
-
-    tdo(&temp)
-        .args(["anytime"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Read a book"));
-}
-
-#[test]
-fn add_task_with_when_date() {
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp)
-        .args(["add", "Team meeting", "--when", "2030-06-15"])
+        .args(["add", "Team meeting", "--on", "2030-06-15"])
         .assert()
         .success();
 
@@ -110,7 +94,10 @@ fn add_task_with_project() {
 fn add_task_with_area() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["create", "area", "Work"]).assert().success();
+    tdo(&temp)
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
 
     tdo(&temp)
         .args(["add", "Report", "--area", "work"])

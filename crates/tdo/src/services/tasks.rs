@@ -106,7 +106,8 @@ pub fn add_task(
 
     // 3. Parse deadline if provided
     let deadline = if let Some(deadline_str) = parameters.deadline {
-        Some(deadline_str.parse::<Date>().map_err(|e| {
+        use crate::date_parser::parse_natural_date;
+        Some(parse_natural_date(&deadline_str).map_err(|e| {
             #[cfg(feature = "logging")]
             error!(deadline = %deadline_str, error = %e, "Invalid deadline date");
             AddTaskError::InvalidDeadline(deadline_str.clone(), e.to_string())
@@ -131,7 +132,7 @@ pub fn add_task(
         completed_at: None,
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
-        modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+        modified_at: crate::sync_clock::next_modified_at(),
     };
 
     let task_id = task.id;
@@ -196,8 +197,10 @@ pub enum MoveTaskError {
 pub struct MoveTaskParameters {
     pub task_number: u64,
     pub notes: Option<String>,
-    pub when: When,
+    pub when: Option<When>,
     pub deadline: Option<String>,
+    pub clear_schedule: bool,
+    pub clear_deadline: bool,
     pub project: Option<String>,
     pub area: Option<String>,
     pub tags: Vec<String>,
@@ -252,14 +255,29 @@ pub fn move_task(
         None
     };
 
-    let deadline = if let Some(deadline_str) = parameters.deadline {
+    let deadline = if parameters.clear_deadline {
+        None
+    } else if let Some(deadline_str) = parameters.deadline {
+        use crate::date_parser::parse_natural_date;
         Some(
-            deadline_str
-                .parse::<Date>()
+            parse_natural_date(&deadline_str)
                 .map_err(|e| MoveTaskError::InvalidDeadline(deadline_str.clone(), e.to_string()))?,
         )
     } else {
-        None
+        task.deadline
+    };
+
+    let when = if parameters.clear_schedule {
+        // Clear schedule - go to inbox if no deadline, otherwise keep current
+        if deadline.is_some() {
+            task.when.clone()
+        } else {
+            When::Inbox
+        }
+    } else if let Some(new_when) = parameters.when {
+        new_when
+    } else {
+        task.when.clone()
     };
 
     let new_task = Task {
@@ -267,7 +285,7 @@ pub fn move_task(
         task_number: task.task_number,
         title: task.title.clone(),
         notes: parameters.notes,
-        when: parameters.when,
+        when,
         deadline,
         project_id,
         area_id,
@@ -277,7 +295,7 @@ pub fn move_task(
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
-        modified_at: task.modified_at.clone(),
+        modified_at: crate::sync_clock::next_modified_at(),
     };
 
     let task_id = task.id;
@@ -359,6 +377,7 @@ pub fn complete_task(
     // Mark task as completed
     let mut updated_task = task.clone();
     updated_task.completed_at = Some(jiff::Timestamp::now());
+    updated_task.modified_at = crate::sync_clock::next_modified_at();
 
     // Update in store
     store.tasks.insert(updated_task.id, updated_task.clone());
@@ -440,6 +459,7 @@ pub fn delete_task(
     let task_id = task.id;
     let mut updated_task = task.clone();
     updated_task.deleted_at = Some(jiff::Timestamp::now());
+    updated_task.modified_at = crate::sync_clock::next_modified_at();
 
     // Update in store
     store.tasks.insert(task_id, updated_task.clone());
@@ -486,6 +506,7 @@ pub fn restore_task(
     let task_id = task.id;
     let mut restored_task = task.clone();
     restored_task.deleted_at = None;
+    restored_task.modified_at = crate::sync_clock::next_modified_at();
 
     // Update in store
     store.tasks.insert(task_id, restored_task.clone());
@@ -687,7 +708,7 @@ pub fn edit_task(
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
-        modified_at: task.modified_at.clone(),
+        modified_at: crate::sync_clock::next_modified_at(),
     };
 
     let task_id = task.id;
@@ -704,16 +725,26 @@ pub fn edit_task(
 
 /// Parse when string to When enum
 fn parse_when_string(s: &str) -> Result<When, ()> {
+    use crate::date_parser::parse_natural_date;
+    use jiff::Zoned;
+
     match s.to_lowercase().as_str() {
         "inbox" => Ok(When::Inbox),
-        "today" => Ok(When::Today { evening: false }),
-        "today-evening" => Ok(When::Today { evening: true }),
-        "anytime" => Ok(When::Anytime),
+        "today" => {
+            let today_date = Zoned::now().date();
+            Ok(When::Scheduled {
+                date: today_date,
+                evening: None,
+            })
+        }
         "someday" => Ok(When::Someday),
         _ => {
-            // Try to parse as date
-            s.parse::<Date>()
-                .map(|date| When::Scheduled { date })
+            // Try to parse as natural language date
+            parse_natural_date(s)
+                .map(|date| When::Scheduled {
+                    date,
+                    evening: None,
+                })
                 .map_err(|_| ())
         }
     }
@@ -1111,14 +1142,20 @@ mod tests {
         let mut store = Store::default();
         let task = create_test_task(&mut store, "Test Task");
 
+        let today = jiff::Zoned::now().date();
         let result = move_task(
             &mut store,
             &storage,
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Today { evening: false },
+                when: Some(When::Scheduled {
+                    date: today,
+                    evening: None,
+                }),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1127,7 +1164,13 @@ mod tests {
 
         assert!(result.is_ok());
         let moved = result.unwrap();
-        assert!(matches!(moved.when, When::Today { evening: false }));
+        assert!(matches!(
+            moved.when,
+            When::Scheduled {
+                date: _,
+                evening: None
+            }
+        ));
     }
 
     #[test]
@@ -1142,8 +1185,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Someday,
+                when: Some(When::Someday),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1155,7 +1200,8 @@ mod tests {
     }
 
     #[test]
-    fn test_move_task_to_anytime() {
+    fn test_move_task_to_someday_legacy() {
+        // Test that demonstrates Someday behavior (Anytime was replaced with Someday)
         let storage = MockStorage::new();
         let mut store = Store::default();
         let task = create_test_task(&mut store, "Test Task");
@@ -1166,8 +1212,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Anytime,
+                when: Some(When::Someday),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1175,7 +1223,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert!(matches!(result.unwrap().when, When::Anytime));
+        assert!(matches!(result.unwrap().when, When::Someday));
     }
 
     #[test]
@@ -1191,8 +1239,13 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Scheduled { date },
+                when: Some(When::Scheduled {
+                    date,
+                    evening: None,
+                }),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1204,10 +1257,11 @@ mod tests {
     }
 
     #[test]
-    fn test_move_task_to_evening() {
+    fn test_move_task_with_evening() {
         let storage = MockStorage::new();
         let mut store = Store::default();
         let task = create_test_task(&mut store, "Test Task");
+        let today = jiff::Zoned::now().date();
 
         let result = move_task(
             &mut store,
@@ -1215,8 +1269,13 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Today { evening: true },
+                when: Some(When::Scheduled {
+                    date: today,
+                    evening: Some(true),
+                }),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1226,7 +1285,10 @@ mod tests {
         assert!(result.is_ok());
         assert!(matches!(
             result.unwrap().when,
-            When::Today { evening: true }
+            When::Scheduled {
+                evening: Some(true),
+                ..
+            }
         ));
     }
 
@@ -1243,8 +1305,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: Some("New".to_string()),
                 area: None,
                 tags: vec![],
@@ -1268,8 +1332,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: Some("personal".to_string()),
                 tags: vec![],
@@ -1292,8 +1358,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: Some("Updated notes".to_string()),
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1316,8 +1384,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec!["new-tag".to_string()],
@@ -1339,8 +1409,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: 999,
                 notes: None,
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: None,
                 tags: vec![],
@@ -1362,8 +1434,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: Some("NonExistent".to_string()),
                 area: None,
                 tags: vec![],
@@ -1385,8 +1459,10 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: When::Inbox,
+                when: Some(When::Inbox),
                 deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
                 project: None,
                 area: Some("NonExistent".to_string()),
                 tags: vec![],

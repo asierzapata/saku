@@ -54,14 +54,11 @@ fn upcoming_empty() {
 }
 
 #[test]
-fn anytime_empty() {
+fn anytime_command_removed() {
+    // Anytime was replaced with Someday
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp)
-        .args(["anytime"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("No anytime tasks"));
+    tdo(&temp).args(["anytime"]).assert().failure(); // Command should not exist
 }
 
 #[test]
@@ -144,10 +141,7 @@ fn today_shows_today_tasks() {
 fn inbox_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp)
-        .args(["add", "Call dentist"])
-        .assert()
-        .success();
+    tdo(&temp).args(["add", "Call dentist"]).assert().success();
 
     tdo(&temp)
         .args(["inbox"])
@@ -162,7 +156,7 @@ fn upcoming_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["add", "Team meeting", "--when", "2030-06-15"])
+        .args(["add", "Team meeting", "--on", "2030-06-15"])
         .assert()
         .success();
 
@@ -174,16 +168,17 @@ fn upcoming_shows_tasks() {
 }
 
 #[test]
-fn anytime_shows_tasks() {
+fn someday_replaces_anytime() {
+    // Someday replaced Anytime
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["add", "Read a book", "--anytime"])
+        .args(["add", "Read a book", "--someday"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["anytime"])
+        .args(["someday"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Read a book"));
@@ -325,7 +320,7 @@ fn inbox_tasks_with_deadlines_appear_first() {
 
     tdo(&temp).args(["add", "NO_DEADLINE"]).assert().success();
     tdo(&temp)
-        .args(["add", "WITH_DEADLINE", "--deadline", "2030-01-01"])
+        .args(["add", "WITH_DEADLINE", "--due", "2030-01-01"])
         .assert()
         .success();
 

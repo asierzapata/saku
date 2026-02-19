@@ -104,11 +104,10 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
 fn when_to_string(when: &When) -> String {
     match when {
         When::Inbox => "inbox".to_string(),
-        When::Today { evening: false } => "today".to_string(),
-        When::Today { evening: true } => "today-evening".to_string(),
-        When::Anytime => "anytime".to_string(),
         When::Someday => "someday".to_string(),
-        When::Scheduled { date } => date.to_string(),
+        When::Scheduled { date, .. } => date.to_string(),
+        When::LegacyToday { .. } => "today".to_string(), // Should not appear after migration
+        When::LegacyAnytime => "someday".to_string(), // Converted to someday
     }
 }
 
@@ -429,7 +428,10 @@ mod tests {
             project_id: Some(project.id),
             area_id: Some(area.id),
             tags: vec!["urgent".to_string(), "bug".to_string()],
-            when: When::Today { evening: false },
+            when: When::Scheduled {
+                date: jiff::Zoned::now().date(),
+                evening: None,
+            },
             deadline: Some("2026-03-15".parse::<Date>().unwrap()),
             defer_until: None,
             checklist: vec![
@@ -458,7 +460,9 @@ mod tests {
         assert!(serialized.contains("Project: Backend API"));
         assert!(serialized.contains("Area: Work"));
         assert!(serialized.contains("Tags: urgent, bug"));
-        assert!(serialized.contains("When: today"));
+        // When should show the date (which is today's date in ISO format)
+        let today_str = jiff::Zoned::now().date().to_string();
+        assert!(serialized.contains(&format!("When: {}", today_str)));
         assert!(serialized.contains("Deadline: 2026-03-15"));
         assert!(serialized.contains("[ ] Step 1"));
         assert!(serialized.contains("[x] Step 2"));

@@ -61,6 +61,7 @@ pub fn create_project(
         name: parameters.name,
         created_at: jiff::Timestamp::now(),
         area_id,
+        modified_at: crate::sync_clock::next_modified_at(),
         ..Project::default()
     };
 
@@ -136,12 +137,14 @@ pub fn delete_project(
     for task_id in task_ids_to_delete {
         if let Some(task) = store.get_task_mut(task_id) {
             task.deleted_at = Some(now);
+            task.modified_at = crate::sync_clock::next_modified_at();
         }
     }
 
     // Mark project as deleted
     if let Some(project) = store.get_project_mut(project_id) {
         project.deleted_at = Some(now);
+        project.modified_at = crate::sync_clock::next_modified_at();
     }
 
     // Persist to storage
@@ -254,6 +257,7 @@ pub fn edit_project(
         if let Some(area_id) = new_area_id {
             project.area_id = area_id;
         }
+        project.modified_at = crate::sync_clock::next_modified_at();
     }
 
     // Persist to storage
@@ -304,6 +308,7 @@ pub fn restore_project(
     // Restore project (does NOT auto-restore tasks - user must restore them separately)
     if let Some(project) = store.get_project_mut(project_id) {
         project.deleted_at = None;
+        project.modified_at = crate::sync_clock::next_modified_at();
     }
 
     // Persist to storage

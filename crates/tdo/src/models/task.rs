@@ -42,54 +42,80 @@ pub struct Task {
     pub modified_at: HybridTimestamp,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-#[serde(tag = "type")]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "PascalCase")]
 pub enum When {
     #[default]
     Inbox,
-    Today {
-        evening: bool,
-    },
-    Someday,
-    Anytime,
     Scheduled {
         date: Date,
+        // Support migration from old Today variant with evening field
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        evening: Option<bool>,
     },
+    Someday,
+    // Legacy variants for migration - deserialize only
+    #[serde(rename = "Today", skip_serializing)]
+    LegacyToday {
+        evening: bool,
+    },
+    #[serde(rename = "Anytime", skip_serializing)]
+    LegacyAnytime,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum WhenInstantiationError {
-    #[error("Invalid schedule date format: {0}")]
-    ScheduleAtIncorrect(String),
+    #[error("Invalid schedule date format: {0} - {1}")]
+    ScheduleAtIncorrect(String, String),
 
     #[error("Conflicting scheduling flags: {}", .0.join(", "))]
     ConflictingFlags(Vec<String>),
-
-    #[error("The --evening flag can only be used with --today")]
-    EveningWithoutToday,
 }
 
 impl When {
+    /// Normalize legacy variants after deserialization
+    pub fn normalize(self) -> Self {
+        use jiff::Zoned;
+        match self {
+            When::LegacyToday { evening: _ } => {
+                // Convert old Today variant to Scheduled with today's date
+                let today = Zoned::now().date();
+                When::Scheduled {
+                    date: today,
+                    evening: None,
+                }
+            }
+            When::LegacyAnytime => When::Someday,
+            other => other,
+        }
+    }
+
     pub fn from_command_flags(
         today: bool,
-        evening: bool,
+        tomorrow: bool,
+        next_week: bool,
         someday: bool,
-        anytime: bool,
-        schedule_at: Option<String>,
+        on: Option<String>,
     ) -> Result<When, WhenInstantiationError> {
+        use crate::date_parser::parse_natural_date;
+        use jiff::Zoned;
+
         // Collect provided scheduling flags
         let mut provided_flags = Vec::new();
         if today {
             provided_flags.push("--today");
         }
+        if tomorrow {
+            provided_flags.push("--tomorrow");
+        }
+        if next_week {
+            provided_flags.push("--next-week");
+        }
         if someday {
             provided_flags.push("--someday");
         }
-        if anytime {
-            provided_flags.push("--anytime");
-        }
-        if schedule_at.is_some() {
-            provided_flags.push("--when");
+        if on.is_some() {
+            provided_flags.push("--on");
         }
 
         // Detect mutually exclusive flag conflicts
@@ -99,23 +125,50 @@ impl When {
             ));
         }
 
-        // Validate --evening usage
-        if evening && !today {
-            return Err(WhenInstantiationError::EveningWithoutToday);
-        }
-
-        // Process the valid flag (existing logic)
+        // Process the valid flag
         if today {
-            Ok(When::Today { evening })
+            let today_date = Zoned::now().date();
+            Ok(When::Scheduled {
+                date: today_date,
+                evening: None,
+            })
+        } else if tomorrow {
+            let tomorrow_date = Zoned::now()
+                .date()
+                .checked_add(jiff::Span::new().days(1))
+                .expect("Failed to calculate tomorrow");
+            Ok(When::Scheduled {
+                date: tomorrow_date,
+                evening: None,
+            })
+        } else if next_week {
+            let today_date = Zoned::now().date();
+            let days_until_next_monday = match today_date.weekday() {
+                jiff::civil::Weekday::Monday => 7,
+                jiff::civil::Weekday::Tuesday => 6,
+                jiff::civil::Weekday::Wednesday => 5,
+                jiff::civil::Weekday::Thursday => 4,
+                jiff::civil::Weekday::Friday => 3,
+                jiff::civil::Weekday::Saturday => 2,
+                jiff::civil::Weekday::Sunday => 1,
+            };
+            let next_monday = today_date
+                .checked_add(jiff::Span::new().days(days_until_next_monday))
+                .expect("Failed to calculate next week");
+            Ok(When::Scheduled {
+                date: next_monday,
+                evening: None,
+            })
         } else if someday {
             Ok(When::Someday)
-        } else if anytime {
-            Ok(When::Anytime)
-        } else if let Some(string_date) = schedule_at {
-            string_date
-                .parse()
-                .map(|date| When::Scheduled { date })
-                .map_err(|_| WhenInstantiationError::ScheduleAtIncorrect(string_date))
+        } else if let Some(date_string) = on {
+            let date = parse_natural_date(&date_string).map_err(|e| {
+                WhenInstantiationError::ScheduleAtIncorrect(date_string, e.to_string())
+            })?;
+            Ok(When::Scheduled {
+                date,
+                evening: None,
+            })
         } else {
             Ok(When::Inbox)
         }
@@ -271,5 +324,103 @@ mod tests {
         assert_eq!(ordered[0].task_number, 1);
         assert_eq!(ordered[1].task_number, 2);
         assert_eq!(ordered[2].task_number, 3);
+    }
+
+    #[test]
+    fn normalize_legacy_today_to_scheduled() {
+        let legacy = When::LegacyToday { evening: false };
+        let normalized = legacy.normalize();
+
+        match normalized {
+            When::Scheduled { date, evening } => {
+                // Should be today's date
+                let today = jiff::Zoned::now().date();
+                assert_eq!(date, today);
+                assert_eq!(evening, None);
+            }
+            _ => panic!("Expected Scheduled variant"),
+        }
+    }
+
+    #[test]
+    fn normalize_legacy_anytime_to_someday() {
+        let legacy = When::LegacyAnytime;
+        let normalized = legacy.normalize();
+        assert_eq!(normalized, When::Someday);
+    }
+
+    #[test]
+    fn normalize_preserves_non_legacy_variants() {
+        let inbox = When::Inbox;
+        assert_eq!(inbox.clone().normalize(), inbox);
+
+        let someday = When::Someday;
+        assert_eq!(someday.clone().normalize(), someday);
+
+        let scheduled = When::Scheduled {
+            date: date(2026, 3, 15),
+            evening: None,
+        };
+        assert_eq!(scheduled.clone().normalize(), scheduled);
+    }
+
+    #[test]
+    fn when_from_command_flags_today() {
+        let when = When::from_command_flags(true, false, false, false, None).unwrap();
+        let today = jiff::Zoned::now().date();
+
+        match when {
+            When::Scheduled { date, evening } => {
+                assert_eq!(date, today);
+                assert_eq!(evening, None);
+            }
+            _ => panic!("Expected Scheduled variant"),
+        }
+    }
+
+    #[test]
+    fn when_from_command_flags_on_date() {
+        let when =
+            When::from_command_flags(false, false, false, false, Some("2026-03-15".to_string()))
+                .unwrap();
+
+        match when {
+            When::Scheduled {
+                date: schedule_date,
+                evening,
+            } => {
+                assert_eq!(schedule_date, date(2026, 3, 15));
+                assert_eq!(evening, None);
+            }
+            _ => panic!("Expected Scheduled variant"),
+        }
+    }
+
+    #[test]
+    fn when_from_command_flags_conflicting() {
+        let result = When::from_command_flags(true, true, false, false, None);
+        assert!(result.is_err());
+
+        match result {
+            Err(WhenInstantiationError::ConflictingFlags(_)) => {}
+            _ => panic!("Expected ConflictingFlags error"),
+        }
+    }
+
+    #[test]
+    fn when_from_command_flags_natural_language() {
+        // Test tomorrow
+        let when = When::from_command_flags(false, true, false, false, None).unwrap();
+        let tomorrow = jiff::Zoned::now()
+            .date()
+            .checked_add(jiff::Span::new().days(1))
+            .unwrap();
+
+        match when {
+            When::Scheduled { date, .. } => {
+                assert_eq!(date, tomorrow);
+            }
+            _ => panic!("Expected Scheduled variant"),
+        }
     }
 }

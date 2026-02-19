@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use clap_complete;
 use colored::*;
 
 use saku_tdo::{
@@ -49,9 +50,6 @@ enum Commands {
     /// Show upcoming tasks (future-dated)
     Upcoming,
 
-    /// Show anytime tasks
-    Anytime,
-
     /// Show someday tasks
     Someday,
 
@@ -73,25 +71,25 @@ enum Commands {
         #[arg(long)]
         today: bool,
 
-        /// Schedule for today (evening)
+        /// Schedule for tomorrow
         #[arg(long)]
-        evening: bool,
+        tomorrow: bool,
+
+        /// Schedule for next week (Monday of next week)
+        #[arg(long)]
+        next_week: bool,
 
         /// Defer to someday
         #[arg(long)]
         someday: bool,
 
-        /// Available anytime (no specific date)
+        /// Schedule for a specific date (e.g., "monday", "next friday", "2026-03-15")
         #[arg(long)]
-        anytime: bool,
+        on: Option<String>,
 
-        /// Schedule for a specific date (e.g., "friday", "2025-03-01")
-        #[arg(short, long)]
-        when: Option<String>,
-
-        /// Set a hard deadline
-        #[arg(short, long)]
-        deadline: Option<String>,
+        /// Set a hard deadline (e.g., "friday", "2026-03-20")
+        #[arg(long)]
+        due: Option<String>,
 
         /// Assign to a project
         #[arg(short, long)]
@@ -119,25 +117,33 @@ enum Commands {
         #[arg(long)]
         today: bool,
 
-        /// Schedule for today (evening)
+        /// Schedule for tomorrow
         #[arg(long)]
-        evening: bool,
+        tomorrow: bool,
+
+        /// Schedule for next week (Monday of next week)
+        #[arg(long)]
+        next_week: bool,
 
         /// Defer to someday
         #[arg(long)]
         someday: bool,
 
-        /// Available anytime (no specific date)
+        /// Schedule for a specific date (e.g., "monday", "next friday", "2026-03-15")
         #[arg(long)]
-        anytime: bool,
+        on: Option<String>,
 
-        /// Schedule for a specific date (e.g., "friday", "2025-03-01")
-        #[arg(short, long)]
-        when: Option<String>,
+        /// Set a hard deadline (e.g., "friday", "2026-03-20")
+        #[arg(long)]
+        due: Option<String>,
 
-        /// Set a hard deadline
-        #[arg(short, long)]
-        deadline: Option<String>,
+        /// Remove scheduled date
+        #[arg(long)]
+        clear_schedule: bool,
+
+        /// Remove deadline
+        #[arg(long)]
+        clear_deadline: bool,
 
         /// Assign to a project
         #[arg(short, long)]
@@ -193,6 +199,13 @@ enum Commands {
     List {
         #[command(subcommand)]
         entity: ListEntity,
+    },
+
+    /// Generate shell completion script
+    Completion {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
     },
 }
 
@@ -284,6 +297,39 @@ enum ListEntity {
     Tags,
 }
 
+/// Check if a command is a mutating (write) command that should trigger sync.
+fn is_mutating_command(cmd: &Option<Commands>) -> bool {
+    matches!(
+        cmd,
+        Some(
+            Commands::Add { .. }
+                | Commands::Move { .. }
+                | Commands::Done { .. }
+                | Commands::Delete { .. }
+                | Commands::Restore { .. }
+                | Commands::Create { .. }
+                | Commands::Remove { .. }
+                | Commands::Edit { .. }
+        )
+    )
+}
+
+/// Attempt to sync after a mutation, if TDO_SYNC_DIR is set.
+/// Sync is best-effort: errors are printed as warnings but never abort.
+fn try_sync_after_mutation(storage_path: &std::path::Path) {
+    if let Some(sync_dir) = std::env::var_os("TDO_SYNC_DIR") {
+        let sync_dir = PathBuf::from(sync_dir);
+        // Phase 3: hardcoded dev passphrase
+        let passphrase = b"saku-dev-passphrase";
+        match saku_sync::try_flush_if_online(storage_path, passphrase, &sync_dir) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Warning: sync failed: {}", e);
+            }
+        }
+    }
+}
+
 fn main() {
     // Initialize logging if feature is enabled
     #[cfg(feature = "logging")]
@@ -298,6 +344,9 @@ fn main() {
     let _span = tracing::info_span!("tdo_app", version = env!("CARGO_PKG_VERSION")).entered();
 
     let cli = Cli::parse();
+
+    // Check if this is a mutating command (for post-mutation sync)
+    let should_sync = is_mutating_command(&cli.command);
 
     // Ensure device_id exists (created on first run, used by sync in the future)
     if let Err(e) = saku_storage::device::get_or_create_device_id() {
@@ -322,7 +371,7 @@ fn main() {
         });
     }
 
-    let storage = JsonFileStorage::new(storage_path);
+    let storage = JsonFileStorage::new(storage_path.clone());
 
     let mut store = match storage.load() {
         Ok(store) => store,
@@ -336,35 +385,46 @@ fn main() {
         Some(Commands::Today) => {
             let today = jiff::Zoned::now().date();
 
-            // Collect today tasks
-            let today_regular: Vec<_> = store
-                .get_active_tasks()
-                .filter(|t| matches!(t.when, When::Today { evening: false }))
-                .filter(|t| t.completed_at.is_none())
-                .collect();
-            let today_regular = saku_tdo::models::task::order_tasks(today_regular);
-
-            let today_evening: Vec<_> = store
-                .get_active_tasks()
-                .filter(|t| matches!(t.when, When::Today { evening: true }))
-                .filter(|t| t.completed_at.is_none())
-                .collect();
-            let today_evening = saku_tdo::models::task::order_tasks(today_evening);
-
-            // Collect overdue tasks
+            // Collect overdue tasks (scheduled or deadline < today)
             let overdue_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
-                    if let When::Scheduled { date } = t.when {
-                        date < today && t.completed_at.is_none()
-                    } else {
-                        false
+                    t.completed_at.is_none() && {
+                        let scheduled_overdue = match t.when {
+                            When::Scheduled { date, .. } => date < today,
+                            _ => false,
+                        };
+                        let deadline_overdue = t.deadline.map_or(false, |d| d < today);
+                        scheduled_overdue || deadline_overdue
                     }
                 })
                 .collect();
             let overdue_tasks = saku_tdo::models::task::order_tasks(overdue_tasks);
+            
+            // Collect today tasks (scheduled or deadline == today, excluding overdue)
+            let today_current: Vec<_> = store
+                .get_active_tasks()
+                .filter(|t| {
+                    t.completed_at.is_none() && {
+                        let scheduled_today = match t.when {
+                            When::Scheduled { date, .. } => date == today,
+                            _ => false,
+                        };
+                        let deadline_today = t.deadline.map_or(false, |d| d == today);
+                        
+                        // Check if not already in overdue
+                        let is_overdue = match t.when {
+                            When::Scheduled { date, .. } if date < today => true,
+                            _ => t.deadline.map_or(false, |d| d < today)
+                        };
+                        
+                        (scheduled_today || deadline_today) && !is_overdue
+                    }
+                })
+                .collect();
+            let today_current = saku_tdo::models::task::order_tasks(today_current);
 
-            let total = today_regular.len() + today_evening.len() + overdue_tasks.len();
+            let total = overdue_tasks.len() + today_current.len();
 
             if total == 0 {
                 println!("No tasks for today");
@@ -382,17 +442,9 @@ fn main() {
                     }
                 }
 
-                // Show regular today tasks
-                if !today_regular.is_empty() {
-                    for task in today_regular {
-                        saku_tdo::ui::render_task_line(task, &store);
-                    }
-                }
-
-                // Show evening tasks
-                if !today_evening.is_empty() {
-                    saku_tdo::ui::render_section_header("Evening");
-                    for task in today_evening {
+                // Show today tasks
+                if !today_current.is_empty() {
+                    for task in today_current {
                         saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
@@ -413,25 +465,6 @@ fn main() {
             } else {
                 saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                 for task in inbox_tasks {
-                    saku_tdo::ui::render_task_line(task, &store);
-                }
-            }
-        }
-        Some(Commands::Anytime) => {
-            // Filter anytime tasks
-            let anytime_tasks: Vec<_> = store
-                .get_active_tasks()
-                .filter(|t| matches!(t.when, When::Anytime))
-                .filter(|t| t.completed_at.is_none())
-                .collect();
-            let anytime_tasks = saku_tdo::models::task::order_tasks(anytime_tasks);
-
-            // Display
-            if anytime_tasks.is_empty() {
-                println!("No anytime tasks");
-            } else {
-                saku_tdo::ui::render_view_header("Anytime", anytime_tasks.len());
-                for task in anytime_tasks {
                     saku_tdo::ui::render_task_line(task, &store);
                 }
             }
@@ -472,11 +505,9 @@ fn main() {
                 for task in &all_tasks {
                     let group = match &task.when {
                         When::Inbox => "Inbox",
-                        When::Today { evening: false } => "Today",
-                        When::Today { evening: true } => "Today (Evening)",
                         When::Someday => "Someday",
-                        When::Anytime => "Anytime",
-                        When::Scheduled { date: _ } => "Scheduled",
+                        When::Scheduled { date: _, .. } => "Scheduled",
+                        When::LegacyToday { .. } | When::LegacyAnytime => "Legacy", // Should not appear after migration
                     };
                     grouped.entry(group.to_string()).or_default().push(task);
                 }
@@ -484,10 +515,7 @@ fn main() {
                 // Display in a logical order
                 let order = vec![
                     "Inbox",
-                    "Today",
-                    "Today (Evening)",
                     "Scheduled",
-                    "Anytime",
                     "Someday",
                 ];
 
@@ -507,14 +535,17 @@ fn main() {
 
             let today = jiff::Zoned::now().date();
 
-            // Collect upcoming tasks (scheduled in the future)
+            // Collect upcoming tasks (scheduled or deadline in the future)
             let upcoming_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
-                    if let When::Scheduled { date } = t.when {
-                        date > today && t.completed_at.is_none()
-                    } else {
-                        false
+                    t.completed_at.is_none() && {
+                        let scheduled_future = match t.when {
+                            When::Scheduled { date, .. } => date > today,
+                            _ => false,
+                        };
+                        let deadline_future = t.deadline.map_or(false, |d| d > today);
+                        scheduled_future || deadline_future
                     }
                 })
                 .collect();
@@ -522,13 +553,26 @@ fn main() {
             if upcoming_tasks.is_empty() {
                 println!("No upcoming tasks");
             } else {
-                // Group by date
+                // Group by date (use earliest of scheduled or deadline)
                 let mut grouped: BTreeMap<Date, Vec<&saku_tdo::models::task::Task>> =
                     BTreeMap::new();
 
                 for task in &upcoming_tasks {
-                    if let When::Scheduled { date } = task.when {
-                        grouped.entry(date).or_default().push(task);
+                    let date = match task.when {
+                        When::Scheduled { date, .. } => Some(date),
+                        _ => None,
+                    };
+                    let deadline = task.deadline;
+                    
+                    // Use earliest date
+                    let key_date = match (date, deadline) {
+                        (Some(d1), Some(d2)) => Some(d1.min(d2)),
+                        (Some(d), None) | (None, Some(d)) => Some(d),
+                        (None, None) => None,
+                    };
+                    
+                    if let Some(key) = key_date {
+                        grouped.entry(key).or_default().push(task);
                     }
                 }
 
@@ -644,24 +688,21 @@ fn main() {
         Some(Commands::Add {
             title,
             today,
-            evening,
+            tomorrow,
+            next_week,
             someday,
-            anytime,
-            when: when_str,
-            deadline,
+            on,
+            due,
             project,
             area,
             tag,
             notes,
         }) => {
             // Parse when flags
-            let when = match When::from_command_flags(today, evening, someday, anytime, when_str) {
+            let when = match When::from_command_flags(today, tomorrow, next_week, someday, on) {
                 Ok(w) => w,
-                Err(WhenInstantiationError::ScheduleAtIncorrect(date_str)) => {
-                    eprintln!("Error: Invalid schedule date format: '{}'", date_str);
-                    eprintln!(
-                        "\nExpected format: YYYY-MM-DD (e.g., 2025-03-01) or relative dates like 'friday', 'next monday'"
-                    );
+                Err(WhenInstantiationError::ScheduleAtIncorrect(date_str, error)) => {
+                    eprintln!("Error: Invalid schedule date '{}': {}", date_str, error);
                     std::process::exit(1);
                 }
                 Err(WhenInstantiationError::ConflictingFlags(flags)) => {
@@ -669,14 +710,10 @@ fn main() {
                     eprintln!("\nConflicting flags provided: {}", flags.join(", "));
                     eprintln!("\nPlease use only one of:");
                     eprintln!("  --today       Schedule for today");
+                    eprintln!("  --tomorrow    Schedule for tomorrow");
+                    eprintln!("  --next-week   Schedule for next Monday");
                     eprintln!("  --someday     Defer to someday");
-                    eprintln!("  --anytime     Available anytime");
-                    eprintln!("  --when DATE   Schedule for a specific date");
-                    std::process::exit(1);
-                }
-                Err(WhenInstantiationError::EveningWithoutToday) => {
-                    eprintln!("Error: The --evening flag can only be used with --today");
-                    eprintln!("\nExample: tdo add 'Review PRs' --today --evening");
+                    eprintln!("  --on DATE     Schedule for a specific date");
                     std::process::exit(1);
                 }
             };
@@ -686,7 +723,7 @@ fn main() {
                 title,
                 notes,
                 when,
-                deadline,
+                deadline: due,
                 project,
                 area,
                 tags: tag,
@@ -751,7 +788,6 @@ fn main() {
                 }
                 Err(AddTaskError::InvalidDeadline(date_str, error)) => {
                     eprintln!("Error: Invalid deadline '{}': {}", date_str, error);
-                    eprintln!("\nExpected format: YYYY-MM-DD (e.g., 2025-03-01)");
                     std::process::exit(1);
                 }
                 Err(AddTaskError::Storage(e)) => {
@@ -1078,41 +1114,40 @@ fn main() {
         Some(Commands::Move {
             task_number,
             today,
-            evening,
+            tomorrow,
+            next_week,
             someday,
-            anytime,
-            when: when_str,
-            deadline,
+            on,
+            due,
+            clear_schedule,
+            clear_deadline,
             project,
             area,
             tag,
             notes,
         }) => {
-            // Parse when flags
-            let when = match When::from_command_flags(today, evening, someday, anytime, when_str) {
-                Ok(w) => w,
-                Err(WhenInstantiationError::ScheduleAtIncorrect(date_str)) => {
-                    eprintln!("Error: Invalid schedule date format: '{}'", date_str);
-                    eprintln!(
-                        "\nExpected format: YYYY-MM-DD (e.g., 2025-03-01) or relative dates like 'friday', 'next monday'"
-                    );
-                    std::process::exit(1);
+            // Parse when flags (if any scheduling flag is provided)
+            let when = if today || tomorrow || next_week || someday || on.is_some() {
+                match When::from_command_flags(today, tomorrow, next_week, someday, on) {
+                    Ok(w) => Some(w),
+                    Err(WhenInstantiationError::ScheduleAtIncorrect(date_str, error)) => {
+                        eprintln!("Error: Invalid schedule date '{}': {}", date_str, error);
+                        std::process::exit(1);
+                    }
+                    Err(WhenInstantiationError::ConflictingFlags(flags)) => {
+                        eprintln!("Error: Cannot use multiple scheduling flags together");
+                        eprintln!("\nConflicting flags provided: {}", flags.join(", "));
+                        eprintln!("\nPlease use only one of:");
+                        eprintln!("  --today       Schedule for today");
+                        eprintln!("  --tomorrow    Schedule for tomorrow");
+                        eprintln!("  --next-week   Schedule for next Monday");
+                        eprintln!("  --someday     Defer to someday");
+                        eprintln!("  --on DATE     Schedule for a specific date");
+                        std::process::exit(1);
+                    }
                 }
-                Err(WhenInstantiationError::ConflictingFlags(flags)) => {
-                    eprintln!("Error: Cannot use multiple scheduling flags together");
-                    eprintln!("\nConflicting flags provided: {}", flags.join(", "));
-                    eprintln!("\nPlease use only one of:");
-                    eprintln!("  --today       Schedule for today");
-                    eprintln!("  --someday     Defer to someday");
-                    eprintln!("  --anytime     Available anytime");
-                    eprintln!("  --when DATE   Schedule for a specific date");
-                    std::process::exit(1);
-                }
-                Err(WhenInstantiationError::EveningWithoutToday) => {
-                    eprintln!("Error: The --evening flag can only be used with --today");
-                    eprintln!("\nExample: tdo add 'Review PRs' --today --evening");
-                    std::process::exit(1);
-                }
+            } else {
+                None
             };
 
             let parsed_task_number = match task_number.parse::<u64>() {
@@ -1128,7 +1163,9 @@ fn main() {
                 task_number: parsed_task_number,
                 notes,
                 when,
-                deadline,
+                deadline: due,
+                clear_schedule,
+                clear_deadline,
                 project,
                 area,
                 tags: tag,
@@ -1218,7 +1255,6 @@ fn main() {
                 }
                 Err(MoveTaskError::InvalidDeadline(date_str, error)) => {
                     eprintln!("Error: Invalid deadline '{}': {}", date_str, error);
-                    eprintln!("\nExpected format: YYYY-MM-DD (e.g., 2025-03-01)");
                     std::process::exit(1);
                 }
                 Err(MoveTaskError::Storage(e)) => {
@@ -1721,35 +1757,46 @@ fn main() {
             // Default: show today view (same as `tdo today`)
             let today = jiff::Zoned::now().date();
 
-            // Collect today tasks
-            let today_regular: Vec<_> = store
-                .get_active_tasks()
-                .filter(|t| matches!(t.when, When::Today { evening: false }))
-                .filter(|t| t.completed_at.is_none())
-                .collect();
-            let today_regular = saku_tdo::models::task::order_tasks(today_regular);
-
-            let today_evening: Vec<_> = store
-                .get_active_tasks()
-                .filter(|t| matches!(t.when, When::Today { evening: true }))
-                .filter(|t| t.completed_at.is_none())
-                .collect();
-            let today_evening = saku_tdo::models::task::order_tasks(today_evening);
-
-            // Collect overdue tasks
+            // Collect overdue tasks (scheduled or deadline < today)
             let overdue_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
-                    if let When::Scheduled { date } = t.when {
-                        date < today && t.completed_at.is_none()
-                    } else {
-                        false
+                    t.completed_at.is_none() && {
+                        let scheduled_overdue = match t.when {
+                            When::Scheduled { date, .. } => date < today,
+                            _ => false,
+                        };
+                        let deadline_overdue = t.deadline.map_or(false, |d| d < today);
+                        scheduled_overdue || deadline_overdue
                     }
                 })
                 .collect();
             let overdue_tasks = saku_tdo::models::task::order_tasks(overdue_tasks);
+            
+            // Collect today tasks (scheduled or deadline == today, excluding overdue)
+            let today_current: Vec<_> = store
+                .get_active_tasks()
+                .filter(|t| {
+                    t.completed_at.is_none() && {
+                        let scheduled_today = match t.when {
+                            When::Scheduled { date, .. } => date == today,
+                            _ => false,
+                        };
+                        let deadline_today = t.deadline.map_or(false, |d| d == today);
+                        
+                        // Check if not already in overdue
+                        let is_overdue = match t.when {
+                            When::Scheduled { date, .. } if date < today => true,
+                            _ => t.deadline.map_or(false, |d| d < today)
+                        };
+                        
+                        (scheduled_today || deadline_today) && !is_overdue
+                    }
+                })
+                .collect();
+            let today_current = saku_tdo::models::task::order_tasks(today_current);
 
-            let total = today_regular.len() + today_evening.len() + overdue_tasks.len();
+            let total = overdue_tasks.len() + today_current.len();
 
             if total == 0 {
                 println!("No tasks for today");
@@ -1767,21 +1814,18 @@ fn main() {
                     }
                 }
 
-                // Show regular today tasks
-                if !today_regular.is_empty() {
-                    for task in today_regular {
-                        saku_tdo::ui::render_task_line(task, &store);
-                    }
-                }
-
-                // Show evening tasks
-                if !today_evening.is_empty() {
-                    saku_tdo::ui::render_section_header("Evening");
-                    for task in today_evening {
+                // Show today tasks
+                if !today_current.is_empty() {
+                    for task in today_current {
                         saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
             }
         }
+    }
+
+    // After mutation, attempt sync if TDO_SYNC_DIR is set
+    if should_sync {
+        try_sync_after_mutation(&storage_path);
     }
 }
