@@ -295,10 +295,7 @@ fn main() {
 
     // Create root span for the entire application
     #[cfg(feature = "logging")]
-    let _span = tracing::info_span!(
-        "tdo_app",
-        version = env!("CARGO_PKG_VERSION")
-    ).entered();
+    let _span = tracing::info_span!("tdo_app", version = env!("CARGO_PKG_VERSION")).entered();
 
     let cli = Cli::parse();
 
@@ -376,14 +373,14 @@ fn main() {
                 if !overdue_tasks.is_empty() {
                     saku_tdo::ui::render_section_header("Overdue");
                     for task in overdue_tasks {
-                        saku_tdo::ui::render_task_line(task, &store, true);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
 
                 // Show regular today tasks
                 if !today_regular.is_empty() {
                     for task in today_regular {
-                        saku_tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
 
@@ -391,7 +388,7 @@ fn main() {
                 if !today_evening.is_empty() {
                     saku_tdo::ui::render_section_header("Evening");
                     for task in today_evening {
-                        saku_tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
             }
@@ -411,7 +408,7 @@ fn main() {
             } else {
                 saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                 for task in inbox_tasks {
-                    saku_tdo::ui::render_task_line(task, &store, false);
+                    saku_tdo::ui::render_task_line(task, &store);
                 }
             }
         }
@@ -430,7 +427,7 @@ fn main() {
             } else {
                 saku_tdo::ui::render_view_header("Anytime", anytime_tasks.len());
                 for task in anytime_tasks {
-                    saku_tdo::ui::render_task_line(task, &store, false);
+                    saku_tdo::ui::render_task_line(task, &store);
                 }
             }
         }
@@ -449,7 +446,7 @@ fn main() {
             } else {
                 saku_tdo::ui::render_view_header("Someday", someday_tasks.len());
                 for task in someday_tasks {
-                    saku_tdo::ui::render_task_line(task, &store, false);
+                    saku_tdo::ui::render_task_line(task, &store);
                 }
             }
         }
@@ -493,8 +490,7 @@ fn main() {
                     if let Some(tasks) = grouped.get(group_name) {
                         saku_tdo::ui::render_section_header(group_name);
                         for task in tasks {
-                            let is_overdue = saku_tdo::ui::is_overdue(task);
-                            saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                            saku_tdo::ui::render_task_line(task, &store);
                         }
                     }
                 }
@@ -538,7 +534,7 @@ fn main() {
                     tasks.sort_by_key(|t| t.task_number);
                     saku_tdo::ui::render_section_header(&saku_tdo::ui::format_date_header(date));
                     for task in tasks {
-                        saku_tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
             }
@@ -588,7 +584,7 @@ fn main() {
                     saku_tdo::ui::render_section_header(&month_header);
 
                     for task in sorted_tasks {
-                        saku_tdo::ui::render_task_line_with_completion_date(task, &store, false);
+                        saku_tdo::ui::render_task_line_with_completion_date(task, &store);
                     }
                 }
             }
@@ -613,7 +609,7 @@ fn main() {
                         deleted_tasks.len()
                     ));
                     for task in deleted_tasks {
-                        saku_tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
 
@@ -682,7 +678,7 @@ fn main() {
 
             // Build parameters
             let params = AddTaskParameters {
-                title: title.clone(),
+                title,
                 notes,
                 when,
                 deadline,
@@ -791,7 +787,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Edit { entity: EditEntity::Area { name, new_name } }) => {
+        Some(Commands::Edit {
+            entity: EditEntity::Area { name, new_name },
+        }) => {
             let params = EditAreaParameters { name, new_name };
             match edit_area(&mut store, &storage, params) {
                 Ok(area) => {
@@ -810,7 +808,10 @@ fn main() {
                     std::process::exit(1);
                 }
                 Err(EditAreaError::AmbiguousAreaName(query, names)) => {
-                    eprintln!("Error: Area name '{}' is ambiguous. Multiple areas found:", query);
+                    eprintln!(
+                        "Error: Area name '{}' is ambiguous. Multiple areas found:",
+                        query
+                    );
                     for name in names {
                         eprintln!("  - {}", name);
                     }
@@ -827,8 +828,19 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Edit { entity: EditEntity::Project { name, new_name, area } }) => {
-            let params = EditProjectParameters { name, new_name, area };
+        Some(Commands::Edit {
+            entity:
+                EditEntity::Project {
+                    name,
+                    new_name,
+                    area,
+                },
+        }) => {
+            let params = EditProjectParameters {
+                name,
+                new_name,
+                area,
+            };
             match edit_project(&mut store, &storage, params) {
                 Ok(project) => {
                     println!("✓ Project updated: {}", project.name);
@@ -846,7 +858,10 @@ fn main() {
                     std::process::exit(1);
                 }
                 Err(EditProjectError::AmbiguousProjectName(query, names)) => {
-                    eprintln!("Error: Project name '{}' is ambiguous. Multiple projects found:", query);
+                    eprintln!(
+                        "Error: Project name '{}' is ambiguous. Multiple projects found:",
+                        query
+                    );
                     for name in names {
                         eprintln!("  - {}", name);
                     }
@@ -859,7 +874,7 @@ fn main() {
                 }
                 Err(EditProjectError::AreaNotFound(area)) => {
                     eprintln!("Error: Area '{}' not found", area);
-                    
+
                     let areas: Vec<_> = store.get_active_areas().collect();
                     if !areas.is_empty() {
                         eprintln!("\nAvailable areas:");
@@ -870,7 +885,10 @@ fn main() {
                     std::process::exit(1);
                 }
                 Err(EditProjectError::AmbiguousAreaName(query, names)) => {
-                    eprintln!("Error: Area name '{}' is ambiguous. Multiple areas found:", query);
+                    eprintln!(
+                        "Error: Area name '{}' is ambiguous. Multiple areas found:",
+                        query
+                    );
                     for name in names {
                         eprintln!("  - {}", name);
                     }
@@ -883,9 +901,11 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Edit { entity: EditEntity::Task {
-            task_number_or_fuzzy_name,
-        } }) => {
+        Some(Commands::Edit {
+            entity: EditEntity::Task {
+                task_number_or_fuzzy_name,
+            },
+        }) => {
             let params = EditTaskParameters {
                 task_number_or_fuzzy_name,
             };
@@ -1202,7 +1222,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Create { entity: CreateEntity::Area { name } }) => {
+        Some(Commands::Create {
+            entity: CreateEntity::Area { name },
+        }) => {
             let params = CreateAreaParameters { name };
             match create_area(&mut store, &storage, params) {
                 Ok(area) => {
@@ -1218,7 +1240,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Remove { entity: RemoveEntity::Area { name } }) => {
+        Some(Commands::Remove {
+            entity: RemoveEntity::Area { name },
+        }) => {
             let params = DeleteAreaParameters { name };
 
             match delete_area(&mut store, &storage, params) {
@@ -1252,7 +1276,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::List { entity: ListEntity::Areas }) => {
+        Some(Commands::List {
+            entity: ListEntity::Areas,
+        }) => {
             // Collect all active areas
             let mut areas: Vec<_> = store.get_active_areas().collect();
 
@@ -1326,7 +1352,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Create { entity: CreateEntity::Project { name, area } }) => {
+        Some(Commands::Create {
+            entity: CreateEntity::Project { name, area },
+        }) => {
             let params = CreateProjectParameters { name, area };
             match create_project(&mut store, &storage, params) {
                 Ok(project) => {
@@ -1354,7 +1382,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Remove { entity: RemoveEntity::Project { name } }) => {
+        Some(Commands::Remove {
+            entity: RemoveEntity::Project { name },
+        }) => {
             let params = DeleteProjectParameters { name };
 
             match delete_project(&mut store, &storage, params) {
@@ -1394,7 +1424,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::List { entity: ListEntity::Projects }) => {
+        Some(Commands::List {
+            entity: ListEntity::Projects,
+        }) => {
             // Collect all active projects
             let mut projects: Vec<_> = store.get_active_projects().collect();
 
@@ -1445,7 +1477,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Show { entity: ShowEntity::Project { name } }) => {
+        Some(Commands::Show {
+            entity: ShowEntity::Project { name },
+        }) => {
             let matching: Vec<_> = store
                 .get_active_projects()
                 .filter(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
@@ -1499,12 +1533,13 @@ fn main() {
             } else {
                 saku_tdo::ui::render_view_header(&header, tasks.len());
                 for task in tasks {
-                    let is_overdue = saku_tdo::ui::is_overdue(task);
-                    saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                    saku_tdo::ui::render_task_line(task, &store);
                 }
             }
         }
-        Some(Commands::Show { entity: ShowEntity::Area { name } }) => {
+        Some(Commands::Show {
+            entity: ShowEntity::Area { name },
+        }) => {
             let matching: Vec<_> = store
                 .get_active_areas()
                 .filter(|a| a.name.to_lowercase().contains(&name.to_lowercase()))
@@ -1577,8 +1612,7 @@ fn main() {
 
                 // Display direct area tasks (without section header)
                 for task in &direct_tasks {
-                    let is_overdue = saku_tdo::ui::is_overdue(task);
-                    saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                    saku_tdo::ui::render_task_line(task, &store);
                 }
 
                 // Display tasks grouped by project
@@ -1591,15 +1625,16 @@ fn main() {
                         // First section with no direct tasks - print without leading newline
                         println!("  ─── {} ───\n", project.name.bold());
                     }
-                    
+
                     for task in tasks {
-                        let is_overdue = saku_tdo::ui::is_overdue(task);
-                        saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
             }
         }
-        Some(Commands::List { entity: ListEntity::Tags }) => {
+        Some(Commands::List {
+            entity: ListEntity::Tags,
+        }) => {
             // Collect all unique tags from active tasks
             use std::collections::HashMap;
 
@@ -1638,7 +1673,9 @@ fn main() {
                 }
             }
         }
-        Some(Commands::Show { entity: ShowEntity::Tag { name } }) => {
+        Some(Commands::Show {
+            entity: ShowEntity::Tag { name },
+        }) => {
             // Find tasks with this tag (case-insensitive)
             let mut tasks: Vec<_> = store
                 .get_active_tasks()
@@ -1671,8 +1708,7 @@ fn main() {
                 tasks.sort_by_key(|t| t.task_number);
                 saku_tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
                 for task in tasks {
-                    let is_overdue = saku_tdo::ui::is_overdue(task);
-                    saku_tdo::ui::render_task_line(task, &store, is_overdue);
+                    saku_tdo::ui::render_task_line(task, &store);
                 }
             }
         }
@@ -1722,14 +1758,14 @@ fn main() {
                 if !overdue_tasks.is_empty() {
                     saku_tdo::ui::render_section_header("Overdue");
                     for task in overdue_tasks {
-                        saku_tdo::ui::render_task_line(task, &store, true);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
 
                 // Show regular today tasks
                 if !today_regular.is_empty() {
                     for task in today_regular {
-                        saku_tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
 
@@ -1737,7 +1773,7 @@ fn main() {
                 if !today_evening.is_empty() {
                     saku_tdo::ui::render_section_header("Evening");
                     for task in today_evening {
-                        saku_tdo::ui::render_task_line(task, &store, false);
+                        saku_tdo::ui::render_task_line(task, &store);
                     }
                 }
             }

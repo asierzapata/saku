@@ -5,19 +5,151 @@ use crate::models::{store::Store, task::Task};
 
 const MAX_CONTENT_WIDTH: usize = 100;
 
+/// Represents the urgency level of a task based on its deadline or scheduled date
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TaskUrgency {
+    Completed,              // Task is done
+    OnTrack,                // Deadline >3 days away
+    ApproachingDeadline,    // Deadline 1-3 days away
+    DueToday,               // Deadline is today
+    Overdue,                // Past deadline or scheduled date
+}
+
 /// Get the terminal width, defaulting to 80 if unavailable
 fn get_terminal_width() -> usize {
     term_size::dimensions().map(|(w, _)| w).unwrap_or(80)
 }
 
-/// Get the appropriate status glyph for a task
-pub fn get_status_glyph(task: &Task, is_overdue: bool) -> ColoredString {
+/// Calculate urgency based on a date relative to today
+fn calculate_urgency_from_date(date: Date, today: Date) -> TaskUrgency {
+    if date < today {
+        return TaskUrgency::Overdue;
+    }
+    if date == today {
+        return TaskUrgency::DueToday;
+    }
+
+    let days_until = today.until(date).expect("valid date range").get_days();
+    if days_until <= 3 {
+        return TaskUrgency::ApproachingDeadline;
+    }
+
+    TaskUrgency::OnTrack
+}
+
+/// Determine the urgency level of a task based on its deadline or scheduled date
+pub fn calculate_task_urgency(task: &Task) -> TaskUrgency {
+    // Completed tasks have their own category
     if task.completed_at.is_some() {
-        "✓".dimmed()
-    } else if is_overdue {
-        "●".red()
+        return TaskUrgency::Completed;
+    }
+
+    let today = jiff::Zoned::now().date();
+
+    // Priority 1: Check deadline (if exists)
+    if let Some(deadline) = task.deadline {
+        return calculate_urgency_from_date(deadline, today);
+    }
+
+    // Priority 2: Check scheduled date
+    if let crate::models::task::When::Scheduled { date } = task.when {
+        return calculate_urgency_from_date(date, today);
+    }
+
+    // Default: On track (no specific urgency)
+    TaskUrgency::OnTrack
+}
+
+/// Format a date compactly based on proximity to today
+/// is_completion: true for completed tasks (always show full date)
+fn format_date_compact(date: Date, today: Date, is_completion: bool) -> String {
+    // Completed tasks: always show full date format (Feb 19)
+    if is_completion {
+        let formatted = date.strftime("%b %-d").to_string();
+        return format!("{:<6}", formatted); // Pad to 6 chars
+    }
+
+    // Active tasks: use proximity-based formatting
+    if date == today {
+        return "Today ".to_string(); // 6 chars
+    }
+
+    let days_diff = if date > today {
+        today.until(date).expect("valid date range").get_days()
     } else {
-        "○".normal()
+        -(date.until(today).expect("valid date range").get_days())
+    };
+
+    // Within ±7 days: show day name (Mon, Tue, etc.)
+    if days_diff.abs() <= 7 {
+        let day_name = date.strftime("%a").to_string(); // e.g., "Mon"
+        return format!("{:<6}", day_name); // Pad to 6 chars: "Mon   "
+    }
+
+    // Beyond 7 days: show "Feb 18" format
+    let formatted = date.strftime("%b %-d").to_string();
+    format!("{:<6}", formatted) // Pad to 6 chars
+}
+
+/// Get the date badge string and urgency for a task
+/// Returns None if task has no date to display
+pub fn get_task_date_badge(task: &Task) -> Option<(String, TaskUrgency)> {
+    let today = jiff::Zoned::now().date();
+
+    // Completed tasks: show completion date
+    if let Some(completed_at) = task.completed_at {
+        let completion_date = jiff::Zoned::new(completed_at, jiff::tz::TimeZone::system()).date();
+        let formatted = format_date_compact(completion_date, today, true);
+        return Some((formatted, TaskUrgency::Completed));
+    }
+
+    // Priority 1: Deadline
+    if let Some(deadline) = task.deadline {
+        let urgency = calculate_urgency_from_date(deadline, today);
+        let formatted = format_date_compact(deadline, today, false);
+        return Some((formatted, urgency));
+    }
+
+    // Priority 2: Scheduled date
+    if let crate::models::task::When::Scheduled { date } = task.when {
+        let urgency = calculate_urgency_from_date(date, today);
+        let formatted = format_date_compact(date, today, false);
+        return Some((formatted, urgency));
+    }
+
+    // Priority 3: Someday tasks (show placeholder)
+    if let crate::models::task::When::Someday = task.when {
+        return Some(("······".to_string(), TaskUrgency::OnTrack));
+    }
+
+    // No date to show
+    None
+}
+
+/// Apply colored background and text styling to date badge
+fn style_date_badge(text: &str, urgency: TaskUrgency) -> ColoredString {
+    match urgency {
+        TaskUrgency::Completed => {
+            text.truecolor(180, 180, 180) // Light gray text
+                .on_truecolor(60, 60, 60)   // Dark gray background
+                .dimmed()
+        }
+        _ => {
+            // All active tasks use consistent gray badge
+            text.truecolor(200, 200, 200)   // Light gray text
+                .on_truecolor(70, 70, 70)   // Dark gray background
+        }
+    }
+}
+
+/// Get the appropriate status glyph for a task based on urgency
+pub fn get_status_glyph(urgency: TaskUrgency) -> ColoredString {
+    match urgency {
+        TaskUrgency::Completed => "✔".dimmed(),  // U+2714 - Heavy Check Mark
+        TaskUrgency::OnTrack => "▢".green(),  // U+25A2 - Empty square
+        TaskUrgency::ApproachingDeadline => "▢".yellow(),  // U+25A2 - Empty square
+        TaskUrgency::DueToday => "▢".truecolor(255, 140, 0),  // U+25A2 - Orange square
+        TaskUrgency::Overdue => "▢".red(),  // U+25A2 - Empty square
     }
 }
 
@@ -46,76 +178,85 @@ pub fn get_task_context(task: &Task, store: &Store) -> Option<String> {
 }
 
 /// Render a single task line with ID, glyph, title, and right-aligned context
-pub fn render_task_line(task: &Task, store: &Store, is_overdue: bool) {
-    render_task_line_with_options(task, store, is_overdue, false);
+pub fn render_task_line(task: &Task, store: &Store) {
+    render_task_line_with_options(task, store, false, false);
 }
 
 /// Render a task line with optional completion date display
-pub fn render_task_line_with_completion_date(task: &Task, store: &Store, is_overdue: bool) {
-    render_task_line_with_options(task, store, is_overdue, true);
+pub fn render_task_line_with_completion_date(task: &Task, store: &Store) {
+    render_task_line_with_options(task, store, false, true);
 }
 
 /// Internal function to render a task line with various options
 fn render_task_line_with_options(
     task: &Task,
     store: &Store,
-    is_overdue: bool,
-    show_completion_date: bool,
+    _is_overdue: bool,
+    _show_completion_date: bool,
 ) {
     let terminal_width = get_terminal_width();
 
     let id_str = format!("{:>3}", task.task_number);
-    let glyph = get_status_glyph(task, is_overdue);
-    let title = &task.title;
-
+    
+    // Calculate urgency
+    let urgency = calculate_task_urgency(task);
+    
+    // Get status glyph
+    let glyph = get_status_glyph(urgency);
+    
+    // Get date badge (if applicable)
+    let date_badge = get_task_date_badge(task);
+    
+    // Style task title
     let styled_title = if task.completed_at.is_some() {
-        title.dimmed()
+        task.title.dimmed()
     } else {
-        title.white()
+        task.title.white()
     };
-
-    let styled_glyph = if task.completed_at.is_some() {
-        glyph.dimmed()
+    
+    // Build left section with optional date badge
+    let has_date_badge = date_badge.is_some();
+    let left_section = if let Some((date_str, badge_urgency)) = date_badge {
+        let styled_badge = style_date_badge(&date_str, badge_urgency);
+        format!(
+            " {}  {}  {}  {}",
+            id_str.italic().dimmed(),
+            glyph,
+            styled_badge,
+            styled_title
+        )
     } else {
-        glyph.white()
+        format!(
+            " {}  {}  {}",
+            id_str.italic().dimmed(),
+            glyph,
+            styled_title
+        )
     };
-
-    let context = get_task_context(task, store);
-
-    let left_section = format!(
-        " {}  {}  {}",
-        id_str.italic().dimmed(),
-        styled_glyph,
-        styled_title
-    );
-
+    
     let styled_left = left_section;
-
-    // Build right-aligned section with completion date and/or context
-    let right_section = if show_completion_date && task.completed_at.is_some() {
-        let completion_date = format_completion_date(task.completed_at.unwrap());
-        if let Some(ctx) = context {
-            format!("{}  ·  {}", completion_date, ctx)
-        } else {
-            completion_date
-        }
-    } else {
-        context.unwrap_or_default()
-    };
-
+    
+    // Get context for right-aligned section
+    let context = get_task_context(task, store);
+    let right_section = context.unwrap_or_default();
+    
+    // Render with dotted separator
     if !right_section.is_empty() {
         let right_dimmed = right_section.dimmed();
-
-        let left_visible_len = format!("  {}  {}  {}", id_str, " ", title).len();
-        let right_visible_len = if show_completion_date && task.completed_at.is_some() {
-            right_section.chars().count()
+        
+        // Calculate visible lengths
+        let left_visible_len = if has_date_badge {
+            // ID (3) + spaces (2) + glyph (1) + spaces (2) + badge (6) + spaces (2) + title
+            format!("  {}    {}  {}", id_str, "      ", task.title).len()
         } else {
-            right_section.len()
+            // ID (3) + spaces (2) + glyph (1) + spaces (2) + title
+            format!("  {}    {}", id_str, task.title).len()
         };
-
+        
+        let right_visible_len = right_section.len();
         let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
         let total_content = left_visible_len + right_visible_len;
-
+        
         if total_content + 4 < effective_width {
             let gap = effective_width - total_content - 2;
             let dots = format!(" {}{}", "·".repeat(gap - 2), " ");
