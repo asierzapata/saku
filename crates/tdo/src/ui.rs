@@ -126,20 +126,9 @@ pub fn get_task_date_badge(task: &Task) -> Option<(String, TaskUrgency)> {
     None
 }
 
-/// Apply colored background and text styling to date badge
-fn style_date_badge(text: &str, urgency: TaskUrgency) -> ColoredString {
-    match urgency {
-        TaskUrgency::Completed => {
-            text.truecolor(180, 180, 180) // Light gray text
-                .on_truecolor(60, 60, 60)   // Dark gray background
-                .dimmed()
-        }
-        _ => {
-            // All active tasks use consistent gray badge
-            text.truecolor(200, 200, 200)   // Light gray text
-                .on_truecolor(70, 70, 70)   // Dark gray background
-        }
-    }
+/// Apply styling to date badge - just dimmed text, no background
+fn style_date_badge(text: &str, _urgency: TaskUrgency) -> ColoredString {
+    text.dimmed()
 }
 
 /// Get the appropriate status glyph for a task based on urgency
