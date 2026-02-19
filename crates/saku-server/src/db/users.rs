@@ -132,7 +132,10 @@ pub fn revoke_device_tokens(
         "DELETE FROM refresh_tokens WHERE device_id = ?1 AND user_id = ?2",
         params![device_id, user_id],
     )?;
-    conn.execute("DELETE FROM devices WHERE id = ?1 AND user_id = ?2", params![device_id, user_id])?;
+    conn.execute(
+        "DELETE FROM devices WHERE id = ?1 AND user_id = ?2",
+        params![device_id, user_id],
+    )?;
     Ok(deleted as u64)
 }
 

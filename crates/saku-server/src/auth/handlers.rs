@@ -1,4 +1,7 @@
-use axum::{Json, extract::{Path, State}};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -47,9 +50,11 @@ pub async fn login(
     let config = state.inner.config.clone();
 
     let (user, refresh_raw) = tokio::task::spawn_blocking(move || {
-        let db = state.inner.db.lock().map_err(|_| {
-            ServerError::Internal("DB lock poisoned".to_string())
-        })?;
+        let db = state
+            .inner
+            .db
+            .lock()
+            .map_err(|_| ServerError::Internal("DB lock poisoned".to_string()))?;
 
         // Find user
         let user = users::find_user_by_email(&db, &req.email)?
@@ -75,7 +80,13 @@ pub async fn login(
             .unwrap_or_else(|_| jiff::Timestamp::now());
         let expires_at_str = expires_at.strftime("%Y-%m-%d %H:%M:%S").to_string();
 
-        users::store_refresh_token(&db, &refresh_hash, &req.device_id, &user.id, &expires_at_str)?;
+        users::store_refresh_token(
+            &db,
+            &refresh_hash,
+            &req.device_id,
+            &user.id,
+            &expires_at_str,
+        )?;
 
         Ok::<_, ServerError>((user, refresh_raw))
     })
@@ -105,13 +116,16 @@ pub async fn refresh(
     let config = state.inner.config.clone();
 
     let (user_id, device_id, new_refresh_raw) = tokio::task::spawn_blocking(move || {
-        let db = state.inner.db.lock().map_err(|_| {
-            ServerError::Internal("DB lock poisoned".to_string())
-        })?;
+        let db = state
+            .inner
+            .db
+            .lock()
+            .map_err(|_| ServerError::Internal("DB lock poisoned".to_string()))?;
 
         let token_hash = sha256_hex(&req.refresh_token);
-        let token = users::validate_refresh_token(&db, &token_hash)?
-            .ok_or_else(|| ServerError::Unauthorized("Invalid or expired refresh token".to_string()))?;
+        let token = users::validate_refresh_token(&db, &token_hash)?.ok_or_else(|| {
+            ServerError::Unauthorized("Invalid or expired refresh token".to_string())
+        })?;
 
         // Rotate: revoke old, issue new
         let new_refresh_raw = uuid::Uuid::new_v4().to_string();
@@ -170,9 +184,11 @@ pub async fn delete_device(
     let user_id = auth.user_id;
 
     tokio::task::spawn_blocking(move || {
-        let db = state.inner.db.lock().map_err(|_| {
-            ServerError::Internal("DB lock poisoned".to_string())
-        })?;
+        let db = state
+            .inner
+            .db
+            .lock()
+            .map_err(|_| ServerError::Internal("DB lock poisoned".to_string()))?;
         users::revoke_device_tokens(&db, &device_id, &user_id)?;
         Ok::<_, ServerError>(())
     })

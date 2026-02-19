@@ -26,6 +26,7 @@ pub struct PresignedUrlResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct UploadUrlRequest {
     pub path: String,
     pub content_length: Option<i64>,
@@ -38,6 +39,7 @@ pub struct UploadUrlResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct ConfirmUploadRequest {
     pub path: String,
     pub size_bytes: i64,
@@ -114,9 +116,11 @@ pub async fn confirm_upload(
     let size_bytes = req.size_bytes;
 
     tokio::task::spawn_blocking(move || {
-        let db = state.inner.db.lock().map_err(|_| {
-            ServerError::Internal("DB lock poisoned".to_string())
-        })?;
+        let db = state
+            .inner
+            .db
+            .lock()
+            .map_err(|_| ServerError::Internal("DB lock poisoned".to_string()))?;
         quota::update_usage(&db, &user_id, size_bytes)?;
         Ok::<_, ServerError>(())
     })
@@ -144,9 +148,7 @@ pub async fn metadata(
 
     Ok(Json(MetadataResponse {
         size_bytes: stat.content_length(),
-        last_modified_ms: stat
-            .last_modified()
-            .map(|t| t.timestamp_millis()),
+        last_modified_ms: stat.last_modified().map(|t| t.timestamp_millis()),
         etag: stat.etag().map(|s| s.to_string()),
     }))
 }

@@ -3,8 +3,11 @@ pub mod jwt;
 pub mod middleware;
 pub mod password;
 
-use axum::{Router, routing::{post, delete}};
 use crate::state::AppState;
+use axum::{
+    Router,
+    routing::{delete, post},
+};
 
 /// Build the auth router: `/api/v1/auth/*`
 pub fn router() -> Router<AppState> {

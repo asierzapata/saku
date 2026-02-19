@@ -8,6 +8,7 @@ pub struct StorageQuota {
 }
 
 /// Get the current storage usage for a user.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn get_quota(conn: &Connection, user_id: &str) -> Result<StorageQuota, rusqlite::Error> {
     conn.query_row(
         "SELECT user_id, used_bytes FROM storage_quota WHERE user_id = ?1",
@@ -22,11 +23,7 @@ pub fn get_quota(conn: &Connection, user_id: &str) -> Result<StorageQuota, rusql
 }
 
 /// Add bytes to a user's usage. `delta` can be negative (for deletions).
-pub fn update_usage(
-    conn: &Connection,
-    user_id: &str,
-    delta: i64,
-) -> Result<(), rusqlite::Error> {
+pub fn update_usage(conn: &Connection, user_id: &str, delta: i64) -> Result<(), rusqlite::Error> {
     conn.execute(
         "UPDATE storage_quota SET used_bytes = MAX(0, used_bytes + ?2), last_updated = datetime('now')
          WHERE user_id = ?1",

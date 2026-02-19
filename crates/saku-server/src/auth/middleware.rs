@@ -6,6 +6,7 @@ use crate::state::AppState;
 
 /// Authenticated user info, extracted from Bearer JWT.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AuthenticatedUser {
     pub user_id: String,
     pub device_id: String,
@@ -25,10 +26,8 @@ pub fn extract_auth(
         .strip_prefix("Bearer ")
         .ok_or_else(|| ServerError::Unauthorized("Invalid Authorization format".to_string()))?;
 
-    let claims =
-        jwt::decode_access_token(token, &state.inner.config.auth.jwt_secret).map_err(|_| {
-            ServerError::Unauthorized("Invalid or expired access token".to_string())
-        })?;
+    let claims = jwt::decode_access_token(token, &state.inner.config.auth.jwt_secret)
+        .map_err(|_| ServerError::Unauthorized("Invalid or expired access token".to_string()))?;
 
     Ok(AuthenticatedUser {
         user_id: claims.sub,

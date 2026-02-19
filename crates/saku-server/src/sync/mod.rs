@@ -1,8 +1,11 @@
 pub mod handlers;
 pub mod storage;
 
-use axum::{Router, routing::{get, post}};
 use crate::state::AppState;
+use axum::{
+    Router,
+    routing::{get, post},
+};
 
 /// Build the sync router: `/api/v1/sync/*`
 pub fn router() -> Router<AppState> {
