@@ -18,27 +18,28 @@
 
 ## View
 
-| Command              | Shows                         |
-| -------------------- | ----------------------------- |
-| `tdo`                | Today (default)               |
-| `tdo today`          | Today + overdue               |
-| `tdo inbox`          | Uncategorized tasks           |
-| `tdo upcoming`       | Future-dated, grouped by date |
-| `tdo someday`        | Explicitly deferred           |
-| `tdo logbook`        | Completed (last 14 days)      |
-| `tdo trash`          | Soft-deleted                  |
-| `tdo all`            | Everything active             |
-| `tdo project list`   | List all projects             |
-| `tdo project <slug>` | Tasks in specific project     |
-| `tdo area list`      | List all areas                |
-| `tdo area <slug>`    | Projects in specific area     |
-| `tdo tag list`       | List all tags                 |
-| `tdo tag <slug>`     | Tasks with specific tag       |
+| Command                  | Shows                         |
+| ------------------------ | ----------------------------- |
+| `tdo`                    | Today (default)               |
+| `tdo view today`         | Today + overdue               |
+| `tdo view inbox`         | Uncategorized tasks           |
+| `tdo view upcoming`      | Future-dated, grouped by date |
+| `tdo view someday`       | Explicitly deferred           |
+| `tdo view logbook`       | Completed (last 14 days)      |
+| `tdo view trash`         | Soft-deleted                  |
+| `tdo view all`           | Everything active             |
+| `tdo list projects`      | List all projects             |
+| `tdo view project "name"`| Tasks in specific project     |
+| `tdo list areas`         | List all areas                |
+| `tdo view area "name"`   | Projects in specific area     |
+| `tdo list tags`          | List all tags                 |
+| `tdo view tag "name"`    | Tasks with specific tag       |
 
 **Notes:**
 
 - These are read-only view commands. To modify task scheduling, use `tdo move <id>` (see Move / Schedule section)
 - Fuzzy matching applies to `done` command with title matching (case-insensitive substring search)
+- **Deprecation:** Old direct commands (`tdo today`, `tdo inbox`, etc.) still work but show deprecation warnings. They will be removed in v1.0.0. Use `tdo view <subcommand>` instead.
 
 ## Act on Tasks
 

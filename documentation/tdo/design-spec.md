@@ -85,7 +85,7 @@ _Note: In these mockups, the text on the far right represents the dimmed, right-
 Demonstrates different combinations of Area/Project logic.
 
 ```text
-$ tdo today
+$ tdo view today
 
   Today (Feb 15)                                5 tasks
 
@@ -100,7 +100,7 @@ $ tdo today
 ### 2. Upcoming View (Temporal groupings)
 
 ```text
-$ tdo upcoming
+$ tdo view upcoming
 
   Upcoming
 
@@ -119,7 +119,7 @@ $ tdo upcoming
 Tasks in the inbox lack hierarchy, so the right-hand column remains clean and empty.
 
 ```text
-$ tdo inbox
+$ tdo view inbox
 
   Inbox                                         3 tasks
 

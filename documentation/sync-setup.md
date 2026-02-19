@@ -116,7 +116,7 @@ docker run -d \
   saku-server
 ```
 
-**Option B: Binary**
+**Option B: Binary** (requires Rust 1.88+)
 
 ```bash
 cargo install --path crates/saku-server
