@@ -29,13 +29,20 @@ Area (e.g., "Work", "Personal")
 ### View Commands
 
 ```bash
-tdo                    # Today + overdue
-tdo inbox              # Uncategorized tasks
-tdo upcoming           # Future tasks
-tdo someday            # Someday/maybe
-tdo logbook            # Completed (last 14 days)
-tdo all                # All active tasks
+tdo                    # Today + overdue (default)
+tdo view today         # Today + overdue
+tdo view inbox         # Uncategorized tasks
+tdo view upcoming      # Future tasks
+tdo view someday       # Someday/maybe
+tdo view logbook       # Completed (last 14 days)
+tdo view all           # All active tasks
+tdo view trash         # Deleted items
+tdo view project "name"  # Tasks in a project
+tdo view area "name"     # Tasks/projects in an area
+tdo view tag "name"      # Tasks with a tag
 ```
+
+**Note:** Old direct commands (`tdo today`, `tdo inbox`, etc.) are deprecated but still work. Use `tdo view <subcommand>` for new code.
 
 ### Adding Tasks
 
@@ -64,7 +71,8 @@ tdo restore <id>                   # Restore from trash
 tdo create project "Name" [--area AREA]
 tdo create area "Name"
 tdo list projects|areas
-tdo show project|area <name>
+tdo view project "name"          # View tasks in project
+tdo view area "name"             # View tasks/projects in area
 tdo edit project|area <name> --new-name "New Name"
 ```
 
@@ -72,7 +80,7 @@ tdo edit project|area <name> --new-name "New Name"
 
 ```bash
 tdo list tags
-tdo show tag <name>
+tdo view tag "name"    # View tasks with tag
 ```
 
 ## Best Practices for Agents
@@ -87,8 +95,8 @@ tdo show tag <name>
 
 ### Daily Planning
 ```bash
-tdo today              # Review today
-tdo inbox              # Process new items
+tdo view today         # Review today
+tdo view inbox         # Process new items
 tdo move <id> --today  # Schedule from inbox
 ```
 
@@ -107,9 +115,9 @@ tdo add "Design mockups" -p "Q1 Launch" --today
 
 ### Weekly Review
 ```bash
-tdo logbook            # What got done
-tdo upcoming           # What's coming
-tdo someday            # Review someday items
+tdo view logbook       # What got done
+tdo view upcoming      # What's coming
+tdo view someday       # Review someday items
 ```
 
 ## Date Parsing
@@ -119,7 +127,7 @@ tdo someday            # Review someday items
 
 ## Error Handling
 
-**Task not found** (exit 1): Verify ID with `tdo all` first
+**Task not found** (exit 1): Verify ID with `tdo view all` first
 **Invalid date** (exit 2): Use ISO dates or valid natural language
 **Project not found** (exit 1): Create project first with `tdo create project`
 **Conflicting flags** (exit 2): Choose one scheduling option
@@ -140,8 +148,8 @@ async function captureTask(userMessage: string) {
 ### Daily Digest
 ```typescript
 async function dailyDigest() {
-  const today = await exec('tdo today');
-  const inbox = await exec('tdo inbox');
+  const today = await exec('tdo view today');
+  const inbox = await exec('tdo view inbox');
   return `Today:\n${today.stdout}\n\nInbox:\n${inbox.stdout}`;
 }
 ```
@@ -160,8 +168,8 @@ async function scheduleTask(id: number, when: string) {
 
 ```bash
 # View
-tdo today              # What's on my plate?
-tdo inbox              # What needs organizing?
+tdo view today         # What's on my plate?
+tdo view inbox         # What needs organizing?
 
 # Add
 tdo add "Task" --today -p project -t tag
@@ -175,7 +183,7 @@ tdo create project "Name" --area work
 tdo list projects
 
 # Review
-tdo logbook            # What did I finish?
+tdo view logbook       # What did I finish?
 ```
 
 ## Key Points
