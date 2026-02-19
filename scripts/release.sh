@@ -79,10 +79,13 @@ cargo clippy -p "$PACKAGE" -- -D warnings
 
 # 9. Generate changelog
 if [[ -z "$LAST_TAG" ]]; then
-  COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+  ALL_COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
 else
-  COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
+  ALL_COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
 fi
+
+# Filter commits for this crate (matching prefix or no prefix)
+COMMITS=$(echo "$ALL_COMMITS" | grep -E "^- \(${CRATE}\)" || true)
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
