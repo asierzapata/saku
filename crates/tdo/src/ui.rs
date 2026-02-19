@@ -51,7 +51,7 @@ pub fn calculate_task_urgency(task: &Task) -> TaskUrgency {
         crate::models::task::When::Scheduled { date, .. } => Some(date),
         _ => None,
     };
-    
+
     let earliest_date = match (task.deadline, scheduled_date) {
         (Some(d1), Some(d2)) => Some(d1.min(d2)),
         (Some(d), None) | (None, Some(d)) => Some(d),
@@ -272,22 +272,6 @@ fn render_task_line_with_options(
     }
 }
 
-/// Format a completion date for display (e.g., "Feb 15", "Today", "Yesterday")
-fn format_completion_date(timestamp: jiff::Timestamp) -> String {
-    let zoned = jiff::Zoned::new(timestamp, jiff::tz::TimeZone::system());
-    let date = zoned.date();
-    let today = jiff::Zoned::now().date();
-
-    if date == today {
-        "Today".to_string()
-    } else if date == today.yesterday().expect("yesterday should be valid") {
-        "Yesterday".to_string()
-    } else {
-        // Format as "Feb 15"
-        date.strftime("%b %d").to_string()
-    }
-}
-
 /// Render a view header with title and count
 pub fn render_view_header(title: &str, count: usize) {
     let task_word = if count == 1 { "task" } else { "tasks" };
@@ -305,7 +289,7 @@ pub fn render_section_header(title: &str) {
     // Pastel green using truecolor
     println!(
         "\n  {} {}\n",
-        "▌".truecolor(144, 238, 144).bold(),  // Light green
+        "▌".truecolor(144, 238, 144).bold(), // Light green
         title.truecolor(144, 238, 144).bold()
     );
 }
