@@ -16,8 +16,9 @@ name = "tdo"
 path = "src/main.rs"
 
 [features]
-default = []  # No logging by default for zero overhead in release builds
+default = ["sync"]
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
+sync = ["saku-sync/server", "saku-crypto/keychain", "dep:rpassword", "dep:ureq"]
 
 [dependencies]
 # Logging dependencies - optional, disabled by default
@@ -26,6 +27,9 @@ tracing-subscriber = { workspace = true, optional = true }
 tracing-appender = { workspace = true, optional = true }
 saku-storage.workspace = true
 saku-sync.workspace = true
+saku-crypto = { workspace = true, optional = true }
+rpassword = { workspace = true, optional = true }
+ureq = { workspace = true, optional = true }
 clap.workspace = true
 clap_complete = "4.5"
 serde.workspace = true

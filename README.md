@@ -42,6 +42,10 @@ cd crates/tdo
 cargo run -- today
 ```
 
+## Sync
+
+Saku tools can sync across devices via a self-hosted server. See [documentation/sync-setup.md](documentation/sync-setup.md) for setup instructions.
+
 ## Architecture
 
 See [documentation/architecture.md](documentation/architecture.md) for design patterns and shared utilities across the suite.

@@ -207,6 +207,34 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Manage sync settings
+    #[cfg(feature = "sync")]
+    Sync {
+        #[command(subcommand)]
+        action: SyncAction,
+    },
+}
+
+#[cfg(feature = "sync")]
+#[derive(Debug, Subcommand)]
+enum SyncAction {
+    /// Log in to a sync server
+    Login {
+        /// Server URL (e.g. http://localhost:8080)
+        #[arg(long)]
+        server: String,
+
+        /// Email address
+        #[arg(long)]
+        email: String,
+    },
+
+    /// Log out and clear sync credentials
+    Logout,
+
+    /// Show sync status
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -297,6 +325,14 @@ enum ListEntity {
     Tags,
 }
 
+/// Get the hostname of this machine for device naming.
+#[cfg(feature = "sync")]
+fn hostname() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
 /// Check if a command is a mutating (write) command that should trigger sync.
 fn is_mutating_command(cmd: &Option<Commands>) -> bool {
     matches!(
@@ -314,12 +350,42 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
     )
 }
 
-/// Attempt to sync after a mutation, if TDO_SYNC_DIR is set.
+/// Attempt to sync after a mutation.
+/// Tries server sync first (if configured), falls back to TDO_SYNC_DIR for local dev.
 /// Sync is best-effort: errors are printed as warnings but never abort.
 fn try_sync_after_mutation(storage_path: &std::path::Path) {
+    // Try server sync first (if the sync feature is enabled and configured)
+    #[cfg(feature = "sync")]
+    {
+        if let Ok(Some(config)) = saku_sync::config::load_sync_config() {
+            // Read passphrase from keychain
+            match saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
+                .and_then(|ks| ks.get_passphrase())
+            {
+                Ok(passphrase) => {
+                    match saku_sync::try_flush_if_online_server(
+                        storage_path,
+                        passphrase.as_bytes(),
+                        &config.server_url,
+                        &config.device_id,
+                    ) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Warning: sync failed: {}", e);
+                        }
+                    }
+                    return;
+                }
+                Err(_) => {
+                    // No passphrase in keychain, fall through to local sync
+                }
+            }
+        }
+    }
+
+    // Fallback: local filesystem sync via TDO_SYNC_DIR env var
     if let Some(sync_dir) = std::env::var_os("TDO_SYNC_DIR") {
         let sync_dir = PathBuf::from(sync_dir);
-        // Phase 3: hardcoded dev passphrase
         let passphrase = b"saku-dev-passphrase";
         match saku_sync::try_flush_if_online(storage_path, passphrase, &sync_dir) {
             Ok(_) => {}
@@ -1752,6 +1818,140 @@ fn main() {
                     saku_tdo::ui::render_task_line(task, &store);
                 }
             }
+        }
+        #[cfg(feature = "sync")]
+        Some(Commands::Sync { action }) => {
+            match action {
+                SyncAction::Login { server, email } => {
+                    // Prompt for password
+                    let password = match rpassword::prompt_password("Password: ") {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("Error reading password: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Prompt for encryption passphrase
+                    let passphrase = match rpassword::prompt_password("Encryption passphrase: ") {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("Error reading passphrase: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+                    if passphrase.is_empty() {
+                        eprintln!("Error: Encryption passphrase cannot be empty");
+                        std::process::exit(1);
+                    }
+
+                    // Get device ID
+                    let device_id = match saku_storage::device::get_or_create_device_id() {
+                        Ok(id) => id,
+                        Err(e) => {
+                            eprintln!("Error getting device ID: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Login to server
+                    let agent = ureq::agent();
+                    let login_url = format!("{}/api/v1/auth/login", server.trim_end_matches('/'));
+                    let resp = match agent
+                        .post(&login_url)
+                        .send_json(ureq::json!({
+                            "email": email,
+                            "password": password,
+                            "device_id": device_id,
+                            "device_name": hostname(),
+                        })) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("Error: Login failed: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let body: serde_json::Value = match resp.into_json() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            eprintln!("Error: Failed to parse response: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let access_token = body["access_token"].as_str().unwrap_or("");
+                    let refresh_token = body["refresh_token"].as_str().unwrap_or("");
+
+                    // Store tokens in keychain
+                    if let Err(e) = saku_crypto::keychain::KeychainStore::new("saku-sync-access-token")
+                        .and_then(|ks| ks.store_passphrase(access_token))
+                    {
+                        eprintln!("Warning: Failed to store access token in keychain: {}", e);
+                    }
+                    if let Err(e) = saku_crypto::keychain::KeychainStore::new("saku-sync-refresh-token")
+                        .and_then(|ks| ks.store_passphrase(refresh_token))
+                    {
+                        eprintln!("Warning: Failed to store refresh token in keychain: {}", e);
+                    }
+                    if let Err(e) = saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
+                        .and_then(|ks| ks.store_passphrase(&passphrase))
+                    {
+                        eprintln!("Warning: Failed to store passphrase in keychain: {}", e);
+                    }
+
+                    // Save config
+                    let sync_config = saku_sync::config::SyncClientConfig {
+                        server_url: server.clone(),
+                        device_id,
+                    };
+                    if let Err(e) = saku_sync::config::save_sync_config(&sync_config) {
+                        eprintln!("Error: Failed to save sync config: {}", e);
+                        std::process::exit(1);
+                    }
+
+                    println!("Logged in to {} as {}", server, email);
+                }
+                SyncAction::Logout => {
+                    // Clear keychain entries
+                    for account in &[
+                        "saku-sync-access-token",
+                        "saku-sync-refresh-token",
+                        "saku-sync-passphrase",
+                    ] {
+                        if let Ok(ks) = saku_crypto::keychain::KeychainStore::new(account) {
+                            let _ = ks.delete();
+                        }
+                    }
+                    // Delete config
+                    if let Err(e) = saku_sync::config::delete_sync_config() {
+                        eprintln!("Warning: Failed to delete sync config: {}", e);
+                    }
+                    println!("Logged out and cleared sync credentials");
+                }
+                SyncAction::Status => {
+                    match saku_sync::config::load_sync_config() {
+                        Ok(Some(config)) => {
+                            println!("Sync configured:");
+                            println!("  Server: {}", config.server_url);
+                            println!("  Device: {}", config.device_id);
+
+                            // Check if passphrase is stored
+                            let has_passphrase = saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
+                                .and_then(|ks| ks.get_passphrase())
+                                .is_ok();
+                            println!("  Passphrase: {}", if has_passphrase { "stored" } else { "not set" });
+                        }
+                        Ok(None) => {
+                            println!("Sync not configured. Use 'tdo sync login' to set up.");
+                        }
+                        Err(e) => {
+                            eprintln!("Error reading sync config: {}", e);
+                        }
+                    }
+                }
+            }
+            return;
         }
         Some(Commands::Completion { shell }) => {
             let mut cmd = Cli::command();

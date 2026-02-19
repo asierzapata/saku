@@ -6,6 +6,9 @@ pub mod merkle;
 pub mod state_db;
 pub mod sync_engine;
 
+#[cfg(feature = "server")]
+pub mod config;
+
 pub use error::SyncError;
 pub use sync_engine::{SyncConfig, SyncEngine, SyncOutcome, TrackedFile};
 
@@ -29,6 +32,38 @@ pub fn try_flush_if_online(
         tool: "tdo".to_string(),
         relative_path: "store.json".to_string(),
         local_path: store_path,
+    }];
+
+    let db_path = saku_storage::device::saku_data_dir()
+        .map_err(SyncError::DeviceId)?
+        .join("sync.db");
+
+    let config = SyncConfig {
+        db_path,
+        passphrase: passphrase.to_vec(),
+        tracked_files: tracked,
+    };
+
+    let mut engine = SyncEngine::new(config, backend)?;
+    engine.sync()
+}
+
+/// Convenience function: build a `SyncEngine<ServerSyncBackend>`, run `sync()`,
+/// and return the outcome. Used when the server feature is enabled and configured.
+#[cfg(feature = "server")]
+pub fn try_flush_if_online_server(
+    store_path: &std::path::Path,
+    passphrase: &[u8],
+    server_url: &str,
+    device_id: &str,
+) -> Result<SyncOutcome, SyncError> {
+    let backend = backend::server::ServerSyncBackend::new(server_url, device_id)?;
+
+    let tracked = vec![TrackedFile {
+        file_key: "tdo/store.json".to_string(),
+        tool: "tdo".to_string(),
+        relative_path: "store.json".to_string(),
+        local_path: store_path.to_path_buf(),
     }];
 
     let db_path = saku_storage::device::saku_data_dir()

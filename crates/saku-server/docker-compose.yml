@@ -1,0 +1,54 @@
+services:
+  saku-server:
+    build:
+      context: ../..
+      dockerfile: crates/saku-server/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - server-data:/data
+      - ./config.example.toml:/etc/saku-server/config.toml:ro
+    environment:
+      - SAKU__DATABASE__PATH=/data/saku-server.db
+      - SAKU__STORAGE__ENDPOINT=http://minio:9000
+      - SAKU__STORAGE__ACCESS_KEY_ID=minioadmin
+      - SAKU__STORAGE__SECRET_ACCESS_KEY=minioadmin
+      - SAKU__AUTH__JWT_SECRET=dev-jwt-secret-change-in-production
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/saku-sync;
+      exit 0;
+      "
+
+volumes:
+  server-data:
+  minio-data:

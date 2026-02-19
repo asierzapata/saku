@@ -1,6 +1,9 @@
 pub mod local_fs;
 pub mod server;
 
+#[cfg(feature = "server")]
+pub mod server_types;
+
 use crate::error::SyncError;
 
 /// Trait abstracting the remote storage backend.

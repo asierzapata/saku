@@ -1,0 +1,33 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[auth]
+# CHANGE THIS in production! Use a strong random secret.
+jwt_secret = "change-me-to-a-random-secret"
+access_token_mins = 15
+refresh_token_days = 90
+
+[database]
+path = "/data/saku-server.db"
+
+[storage]
+bucket = "saku-sync"
+
+# --- MinIO (local dev) ---
+region = "auto"
+endpoint = "http://minio:9000"
+access_key_id = "minioadmin"
+secret_access_key = "minioadmin"
+
+# --- AWS S3 ---
+# region = "us-east-1"
+# endpoint = "https://s3.us-east-1.amazonaws.com"
+# access_key_id = "AKIA..."
+# secret_access_key = "..."
+
+# --- Cloudflare R2 ---
+# region = "auto"
+# endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+# access_key_id = "..."
+# secret_access_key = "..."
