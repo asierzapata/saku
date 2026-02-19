@@ -3,6 +3,8 @@ use jiff::civil::Date;
 
 use crate::models::{store::Store, task::Task};
 
+const MAX_CONTENT_WIDTH: usize = 100;
+
 /// Get the terminal width, defaulting to 80 if unavailable
 fn get_terminal_width() -> usize {
     term_size::dimensions().map(|(w, _)| w).unwrap_or(80)
@@ -106,20 +108,21 @@ fn render_task_line_with_options(
 
         let left_visible_len = format!("  {}  {}  {}", id_str, " ", title).len();
         let right_visible_len = if show_completion_date && task.completed_at.is_some() {
-            // Account for the visible length without ANSI codes
             right_section.chars().count()
         } else {
             right_section.len()
         };
 
+        let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
         let total_content = left_visible_len + right_visible_len;
 
-        if total_content + 4 < terminal_width {
-            let padding = terminal_width - total_content - 2;
-            println!("{}{}{}", styled_left, " ".repeat(padding), right_dimmed);
+        if total_content + 4 < effective_width {
+            let gap = effective_width - total_content - 2;
+            let dots = format!(" {}{}", "·".repeat(gap - 2), " ");
+            println!("{}{}{}", styled_left, dots.dimmed(), right_dimmed);
         } else {
-            // Not enough space for right alignment, just print normally
-            println!("{}", styled_left);
+            // Fallback: compact inline separator
+            println!("{}  {}  {}", styled_left, "·".dimmed(), right_dimmed);
         }
     } else {
         println!("{}", styled_left);

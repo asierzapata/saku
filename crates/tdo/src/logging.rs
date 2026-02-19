@@ -12,10 +12,10 @@
 //!
 //! Logs are written to:
 //! - stderr (for real-time output)
-//! - ~/.local/share/tdo/tdo.log (rotating log file)
+//! - /Users/asierzapata/Library/Application\ Support/tdo/tdo.log (rotating log file)
 
 use std::path::PathBuf;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initialize the logging system with stderr and file output
 ///
@@ -25,23 +25,18 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 /// - File output with rotation (keeps last 5 log files)
 /// - Default level: ERROR
 pub fn init() -> Result<(), Box<dyn std::error::Error>> {
-    // Determine log directory
     let log_dir = get_log_directory()?;
     std::fs::create_dir_all(&log_dir)?;
 
-    // Set up file appender with rotation
     let file_appender = tracing_appender::rolling::daily(&log_dir, "tdo.log");
     let (non_blocking_file, _guard) = tracing_appender::non_blocking(file_appender);
 
-    // Create env filter with fallback to ERROR level
-    // Check TDO_LOG first, then RUST_LOG, then default to error
     let env_filter = std::env::var("TDO_LOG")
         .or_else(|_| std::env::var("RUST_LOG"))
         .ok()
         .and_then(|val| EnvFilter::try_new(&val).ok())
         .unwrap_or_else(|| EnvFilter::new("error"));
 
-    // Build the subscriber with both stderr and file outputs
     tracing_subscriber::registry()
         .with(env_filter)
         .with(
@@ -59,7 +54,7 @@ pub fn init() -> Result<(), Box<dyn std::error::Error>> {
                 .with_thread_ids(false)
                 .with_line_number(true)
                 .with_file(true)
-                .with_ansi(false), // No ANSI colors in log files
+                .with_ansi(false),
         )
         .init();
 
