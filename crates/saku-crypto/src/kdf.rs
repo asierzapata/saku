@@ -1,6 +1,6 @@
 use argon2::{Algorithm, Argon2, Params, Version};
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::KdfError;

@@ -13,8 +13,7 @@ pub struct KeychainStore {
 impl KeychainStore {
     /// Create a new keychain store for the given account name.
     pub fn new(account: &str) -> Result<Self, KeychainError> {
-        let entry =
-            Entry::new(SERVICE_NAME, account).map_err(KeychainError::StoreFailed)?;
+        let entry = Entry::new(SERVICE_NAME, account).map_err(KeychainError::StoreFailed)?;
         Ok(Self { entry })
     }
 

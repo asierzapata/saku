@@ -1,7 +1,7 @@
+pub mod decrypt;
+pub mod encrypt;
 pub mod error;
 pub mod kdf;
-pub mod encrypt;
-pub mod decrypt;
 
 mod cipher;
 mod format;
@@ -10,10 +10,10 @@ mod format;
 pub mod keychain;
 
 // Re-exports for convenience
+pub use decrypt::decrypt;
+pub use encrypt::encrypt;
 pub use error::{CryptoError, KdfError};
 pub use kdf::MasterKey;
-pub use encrypt::encrypt;
-pub use decrypt::decrypt;
 
 #[cfg(test)]
 mod tests {
