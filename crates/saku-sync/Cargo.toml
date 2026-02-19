@@ -1,0 +1,22 @@
+[package]
+name = "saku-sync"
+version = "0.1.0"
+description = "Sync engine for the saku ecosystem"
+repository = "https://github.com/asierzapata/saku"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+saku-storage.workspace = true
+saku-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+jiff.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
