@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/nte",
+    "crates/saku-crypto",
     "crates/saku-storage",
     "crates/tdo",
 ]
@@ -24,6 +25,12 @@ dirs = "6.0.0"
 colored = "2.1"
 term_size = "0.3"
 tempfile = "3.14"
+argon2 = { version = "0.5", features = ["std"] }
+chacha20poly1305 = "0.10"
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
+keyring = "3"
+saku-crypto = { path = "crates/saku-crypto" }
 saku-storage = { path = "crates/saku-storage" }
 
 # Tracing dependencies - optional for structured logging
