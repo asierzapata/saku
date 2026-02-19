@@ -188,10 +188,13 @@ fn lww_conflict_later_timestamp_wins() {
     let mut task_a = base_task.clone();
     task_a["title"] = json!("Title from A");
     task_a["modified_at"] = json!({"wall_ms": 2000, "lamport": 1, "device_id": "dev-a"});
-    write_store(&store_a_path, &json!({
-        "version": 4, "next_task_number": 2,
-        "tasks": [task_a], "projects": [], "areas": []
-    }));
+    write_store(
+        &store_a_path,
+        &json!({
+            "version": 4, "next_task_number": 2,
+            "tasks": [task_a], "projects": [], "areas": []
+        }),
+    );
 
     // Device A syncs first
     let backend_a = LocalFsSyncBackend::new(remote_dir.path());
@@ -204,10 +207,13 @@ fn lww_conflict_later_timestamp_wins() {
     let mut task_b = base_task.clone();
     task_b["title"] = json!("Title from B (winner)");
     task_b["modified_at"] = json!({"wall_ms": 3000, "lamport": 1, "device_id": "dev-b"});
-    write_store(&store_b_path, &json!({
-        "version": 4, "next_task_number": 2,
-        "tasks": [task_b], "projects": [], "areas": []
-    }));
+    write_store(
+        &store_b_path,
+        &json!({
+            "version": 4, "next_task_number": 2,
+            "tasks": [task_b], "projects": [], "areas": []
+        }),
+    );
 
     // Device B syncs (push + pull merge)
     let backend_b = LocalFsSyncBackend::new(remote_dir.path());
@@ -297,11 +303,14 @@ fn offline_queue_flushes_when_online() {
     let remote_dir = tempfile::tempdir().unwrap();
 
     let store_path = local_dir.path().join("store.json");
-    write_store(&store_path, &json!({
-        "version": 4, "next_task_number": 2,
-        "tasks": [{"id": "t1", "title": "test", "modified_at": {"wall_ms": 100, "lamport": 1, "device_id": "a"}}],
-        "projects": [], "areas": []
-    }));
+    write_store(
+        &store_path,
+        &json!({
+            "version": 4, "next_task_number": 2,
+            "tasks": [{"id": "t1", "title": "test", "modified_at": {"wall_ms": 100, "lamport": 1, "device_id": "a"}}],
+            "projects": [], "areas": []
+        }),
+    );
 
     // First try: backend unreachable
     let backend = LocalFsSyncBackend::new(std::path::Path::new("/nonexistent/remote"));

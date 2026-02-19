@@ -67,7 +67,7 @@ impl StateDb {
                 op_type     TEXT NOT NULL,
                 local_path  TEXT NOT NULL,
                 created_at_ms INTEGER NOT NULL
-            );"
+            );",
         )?;
 
         Ok(())

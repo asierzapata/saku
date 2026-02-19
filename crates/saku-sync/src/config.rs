@@ -15,7 +15,7 @@ pub fn load_sync_config() -> Result<Option<SyncClientConfig>, SyncConfigError> {
     if !path.exists() {
         return Ok(None);
     }
-    let content = std::fs::read_to_string(&path).map_err(|e| SyncConfigError::Io(e))?;
+    let content = std::fs::read_to_string(&path).map_err(SyncConfigError::Io)?;
     let config: SyncClientConfig =
         toml::from_str(&content).map_err(|e| SyncConfigError::Parse(e.to_string()))?;
     Ok(Some(config))
@@ -25,10 +25,11 @@ pub fn load_sync_config() -> Result<Option<SyncClientConfig>, SyncConfigError> {
 pub fn save_sync_config(config: &SyncClientConfig) -> Result<(), SyncConfigError> {
     let path = sync_config_path()?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| SyncConfigError::Io(e))?;
+        std::fs::create_dir_all(parent).map_err(SyncConfigError::Io)?;
     }
-    let content = toml::to_string_pretty(config).map_err(|e| SyncConfigError::Parse(e.to_string()))?;
-    std::fs::write(&path, content).map_err(|e| SyncConfigError::Io(e))?;
+    let content =
+        toml::to_string_pretty(config).map_err(|e| SyncConfigError::Parse(e.to_string()))?;
+    std::fs::write(&path, content).map_err(SyncConfigError::Io)?;
     Ok(())
 }
 
@@ -36,7 +37,7 @@ pub fn save_sync_config(config: &SyncClientConfig) -> Result<(), SyncConfigError
 pub fn delete_sync_config() -> Result<(), SyncConfigError> {
     let path = sync_config_path()?;
     if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| SyncConfigError::Io(e))?;
+        std::fs::remove_file(&path).map_err(SyncConfigError::Io)?;
     }
     Ok(())
 }

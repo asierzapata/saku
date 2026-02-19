@@ -49,6 +49,7 @@ mod impl_server {
         server_url: String,
         access_token: RefCell<String>,
         refresh_token: RefCell<String>,
+        #[allow(dead_code)]
         device_id: String,
         http_client: ureq::Agent,
     }
@@ -61,10 +62,11 @@ mod impl_server {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
 
-            let refresh_token = saku_crypto::keychain::KeychainStore::new("saku-sync-refresh-token")
-                .and_then(|ks| ks.get_passphrase())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+            let refresh_token =
+                saku_crypto::keychain::KeychainStore::new("saku-sync-refresh-token")
+                    .and_then(|ks| ks.get_passphrase())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
 
             let http_client = ureq::AgentBuilder::new()
                 .timeout_connect(std::time::Duration::from_secs(5))
@@ -164,31 +166,24 @@ mod impl_server {
                     })?;
 
                 // Download from presigned URL
-                let data_resp = self
-                    .http_client
-                    .get(&presigned.url)
-                    .call()
-                    .map_err(|e| SyncError::Backend {
+                let data_resp = self.http_client.get(&presigned.url).call().map_err(|e| {
+                    SyncError::Backend {
                         message: format!("Download from presigned URL failed: {e}"),
-                    })?;
+                    }
+                })?;
 
                 let mut bytes = Vec::new();
                 data_resp
                     .into_reader()
                     .read_to_end(&mut bytes)
-                    .map_err(|e| SyncError::Io(e))?;
+                    .map_err(SyncError::Io)?;
 
                 Ok(bytes)
             })
         }
 
         /// POST to get a presigned upload URL, then PUT the data.
-        fn push_via_presign(
-            &self,
-            tool: &str,
-            path: &str,
-            data: &[u8],
-        ) -> Result<(), SyncError> {
+        fn push_via_presign(&self, tool: &str, path: &str, data: &[u8]) -> Result<(), SyncError> {
             let data_vec = data.to_vec();
 
             self.with_auth_retry(|token| {

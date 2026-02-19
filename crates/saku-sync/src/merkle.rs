@@ -70,10 +70,16 @@ impl MerkleTree {
 
     /// Return tool names that differ between this tree and another.
     pub fn differing_tools<'a>(&'a self, other: &'a MerkleTree) -> Vec<&'a str> {
-        let self_map: BTreeMap<&str, &str> =
-            self.tools.iter().map(|t| (t.tool.as_str(), t.hash.as_str())).collect();
-        let other_map: BTreeMap<&str, &str> =
-            other.tools.iter().map(|t| (t.tool.as_str(), t.hash.as_str())).collect();
+        let self_map: BTreeMap<&str, &str> = self
+            .tools
+            .iter()
+            .map(|t| (t.tool.as_str(), t.hash.as_str()))
+            .collect();
+        let other_map: BTreeMap<&str, &str> = other
+            .tools
+            .iter()
+            .map(|t| (t.tool.as_str(), t.hash.as_str()))
+            .collect();
 
         let mut differing = Vec::new();
 

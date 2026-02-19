@@ -125,9 +125,7 @@ impl<B: SyncBackend> SyncEngine<B> {
             self.state_db.upsert_file_state(&FileState {
                 file_key: tracked.file_key.clone(),
                 local_hash: current_hash,
-                remote_hash: prev_state
-                    .map(|s| s.remote_hash)
-                    .unwrap_or_default(),
+                remote_hash: prev_state.map(|s| s.remote_hash).unwrap_or_default(),
                 status: if is_dirty {
                     "dirty".to_string()
                 } else {
@@ -160,10 +158,11 @@ impl<B: SyncBackend> SyncEngine<B> {
         let local_merkle = MerkleTree::build(pre_hashes);
 
         // Fast path: if roots match and no dirty files, done
-        if let Some(ref rm) = remote_merkle {
-            if local_merkle.same_root(rm) && local_dirty_keys.is_empty() {
-                return Ok(SyncOutcome::Skipped);
-            }
+        if let Some(ref rm) = remote_merkle
+            && local_merkle.same_root(rm)
+            && local_dirty_keys.is_empty()
+        {
+            return Ok(SyncOutcome::Skipped);
         }
 
         let mut pushed = 0;
@@ -213,9 +212,8 @@ impl<B: SyncBackend> SyncEngine<B> {
                                     std::fs::write(&tracked.local_path, &merged_bytes)?;
                                 } else if tracked.local_path.exists() {
                                     // Non-JSON file: write conflict copy
-                                    let device_id =
-                                        saku_storage::device::get_or_create_device_id()
-                                            .unwrap_or_else(|_| "unknown".to_string());
+                                    let device_id = saku_storage::device::get_or_create_device_id()
+                                        .unwrap_or_else(|_| "unknown".to_string());
                                     conflict::write_conflict_copy(
                                         &tracked.local_path,
                                         &decrypted,
@@ -312,10 +310,7 @@ mod tests {
     use crate::backend::local_fs::LocalFsSyncBackend;
     use std::io::Write;
 
-    fn make_config(
-        store_path: PathBuf,
-        db_path: PathBuf,
-    ) -> SyncConfig {
+    fn make_config(store_path: PathBuf, db_path: PathBuf) -> SyncConfig {
         SyncConfig {
             db_path,
             passphrase: b"test-passphrase".to_vec(),
@@ -357,7 +352,8 @@ mod tests {
         let local_dir = tempfile::tempdir().unwrap();
         let remote_dir = tempfile::tempdir().unwrap();
 
-        let store_content = r#"{"version":4,"next_task_number":2,"tasks":[],"projects":[],"areas":[]}"#;
+        let store_content =
+            r#"{"version":4,"next_task_number":2,"tasks":[],"projects":[],"areas":[]}"#;
         let store_path = local_dir.path().join("store.json");
         write_test_store(&store_path, store_content);
 
@@ -382,7 +378,8 @@ mod tests {
         let local_dir = tempfile::tempdir().unwrap();
         let remote_dir = tempfile::tempdir().unwrap();
 
-        let store_content = r#"{"version":4,"next_task_number":2,"tasks":[],"projects":[],"areas":[]}"#;
+        let store_content =
+            r#"{"version":4,"next_task_number":2,"tasks":[],"projects":[],"areas":[]}"#;
         let store_path = local_dir.path().join("store.json");
         write_test_store(&store_path, store_content);
 

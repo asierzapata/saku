@@ -110,14 +110,8 @@ pub fn write_conflict_copy(
     remote_content: &[u8],
     device_id: &str,
 ) -> Result<PathBuf, SyncError> {
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("file");
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
     let conflict_name = if ext.is_empty() {
         format!("{}.{}.conflict", stem, device_id)
@@ -233,16 +227,20 @@ mod tests {
         let file_path = dir.path().join("notes.md");
         std::fs::write(&file_path, b"local content").unwrap();
 
-        let conflict_path =
-            write_conflict_copy(&file_path, b"remote content", "dev-b").unwrap();
+        let conflict_path = write_conflict_copy(&file_path, b"remote content", "dev-b").unwrap();
 
         assert!(conflict_path.exists());
-        assert!(conflict_path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("dev-b"));
-        assert_eq!(std::fs::read_to_string(&conflict_path).unwrap(), "remote content");
+        assert!(
+            conflict_path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("dev-b")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&conflict_path).unwrap(),
+            "remote content"
+        );
     }
 }
