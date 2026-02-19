@@ -732,19 +732,13 @@ fn parse_when_string(s: &str) -> Result<When, ()> {
         "inbox" => Ok(When::Inbox),
         "today" => {
             let today_date = Zoned::now().date();
-            Ok(When::Scheduled {
-                date: today_date,
-                evening: None,
-            })
+            Ok(When::Scheduled { date: today_date })
         }
         "someday" => Ok(When::Someday),
         _ => {
             // Try to parse as natural language date
             parse_natural_date(s)
-                .map(|date| When::Scheduled {
-                    date,
-                    evening: None,
-                })
+                .map(|date| When::Scheduled { date })
                 .map_err(|_| ())
         }
     }
@@ -1149,10 +1143,7 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: Some(When::Scheduled {
-                    date: today,
-                    evening: None,
-                }),
+                when: Some(When::Scheduled { date: today }),
                 deadline: None,
                 clear_schedule: false,
                 clear_deadline: false,
@@ -1164,13 +1155,7 @@ mod tests {
 
         assert!(result.is_ok());
         let moved = result.unwrap();
-        assert!(matches!(
-            moved.when,
-            When::Scheduled {
-                date: _,
-                evening: None
-            }
-        ));
+        assert!(matches!(moved.when, When::Scheduled { date: _ }));
     }
 
     #[test]
@@ -1239,10 +1224,7 @@ mod tests {
             MoveTaskParameters {
                 task_number: task.task_number,
                 notes: None,
-                when: Some(When::Scheduled {
-                    date,
-                    evening: None,
-                }),
+                when: Some(When::Scheduled { date }),
                 deadline: None,
                 clear_schedule: false,
                 clear_deadline: false,
@@ -1254,42 +1236,6 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(matches!(result.unwrap().when, When::Scheduled { .. }));
-    }
-
-    #[test]
-    fn test_move_task_with_evening() {
-        let storage = MockStorage::new();
-        let mut store = Store::default();
-        let task = create_test_task(&mut store, "Test Task");
-        let today = jiff::Zoned::now().date();
-
-        let result = move_task(
-            &mut store,
-            &storage,
-            MoveTaskParameters {
-                task_number: task.task_number,
-                notes: None,
-                when: Some(When::Scheduled {
-                    date: today,
-                    evening: Some(true),
-                }),
-                deadline: None,
-                clear_schedule: false,
-                clear_deadline: false,
-                project: None,
-                area: None,
-                tags: vec![],
-            },
-        );
-
-        assert!(result.is_ok());
-        assert!(matches!(
-            result.unwrap().when,
-            When::Scheduled {
-                evening: Some(true),
-                ..
-            }
-        ));
     }
 
     #[test]

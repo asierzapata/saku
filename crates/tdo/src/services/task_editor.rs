@@ -430,7 +430,6 @@ mod tests {
             tags: vec!["urgent".to_string(), "bug".to_string()],
             when: When::Scheduled {
                 date: jiff::Zoned::now().date(),
-                evening: None,
             },
             deadline: Some("2026-03-15".parse::<Date>().unwrap()),
             defer_until: None,

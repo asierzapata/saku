@@ -31,8 +31,8 @@ They exercise **the full stack**: argument parsing → service logic → `JsonFi
 |------|-----------------|
 | `tests/area_commands.rs` | `area new`, `area list`, `area delete` (with cascade), `area view` |
 | `tests/project_commands.rs` | `project new`, `project list`, `project delete` (with cascade), `project view` |
-| `tests/task_commands.rs` | `add` (inbox, today, someday, anytime, scheduled, with project/area/tags), `done`, `delete`, `restore`, `move` |
-| `tests/view_commands.rs` | Default view, `today`, `inbox`, `upcoming`, `anytime`, `someday`, `logbook`, `trash`, `all`, `tag list`, `tag view` — both empty states and populated states |
+| `tests/task_commands.rs` | `add` (inbox, today, someday, scheduled, with project/area/tags), `done`, `delete`, `restore`, `move` |
+| `tests/view_commands.rs` | Default view, `today`, `inbox`, `upcoming`, `someday`, `logbook`, `trash`, `all`, `tag list`, `tag view` — both empty states and populated states |
 
 Coverage scope is **happy-path only**. Error paths (unknown project, ambiguous name, etc.) are covered by unit tests where the logic lives. The `edit` command is excluded because it requires an interactive editor.
 

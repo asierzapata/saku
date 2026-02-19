@@ -4,7 +4,7 @@ A flexible task management tool for the terminal with support for areas, project
 
 ## Features
 
-- **Flexible scheduling**: Today, Inbox, Upcoming, Anytime, Someday, or Logbook
+- **Flexible scheduling**: Inbox, Today (scheduled dates), Upcoming, Someday, or Logbook
 - **Areas & Projects**: Organize tasks by life areas and projects
 - **Tags**: Cross-cutting categorization
 - **Simple storage**: JSON file-based, human-readable
@@ -24,7 +24,6 @@ cargo install --path .
 tdo today           # Tasks scheduled for today
 tdo inbox           # Unprocessed tasks
 tdo upcoming        # Upcoming scheduled tasks
-tdo anytime         # Tasks to do anytime
 tdo someday         # Someday/maybe tasks
 tdo logbook         # Completed tasks
 tdo all             # All active tasks

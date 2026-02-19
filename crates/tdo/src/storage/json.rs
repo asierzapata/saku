@@ -4,7 +4,7 @@ use serde_json::to_string_pretty;
 
 use saku_storage::io::{
     atomic_writer::atomic_write,
-    backup::{create_backup, cleanup_old_backups},
+    backup::{cleanup_old_backups, create_backup},
     file_lock::FileLock,
 };
 
@@ -427,7 +427,7 @@ mod tests {
         let storage = JsonFileStorage::new(path);
         let store = storage.load().expect("Migration should succeed");
 
-        assert_eq!(store.version, 4);
+        assert_eq!(store.version, 5);
         assert_eq!(store.next_task_number, 3);
 
         // "First task" (earlier created_at) gets task_number 1

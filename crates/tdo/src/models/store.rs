@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::models::{area::Area, project::Project, task::Task};
 
 /// Current schema version
-pub const CURRENT_VERSION: u32 = 4;
+pub const CURRENT_VERSION: u32 = 5;
 
 /// Storage representation (how data lives on disk as JSON)
 #[derive(Serialize, Deserialize)]

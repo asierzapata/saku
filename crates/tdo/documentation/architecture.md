@@ -172,9 +172,8 @@ pub struct Store {
 
 Tasks use a `When` enum for flexible scheduling:
 - `Inbox`: Unscheduled
-- `Anytime`: No specific date
 - `Someday`: Maybe later
-- `Scheduled`: Specific date with optional evening flag
+- `Scheduled`: Specific date
 
 ### Soft Delete Pattern
 

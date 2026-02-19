@@ -6,9 +6,7 @@
 | -------------------------------------- | -------------------------- |
 | `tdo add "task"`                       | Add to Inbox               |
 | `tdo add "task" --today`               | Add to Today               |
-| `tdo add "task" --today --evening`     | Add to Today (evening tag) |
 | `tdo add "task" --someday`             | Add to Someday             |
-| `tdo add "task" --anytime`             | Add to Anytime             |
 | `tdo add "task" --when friday`         | Schedule for specific date |
 | `tdo add "task" --deadline 2025-03-01` | Set hard deadline          |
 | `tdo add "task" -p project-slug`       | Add to project             |
@@ -16,7 +14,7 @@
 | `tdo add "task" -t tag1 -t tag2`       | Add with tags              |
 | `tdo add "task" -n "some notes"`       | Add with notes             |
 
-**Note:** Only one scheduling flag allowed: `--today`, `--someday`, `--anytime`, or `--when` (mutually exclusive)
+**Note:** Only one scheduling flag allowed: `--today`, `--someday`, or `--when` (mutually exclusive)
 
 ## View
 
@@ -26,7 +24,6 @@
 | `tdo today`          | Today + overdue               |
 | `tdo inbox`          | Uncategorized tasks           |
 | `tdo upcoming`       | Future-dated, grouped by date |
-| `tdo anytime`        | No date, not someday          |
 | `tdo someday`        | Explicitly deferred           |
 | `tdo logbook`        | Completed (last 14 days)      |
 | `tdo trash`          | Soft-deleted                  |
@@ -62,9 +59,7 @@ The `move` command updates task properties. It supports all the same flags as `a
 | Command                               | Description                     |
 | ------------------------------------- | ------------------------------- |
 | `tdo move <id> --today`               | Move task to Today              |
-| `tdo move <id> --today --evening`     | Move task to Today (evening)    |
 | `tdo move <id> --someday`             | Move task to Someday            |
-| `tdo move <id> --anytime`             | Move task to Anytime            |
 | `tdo move <id> --when friday`         | Schedule task for specific date |
 | `tdo move <id> -p project-slug`       | Assign task to project          |
 | `tdo move <id> -a area-name`          | Assign task to area             |
@@ -75,7 +70,7 @@ The `move` command updates task properties. It supports all the same flags as `a
 **Notes:**
 
 - Flags can be combined. Example: `tdo move 5 --today -p work -t urgent`
-- Only one scheduling flag allowed: `--today`, `--someday`, `--anytime`, or `--when` (mutually exclusive)
+- Only one scheduling flag allowed: `--today`, `--someday`, or `--when` (mutually exclusive)
 - To _view_ lists (Today, Someday, etc.), use commands without `<id>` (see View section)
 
 ## Projects
@@ -105,9 +100,7 @@ Example: "My Cool Project" → `my-cool-project`
 | Flag                | Short | Description                    |
 | ------------------- | ----- | ------------------------------ |
 | `--today`           |       | Schedule for today             |
-| `--evening`         |       | Tag as evening (metadata only) |
 | `--someday`         |       | Defer to someday               |
-| `--anytime`         |       | Available anytime              |
 | `--when <date>`     | `-w`  | Schedule for date              |
 | `--deadline <date>` | `-d`  | Hard due date                  |
 | `--project <slug>`  | `-p`  | Assign to project              |

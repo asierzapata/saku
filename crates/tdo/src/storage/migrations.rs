@@ -7,7 +7,12 @@ use crate::storage::StorageError;
 type MigrationFn = fn(Value) -> Result<Value, StorageError>;
 
 fn get_migrations() -> Vec<MigrationFn> {
-    vec![migrate_v1_to_v2, migrate_v2_to_v3, migrate_v3_to_v4]
+    vec![
+        migrate_v1_to_v2,
+        migrate_v2_to_v3,
+        migrate_v3_to_v4,
+        migrate_v4_to_v5,
+    ]
 }
 
 fn migrate_v1_to_v2(mut value: Value) -> Result<Value, StorageError> {
@@ -140,6 +145,31 @@ fn migrate_v3_to_v4(mut value: Value) -> Result<Value, StorageError> {
                             "device_id": ""
                         }),
                     );
+                }
+            }
+        }
+    }
+
+    Ok(value)
+}
+
+fn migrate_v4_to_v5(mut value: Value) -> Result<Value, StorageError> {
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("version".to_string(), Value::from(5));
+
+        // Remove the evening field from any Scheduled tasks
+        // This is handled transparently by serde deserialization,
+        // but we explicitly clean up the JSON here for consistency
+        if let Some(tasks) = obj.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+            for task in tasks {
+                if let Some(task_obj) = task.as_object_mut() {
+                    if let Some(when_obj) = task_obj.get_mut("when").and_then(|w| w.as_object_mut())
+                    {
+                        if when_obj.get("type").and_then(|t| t.as_str()) == Some("Scheduled") {
+                            // Remove evening field if present
+                            when_obj.remove("evening");
+                        }
+                    }
                 }
             }
         }

@@ -15,8 +15,8 @@ Every task line is composed of two distinct sections separated by dynamic whites
 
 ### Vertical Composition
 
-- Tasks are grouped under bold headers based on the current view (e.g., **Today**, **Upcoming**, **Evening**).
-- A single empty line separates distinct groups (e.g., between the main "Today" list and the "Evening" bucket).
+- Tasks are grouped under bold headers based on the current view (e.g., **Today**, **Upcoming**).
+- A single empty line separates distinct groups (e.g., between different date sections).
 
 ---
 
@@ -94,10 +94,6 @@ $ tdo today
   3  ○  Call dentist to reschedule              Personal
   4  ○  Buy milk                                Personal / Errands
   5  ○  Write product spec for tdo              Side Projects / tdo
-
-  ─── Evening ───
-
-  6  ○  Read Chapter 5 of Rust book             Personal / Study
 
 ```
 

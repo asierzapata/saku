@@ -49,9 +49,6 @@ pub enum When {
     Inbox,
     Scheduled {
         date: Date,
-        // Support migration from old Today variant with evening field
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        evening: Option<bool>,
     },
     Someday,
     // Legacy variants for migration - deserialize only
@@ -80,10 +77,7 @@ impl When {
             When::LegacyToday { evening: _ } => {
                 // Convert old Today variant to Scheduled with today's date
                 let today = Zoned::now().date();
-                When::Scheduled {
-                    date: today,
-                    evening: None,
-                }
+                When::Scheduled { date: today }
             }
             When::LegacyAnytime => When::Someday,
             other => other,
@@ -128,10 +122,7 @@ impl When {
         // Process the valid flag
         if today {
             let today_date = Zoned::now().date();
-            Ok(When::Scheduled {
-                date: today_date,
-                evening: None,
-            })
+            Ok(When::Scheduled { date: today_date })
         } else if tomorrow {
             let tomorrow_date = Zoned::now()
                 .date()
@@ -139,7 +130,6 @@ impl When {
                 .expect("Failed to calculate tomorrow");
             Ok(When::Scheduled {
                 date: tomorrow_date,
-                evening: None,
             })
         } else if next_week {
             let today_date = Zoned::now().date();
@@ -155,20 +145,14 @@ impl When {
             let next_monday = today_date
                 .checked_add(jiff::Span::new().days(days_until_next_monday))
                 .expect("Failed to calculate next week");
-            Ok(When::Scheduled {
-                date: next_monday,
-                evening: None,
-            })
+            Ok(When::Scheduled { date: next_monday })
         } else if someday {
             Ok(When::Someday)
         } else if let Some(date_string) = on {
             let date = parse_natural_date(&date_string).map_err(|e| {
                 WhenInstantiationError::ScheduleAtIncorrect(date_string, e.to_string())
             })?;
-            Ok(When::Scheduled {
-                date,
-                evening: None,
-            })
+            Ok(When::Scheduled { date })
         } else {
             Ok(When::Inbox)
         }
@@ -332,11 +316,10 @@ mod tests {
         let normalized = legacy.normalize();
 
         match normalized {
-            When::Scheduled { date, evening } => {
+            When::Scheduled { date } => {
                 // Should be today's date
                 let today = jiff::Zoned::now().date();
                 assert_eq!(date, today);
-                assert_eq!(evening, None);
             }
             _ => panic!("Expected Scheduled variant"),
         }
@@ -359,7 +342,6 @@ mod tests {
 
         let scheduled = When::Scheduled {
             date: date(2026, 3, 15),
-            evening: None,
         };
         assert_eq!(scheduled.clone().normalize(), scheduled);
     }
@@ -370,9 +352,8 @@ mod tests {
         let today = jiff::Zoned::now().date();
 
         match when {
-            When::Scheduled { date, evening } => {
+            When::Scheduled { date } => {
                 assert_eq!(date, today);
-                assert_eq!(evening, None);
             }
             _ => panic!("Expected Scheduled variant"),
         }
@@ -387,10 +368,8 @@ mod tests {
         match when {
             When::Scheduled {
                 date: schedule_date,
-                evening,
             } => {
                 assert_eq!(schedule_date, date(2026, 3, 15));
-                assert_eq!(evening, None);
             }
             _ => panic!("Expected Scheduled variant"),
         }
