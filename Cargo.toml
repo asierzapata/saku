@@ -13,8 +13,14 @@ members = [
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Asier Zapata <me@asierzapata.com>"]
+publish = false
 
 [workspace.dependencies]
+# Internal dependencies
+saku-crypto = { path = "crates/saku-crypto" }
+saku-storage = { path = "crates/saku-storage" }
+saku-sync = { path = "crates/saku-sync" }
+
 # Shared dependencies with versions
 clap = { version = "4.5.58", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,9 +41,6 @@ keyring = "3"
 sha2 = "0.10"
 hex = "0.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
-    saku-crypto = { version = "0.1.0", path = "crates/saku-crypto" }
-    saku-storage = { version = "0.1.0", path = "crates/saku-storage" }
-    saku-sync = { version = "0.1.0", path = "crates/saku-sync" }
 
 # HTTP / server dependencies
 ureq = { version = "2", features = ["json"] }

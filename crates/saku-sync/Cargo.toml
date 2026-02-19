@@ -1,12 +1,12 @@
 [package]
 name = "saku-sync"
 version = "0.1.0"
-publish = false
 description = "Sync engine for the saku ecosystem"
 repository = "https://github.com/asierzapata/saku"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [features]
 default = []
