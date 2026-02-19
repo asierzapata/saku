@@ -84,8 +84,9 @@ else
   ALL_COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
 fi
 
-# Filter commits for this crate (matching prefix or no prefix)
-COMMITS=$(echo "$ALL_COMMITS" | grep -E "^- \(${CRATE}\)" || true)
+# Filter commits for this crate and its dependencies
+# Include commits with crate prefix (e.g., "(tdo)") and internal deps (e.g., "(storage)")
+COMMITS=$(echo "$ALL_COMMITS" | grep -E "^- \(${CRATE}\)|^- \(storage\)" || true)
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
