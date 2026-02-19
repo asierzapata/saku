@@ -11,7 +11,7 @@ static LAMPORT: AtomicU64 = AtomicU64::new(1);
 /// from disk (falling back to "unknown" if unavailable).
 pub fn next_modified_at() -> HybridTimestamp {
     let lamport = LAMPORT.fetch_add(1, Ordering::Relaxed);
-    let device_id = saku_storage::device::get_or_create_device_id()
-        .unwrap_or_else(|_| "unknown".to_string());
+    let device_id =
+        saku_storage::device::get_or_create_device_id().unwrap_or_else(|_| "unknown".to_string());
     HybridTimestamp::now(lamport, device_id)
 }

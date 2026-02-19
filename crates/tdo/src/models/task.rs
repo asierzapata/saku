@@ -2,8 +2,8 @@
 
 use std::cmp::Ordering;
 
-use jiff::civil::Date;
 use jiff::Timestamp;
+use jiff::civil::Date;
 use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

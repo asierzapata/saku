@@ -107,7 +107,7 @@ fn when_to_string(when: &When) -> String {
         When::Someday => "someday".to_string(),
         When::Scheduled { date, .. } => date.to_string(),
         When::LegacyToday { .. } => "today".to_string(), // Should not appear after migration
-        When::LegacyAnytime => "someday".to_string(), // Converted to someday
+        When::LegacyAnytime => "someday".to_string(),    // Converted to someday
     }
 }
 
@@ -342,7 +342,8 @@ pub fn has_changes(original_task: &Task, parsed: &ParsedTaskEdit, store: &Store)
     }
     for (i, original_item) in original_task.checklist.iter().enumerate() {
         if let Some((parsed_title, parsed_completed)) = parsed.checklist.get(i)
-            && (original_item.title != *parsed_title || original_item.completed != *parsed_completed)
+            && (original_item.title != *parsed_title
+                || original_item.completed != *parsed_completed)
         {
             return true;
         }

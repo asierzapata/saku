@@ -21,13 +21,21 @@ cargo install --path .
 ### View tasks
 
 ```bash
-tdo today           # Tasks scheduled for today
-tdo inbox           # Unprocessed tasks
-tdo upcoming        # Upcoming scheduled tasks
-tdo someday         # Someday/maybe tasks
-tdo logbook         # Completed tasks
-tdo all             # All active tasks
+tdo view today           # Tasks scheduled for today
+tdo view inbox           # Unprocessed tasks
+tdo view upcoming        # Upcoming scheduled tasks
+tdo view someday         # Someday/maybe tasks
+tdo view logbook         # Completed tasks
+tdo view all             # All active tasks
+tdo view trash           # Deleted items
+
+# View entity-specific tasks
+tdo view project "name"  # Tasks in a project
+tdo view area "name"     # Tasks/projects in an area
+tdo view tag "name"      # Tasks with a tag
 ```
+
+**Note:** The old direct commands (`tdo today`, `tdo inbox`, etc.) are deprecated and will be removed in v1.0.0. Use `tdo view <subcommand>` instead.
 
 ### Manage tasks
 

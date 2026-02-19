@@ -47,3 +47,4 @@ tempfile.workspace = true
 assert_cmd = "2"
 assert_fs = "1"
 predicates = "3"
+proptest = "1"

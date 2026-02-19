@@ -1,5 +1,5 @@
-use jiff::civil::Date;
 use jiff::Zoned;
+use jiff::civil::Date;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DateParseError {
@@ -12,7 +12,11 @@ impl std::fmt::Display for DateParseError {
         match self {
             DateParseError::InvalidFormat(msg) => write!(f, "Invalid date format: {}", msg),
             DateParseError::UnknownKeyword(keyword) => {
-                write!(f, "Unknown date keyword: '{}'. Supported: today, tomorrow, monday-sunday, next week, next <weekday>, or ISO format (YYYY-MM-DD)", keyword)
+                write!(
+                    f,
+                    "Unknown date keyword: '{}'. Supported: today, tomorrow, monday-sunday, next week, next <weekday>, or ISO format (YYYY-MM-DD)",
+                    keyword
+                )
             }
         }
     }
@@ -188,7 +192,7 @@ mod tests {
         assert_eq!(result.weekday(), jiff::civil::Weekday::Monday);
 
         let days_diff = result.since(today).unwrap().get_days();
-        assert!(days_diff >= 1 && days_diff <= 7);
+        assert!((1..=7).contains(&days_diff));
     }
 
     #[test]
@@ -289,5 +293,58 @@ mod tests {
         // Invalid ISO dates should fail
         assert!(parse_natural_date("2026-13-01").is_err()); // Invalid month
         assert!(parse_natural_date("2026-02-30").is_err()); // Invalid day
+    }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn weekday_strategy() -> impl Strategy<Value = &'static str> {
+            prop_oneof![
+                Just("monday"),
+                Just("tuesday"),
+                Just("wednesday"),
+                Just("thursday"),
+                Just("friday"),
+                Just("saturday"),
+                Just("sunday"),
+                Just("mon"),
+                Just("tue"),
+                Just("wed"),
+                Just("thu"),
+                Just("fri"),
+                Just("sat"),
+                Just("sun"),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn weekday_names_parse_to_future_date(day in weekday_strategy()) {
+                let today = Zoned::now().date();
+                let result = parse_natural_date(day).unwrap();
+                prop_assert!(result > today, "Parsed date {:?} should be after today {:?}", result, today);
+                let diff = result.since(today).unwrap().get_days();
+                prop_assert!((1..=7).contains(&diff), "Should be 1-7 days away, got {}", diff);
+            }
+
+            #[test]
+            fn arbitrary_strings_never_panic(input in "\\PC{0,50}") {
+                // parse_natural_date should never panic, only return Ok or Err
+                let _ = parse_natural_date(&input);
+            }
+
+            #[test]
+            fn valid_iso_dates_roundtrip(
+                year in 2000i16..2100,
+                month in 1i8..=12,
+                day in 1i8..=28  // 28 is safe for all months
+            ) {
+                let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
+                let parsed = parse_natural_date(&date_str).unwrap();
+                let reparsed = parse_natural_date(&parsed.to_string()).unwrap();
+                prop_assert_eq!(parsed, reparsed);
+            }
+        }
     }
 }

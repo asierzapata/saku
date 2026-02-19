@@ -261,14 +261,12 @@ fn render_task_line_with_options(
             // Fallback: compact inline separator
             println!("{}  {}  {}", styled_left, "·".dimmed(), right_dimmed);
         }
+    } else if left_visible_len + 2 < effective_width {
+        let gap = effective_width - left_visible_len - 1;
+        let dots = format!(" {}", "·".repeat(gap - 2));
+        println!("{}{}", styled_left, dots.dimmed());
     } else {
-        if left_visible_len + 2 < effective_width {
-            let gap = effective_width - left_visible_len - 1;
-            let dots = format!(" {}", "·".repeat(gap - 2));
-            println!("{}{}", styled_left, dots.dimmed());
-        } else {
-            println!("{}", styled_left);
-        }
+        println!("{}", styled_left);
     }
 }
 

@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use predicates::prelude::*;
@@ -23,7 +25,10 @@ fn project_new_creates_project() {
 fn project_new_with_area() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["create", "area", "Work"]).assert().success();
+    tdo(&temp)
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
 
     tdo(&temp)
         .args(["create", "project", "Sprint", "--area", "Work"])
@@ -69,7 +74,10 @@ fn project_list_empty() {
 fn project_list_shows_project_info() {
     let temp = TempDir::new().unwrap();
 
-    tdo(&temp).args(["create", "area", "Work"]).assert().success();
+    tdo(&temp)
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
     tdo(&temp)
         .args(["create", "project", "Sprint", "--area", "Work"])
         .assert()

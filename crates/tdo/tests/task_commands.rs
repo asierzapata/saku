@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use predicates::prelude::*;
@@ -227,4 +229,69 @@ fn move_task_to_project() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Project: Website"));
+}
+
+// --- Negative / error test cases ---
+
+#[test]
+fn done_task_not_found() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["done", "999"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn done_ambiguous_name() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+    tdo(&temp).args(["add", "Buy bread"]).assert().success();
+
+    tdo(&temp)
+        .args(["done", "Buy"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ambiguous"));
+}
+
+#[test]
+fn delete_already_deleted() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+    tdo(&temp).args(["delete", "1"]).assert().success();
+
+    tdo(&temp)
+        .args(["delete", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already deleted"));
+}
+
+#[test]
+fn add_with_invalid_date() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "Bad date task", "--on", "not-a-date"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid schedule date"));
+}
+
+#[test]
+fn move_to_nonexistent_project() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Some task"]).assert().success();
+
+    tdo(&temp)
+        .args(["move", "1", "--project", "nonexistent"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
 }

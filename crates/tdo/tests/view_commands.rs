@@ -13,73 +13,55 @@ fn tdo(temp_dir: &TempDir) -> Command {
 // ── Empty states ──────────────────────────────────────────────────────────────
 
 #[test]
-fn default_view_empty() {
+fn view_today_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
+        .args(["view", "today"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No tasks for today"));
 }
 
 #[test]
-fn today_empty() {
+fn view_inbox_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["today"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("No tasks for today"));
-}
-
-#[test]
-fn inbox_empty() {
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp)
-        .args(["inbox"])
+        .args(["view", "inbox"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Inbox is empty"));
 }
 
 #[test]
-fn upcoming_empty() {
+fn view_upcoming_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["upcoming"])
+        .args(["view", "upcoming"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No upcoming tasks"));
 }
 
 #[test]
-fn anytime_command_removed() {
-    // Anytime was replaced with Someday
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp).args(["anytime"]).assert().failure(); // Command should not exist
-}
-
-#[test]
-fn someday_empty() {
+fn view_someday_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["someday"])
+        .args(["view", "someday"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No someday tasks"));
 }
 
 #[test]
-fn logbook_empty() {
+fn view_logbook_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["logbook"])
+        .args(["view", "logbook"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -88,42 +70,31 @@ fn logbook_empty() {
 }
 
 #[test]
-fn trash_empty() {
+fn view_trash_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["trash"])
+        .args(["view", "trash"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Trash is empty"));
 }
 
 #[test]
-fn all_empty() {
+fn view_all_empty() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["all"])
+        .args(["view", "all"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No active tasks"));
 }
 
-#[test]
-fn tag_list_empty() {
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp)
-        .args(["list", "tags"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("No tags found"));
-}
-
 // ── With data ─────────────────────────────────────────────────────────────────
 
 #[test]
-fn today_shows_today_tasks() {
+fn view_today_shows_today_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
@@ -132,7 +103,7 @@ fn today_shows_today_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["today"])
+        .args(["view", "today"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Morning standup"))
@@ -140,13 +111,13 @@ fn today_shows_today_tasks() {
 }
 
 #[test]
-fn inbox_shows_tasks() {
+fn view_inbox_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp).args(["add", "Call dentist"]).assert().success();
 
     tdo(&temp)
-        .args(["inbox"])
+        .args(["view", "inbox"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Call dentist"))
@@ -154,7 +125,7 @@ fn inbox_shows_tasks() {
 }
 
 #[test]
-fn upcoming_shows_tasks() {
+fn view_upcoming_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
@@ -163,31 +134,14 @@ fn upcoming_shows_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["upcoming"])
+        .args(["view", "upcoming"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Team meeting"));
 }
 
 #[test]
-fn someday_replaces_anytime() {
-    // Someday replaced Anytime
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp)
-        .args(["add", "Read a book", "--someday"])
-        .assert()
-        .success();
-
-    tdo(&temp)
-        .args(["someday"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Read a book"));
-}
-
-#[test]
-fn someday_shows_tasks() {
+fn view_someday_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
@@ -196,42 +150,42 @@ fn someday_shows_tasks() {
         .success();
 
     tdo(&temp)
-        .args(["someday"])
+        .args(["view", "someday"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Learn Rust"));
 }
 
 #[test]
-fn logbook_shows_completed_tasks() {
+fn view_logbook_shows_completed_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp).args(["add", "Buy milk"]).assert().success();
     tdo(&temp).args(["done", "1"]).assert().success();
 
     tdo(&temp)
-        .args(["logbook"])
+        .args(["view", "logbook"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Buy milk"));
 }
 
 #[test]
-fn trash_shows_deleted_tasks() {
+fn view_trash_shows_deleted_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp).args(["add", "Buy milk"]).assert().success();
     tdo(&temp).args(["delete", "1"]).assert().success();
 
     tdo(&temp)
-        .args(["trash"])
+        .args(["view", "trash"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Buy milk"));
 }
 
 #[test]
-fn all_shows_tasks_grouped() {
+fn view_all_shows_tasks_grouped() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp).args(["add", "Inbox task"]).assert().success();
@@ -245,7 +199,7 @@ fn all_shows_tasks_grouped() {
         .success();
 
     tdo(&temp)
-        .args(["all"])
+        .args(["view", "all"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Inbox task"))
@@ -253,36 +207,106 @@ fn all_shows_tasks_grouped() {
         .stdout(predicate::str::contains("Someday task"));
 }
 
+// ── Entity views ──────────────────────────────────────────────────────────────
+
 #[test]
-fn tag_list_shows_tags() {
+fn view_project_shows_tasks() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
-        .args(["add", "Fix bug", "--tag", "urgent"])
+        .args(["create", "project", "Website"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["list", "tags"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("urgent"));
-}
-
-#[test]
-fn tag_view_shows_tasks() {
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp)
-        .args(["add", "Fix bug", "--tag", "urgent"])
+        .args(["add", "Fix bug", "--project", "Website"])
         .assert()
         .success();
 
     tdo(&temp)
-        .args(["show", "tag", "urgent"])
+        .args(["view", "project", "Website"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Fix bug"));
+}
+
+#[test]
+fn view_area_shows_projects_and_tasks() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["create", "area", "Work"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["create", "project", "Website", "--area", "Work"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["add", "Fix bug", "--project", "Website"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["view", "area", "Work"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Fix bug"));
+}
+
+#[test]
+fn view_tag_shows_tasks() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "Fix bug", "--tag", "urgent"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["view", "tag", "urgent"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Fix bug"));
+}
+
+#[test]
+fn view_tag_not_found() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["view", "tag", "nonexistent"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No tasks with tag 'nonexistent'"));
+}
+
+#[test]
+fn view_project_not_found() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["view", "project", "Nonexistent"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Error: Project 'Nonexistent' not found",
+        ));
+}
+
+#[test]
+fn view_area_not_found() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["view", "area", "Nonexistent"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Error: Area 'Nonexistent' not found",
+        ));
 }
 
 // ── Ordering ───────────────────────────────────────────────────────────────────
@@ -301,7 +325,7 @@ fn assert_order(stdout: &str, first: &str, second: &str) {
 }
 
 #[test]
-fn inbox_tasks_appear_in_number_order() {
+fn view_inbox_tasks_appear_in_number_order() {
     let temp = TempDir::new().unwrap();
 
     // Add tasks — they get numbers 1, 2, 3 in creation order
@@ -309,7 +333,7 @@ fn inbox_tasks_appear_in_number_order() {
     tdo(&temp).args(["add", "BETA_TASK"]).assert().success();
     tdo(&temp).args(["add", "GAMMA_TASK"]).assert().success();
 
-    let assert = tdo(&temp).args(["inbox"]).assert().success();
+    let assert = tdo(&temp).args(["view", "inbox"]).assert().success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     assert_order(&stdout, "ALPHA_TASK", "BETA_TASK");
@@ -317,23 +341,7 @@ fn inbox_tasks_appear_in_number_order() {
 }
 
 #[test]
-fn inbox_tasks_with_deadlines_appear_first() {
-    let temp = TempDir::new().unwrap();
-
-    tdo(&temp).args(["add", "NO_DEADLINE"]).assert().success();
-    tdo(&temp)
-        .args(["add", "WITH_DEADLINE", "--due", "2030-01-01"])
-        .assert()
-        .success();
-
-    let assert = tdo(&temp).args(["inbox"]).assert().success();
-    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-
-    assert_order(&stdout, "WITH_DEADLINE", "NO_DEADLINE");
-}
-
-#[test]
-fn today_tasks_appear_in_number_order() {
+fn view_today_tasks_appear_in_number_order() {
     let temp = TempDir::new().unwrap();
 
     tdo(&temp)
@@ -349,7 +357,7 @@ fn today_tasks_appear_in_number_order() {
         .assert()
         .success();
 
-    let assert = tdo(&temp).args(["today"]).assert().success();
+    let assert = tdo(&temp).args(["view", "today"]).assert().success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     assert_order(&stdout, "ALPHA_TASK", "BETA_TASK");

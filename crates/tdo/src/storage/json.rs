@@ -140,7 +140,7 @@ impl Storage for JsonFileStorage {
                 path: lock_file_path.clone(),
                 source: match e {
                     saku_storage::error::IoError::LockFailed { source, .. } => source,
-                    _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    _ => std::io::Error::other(e.to_string()),
                 },
             }
         })?;
@@ -152,7 +152,7 @@ impl Storage for JsonFileStorage {
             path: self.path.clone(),
             source: match e {
                 saku_storage::error::IoError::BackupFailed { source, .. } => source,
-                _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                _ => std::io::Error::other(e.to_string()),
             },
         })?;
 
@@ -160,7 +160,7 @@ impl Storage for JsonFileStorage {
             dir: self.path.clone(),
             source: match e {
                 saku_storage::error::IoError::CleanupFailed { source, .. } => source,
-                _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                _ => std::io::Error::other(e.to_string()),
             },
         })?;
 
@@ -176,7 +176,7 @@ impl Storage for JsonFileStorage {
                 source: match e {
                     saku_storage::error::IoError::WriteFailed { source, .. } => source,
                     saku_storage::error::IoError::RenameFailed { source, .. } => source,
-                    _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    _ => std::io::Error::other(e.to_string()),
                 },
             }
         })?;
@@ -188,7 +188,7 @@ impl Storage for JsonFileStorage {
                 path: self.path.clone(),
                 source: match e {
                     saku_storage::error::IoError::UnlockFailed { source, .. } => source,
-                    _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    _ => std::io::Error::other(e.to_string()),
                 },
             }
         })?;
@@ -241,7 +241,7 @@ mod tests {
         let json_file_storage = JsonFileStorage {
             path: PathBuf::from("/tmp/test_store.json"),
         };
-        if let Err(_) = json_file_storage.save(&store) {
+        if json_file_storage.save(&store).is_err() {
             panic!("Should correctly save the store");
         }
         match json_file_storage.load() {
@@ -327,8 +327,10 @@ mod tests {
         let storage = JsonFileStorage::new(store_path.clone());
 
         for i in 1..=7 {
-            let mut store = Store::default();
-            store.version = i;
+            let mut store = Store {
+                version: i,
+                ..Store::default()
+            };
 
             // Add a unique task to make each save different
             let task = Task {
@@ -374,8 +376,10 @@ mod tests {
             "Backups dir should not exist after first save"
         );
 
-        let mut store2 = Store::default();
-        store2.version = 2;
+        let mut store2 = Store {
+            version: 2,
+            ..Store::default()
+        };
 
         // Add a task to make it different from first save
         let task = Task {

@@ -162,14 +162,12 @@ fn migrate_v4_to_v5(mut value: Value) -> Result<Value, StorageError> {
         // but we explicitly clean up the JSON here for consistency
         if let Some(tasks) = obj.get_mut("tasks").and_then(|t| t.as_array_mut()) {
             for task in tasks {
-                if let Some(task_obj) = task.as_object_mut() {
-                    if let Some(when_obj) = task_obj.get_mut("when").and_then(|w| w.as_object_mut())
-                    {
-                        if when_obj.get("type").and_then(|t| t.as_str()) == Some("Scheduled") {
-                            // Remove evening field if present
-                            when_obj.remove("evening");
-                        }
-                    }
+                if let Some(task_obj) = task.as_object_mut()
+                    && let Some(when_obj) = task_obj.get_mut("when").and_then(|w| w.as_object_mut())
+                    && when_obj.get("type").and_then(|t| t.as_str()) == Some("Scheduled")
+                {
+                    // Remove evening field if present
+                    when_obj.remove("evening");
                 }
             }
         }
@@ -324,5 +322,152 @@ mod tests {
         assert_eq!(area_modified["wall_ms"], 0);
         assert_eq!(area_modified["lamport"], 0);
         assert_eq!(area_modified["device_id"], "");
+    }
+
+    #[test]
+    fn test_migrate_v1_to_v2_assigns_task_numbers() {
+        let v1_json = serde_json::json!({
+            "tasks": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "title": "Later task",
+                    "notes": null, "project_id": null, "area_id": null,
+                    "tags": [], "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "checklist": [], "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-02T00:00:00Z"
+                },
+                {
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "title": "Earlier task",
+                    "notes": null, "project_id": null, "area_id": null,
+                    "tags": [], "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "checklist": [], "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z"
+                }
+            ],
+            "projects": [],
+            "areas": []
+        });
+
+        let result = migrate_v1_to_v2(v1_json).unwrap();
+
+        assert_eq!(result["version"], 2);
+        assert_eq!(result["next_task_number"], 3);
+
+        // Earlier task (index 1) gets task_number 1, later task (index 0) gets 2
+        assert_eq!(result["tasks"][1]["task_number"], 1);
+        assert_eq!(result["tasks"][0]["task_number"], 2);
+    }
+
+    #[test]
+    fn test_migrate_v2_to_v3_adds_deleted_at() {
+        let v2_json = serde_json::json!({
+            "version": 2,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "name": "My Project",
+                    "area_id": null, "notes": null, "deadline": null,
+                    "completed_at": null,
+                    "created_at": "2025-06-01T00:00:00Z"
+                }
+            ],
+            "areas": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "name": "My Area"
+                }
+            ]
+        });
+
+        let result = migrate_v2_to_v3(v2_json).unwrap();
+
+        assert_eq!(result["version"], 3);
+        assert!(result["projects"][0]["deleted_at"].is_null());
+        assert!(result["areas"][0]["deleted_at"].is_null());
+    }
+
+    #[test]
+    fn test_migrate_v4_to_v5_removes_evening() {
+        let v4_json = serde_json::json!({
+            "version": 4,
+            "next_task_number": 2,
+            "tasks": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "task_number": 1,
+                    "title": "Evening task",
+                    "notes": null, "project_id": null, "area_id": null,
+                    "tags": [], "when": {"type": "Scheduled", "date": "2025-06-15", "evening": true},
+                    "deadline": null, "defer_until": null,
+                    "checklist": [], "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 0, "lamport": 0, "device_id": ""}
+                }
+            ],
+            "projects": [],
+            "areas": []
+        });
+
+        let result = migrate_v4_to_v5(v4_json).unwrap();
+
+        assert_eq!(result["version"], 5);
+        // evening field should be removed
+        assert!(result["tasks"][0]["when"].get("evening").is_none());
+        // date should still be there
+        assert_eq!(result["tasks"][0]["when"]["date"], "2025-06-15");
+        assert_eq!(result["tasks"][0]["when"]["type"], "Scheduled");
+    }
+
+    #[test]
+    fn test_full_migration_v1_to_v5() {
+        let v1_json = serde_json::json!({
+            "tasks": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "title": "My task",
+                    "notes": null, "project_id": null, "area_id": null,
+                    "tags": [], "when": {"type": "Scheduled", "date": "2025-06-15", "evening": true},
+                    "deadline": null, "defer_until": null,
+                    "checklist": [], "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z"
+                }
+            ],
+            "projects": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "name": "Project",
+                    "area_id": null, "notes": null, "deadline": null,
+                    "completed_at": null,
+                    "created_at": "2025-05-01T00:00:00Z"
+                }
+            ],
+            "areas": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000003",
+                    "name": "Area"
+                }
+            ]
+        });
+
+        let result = apply_migrations(v1_json, 1, 5).unwrap();
+
+        assert_eq!(result["version"], 5);
+        // v1→v2: task_number assigned
+        assert_eq!(result["tasks"][0]["task_number"], 1);
+        assert_eq!(result["next_task_number"], 2);
+        // v2→v3: deleted_at on projects/areas
+        assert!(result["projects"][0]["deleted_at"].is_null());
+        assert!(result["areas"][0]["deleted_at"].is_null());
+        // v3→v4: modified_at added
+        assert!(result["tasks"][0].get("modified_at").is_some());
+        assert!(result["projects"][0].get("modified_at").is_some());
+        assert!(result["areas"][0].get("modified_at").is_some());
+        // v4→v5: evening removed
+        assert!(result["tasks"][0]["when"].get("evening").is_none());
     }
 }
