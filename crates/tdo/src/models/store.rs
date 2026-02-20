@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::models::{area::Area, project::Project, task::Task};
 
 /// Current schema version
-pub const CURRENT_VERSION: u32 = 5;
+pub const CURRENT_VERSION: u32 = 6;
 
 /// Storage representation (how data lives on disk as JSON)
 #[derive(Serialize, Deserialize)]
@@ -194,5 +194,31 @@ impl Store {
         self.tasks
             .values()
             .filter(move |t| t.area_id == Some(area_id) && t.project_id.is_none())
+    }
+
+    /// Returns true if the task has at least one incomplete, non-deleted dependency.
+    pub fn is_task_blocked(&self, task: &Task) -> bool {
+        task.depends_on.iter().any(|dep_id| {
+            self.tasks.get(dep_id).is_some_and(|dep| {
+                dep.completed_at.is_none() && dep.deleted_at.is_none()
+            })
+        })
+    }
+
+    /// Returns all tasks that are directly blocking the given task (incomplete, non-deleted).
+    pub fn get_blockers(&self, task: &Task) -> Vec<&Task> {
+        task.depends_on
+            .iter()
+            .filter_map(|dep_id| self.tasks.get(dep_id))
+            .filter(|dep| dep.completed_at.is_none() && dep.deleted_at.is_none())
+            .collect()
+    }
+
+    /// Returns all tasks that depend on the given task (tasks that this task is blocking).
+    pub fn get_blocking(&self, task_id: Uuid) -> Vec<&Task> {
+        self.tasks
+            .values()
+            .filter(|t| t.depends_on.contains(&task_id))
+            .collect()
     }
 }

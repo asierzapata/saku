@@ -225,6 +225,15 @@ pub fn render_task_line_with_completion_date(task: &Task, store: &Store) {
     render_task_line_with_options(task, store, false, true);
 }
 
+/// Build a compact blocker badge string: "[blocked: #11]" or "[blocked: #11 +2]"
+fn blocker_badge(blockers: &[&crate::models::task::Task]) -> String {
+    match blockers.len() {
+        0 => String::new(),
+        1 => format!("[blocked: #{}]", blockers[0].task_number),
+        n => format!("[blocked: #{} +{}]", blockers[0].task_number, n - 1),
+    }
+}
+
 /// Internal function to render a task line with various options
 fn render_task_line_with_options(
     task: &Task,
@@ -301,8 +310,12 @@ fn render_task_line_with_options(
             }
         };
 
+    // Determine blocked state
+    let blockers = store.get_blockers(task);
+    let is_blocked = !blockers.is_empty();
+
     // Build styled left section
-    let styled_title = if task.completed_at.is_some() {
+    let styled_title = if task.completed_at.is_some() || is_blocked {
         display_title.as_str().dimmed()
     } else {
         display_title.as_str().white()
@@ -322,23 +335,41 @@ fn render_task_line_with_options(
         .map(|c| c.chars().count())
         .unwrap_or(0);
 
+    let badge_str = if is_blocked {
+        blocker_badge(&blockers)
+    } else {
+        String::new()
+    };
+    let badge_str_len = badge_str.chars().count();
+
     if let Some(ref ctx) = display_context {
-        // Fill remaining space with dots between title and context
+        // Fill remaining space with dots between title and context (+ blocker badge after context)
+        let right_len = display_ctx_len + if badge_str_len > 0 { 1 + badge_str_len } else { 0 };
         let sep_space =
-            effective_width.saturating_sub(fixed_overhead + display_title_len + display_ctx_len);
-        // sep_space is the budget for " " + dots + " "
+            effective_width.saturating_sub(fixed_overhead + display_title_len + right_len);
         let dots_count = sep_space.saturating_sub(2);
         let separator = format!(" {}{}", "·".repeat(dots_count), " ");
-        println!(
-            "{}{}{}",
-            left_section,
-            separator.dimmed(),
-            ctx.as_str().dimmed()
-        );
+        if badge_str_len > 0 {
+            println!(
+                "{}{}{} {}",
+                left_section,
+                separator.dimmed(),
+                ctx.as_str().dimmed(),
+                badge_str.dimmed()
+            );
+        } else {
+            println!(
+                "{}{}{}",
+                left_section,
+                separator.dimmed(),
+                ctx.as_str().dimmed()
+            );
+        }
     } else {
-        // No context: fill remaining space with dots
+        // No context: fill remaining space with dots, then blocker badge
+        let right_len = badge_str_len;
         let fill_space =
-            effective_width.saturating_sub(fixed_overhead + display_title_len);
+            effective_width.saturating_sub(fixed_overhead + display_title_len + right_len);
         let fill = if fill_space >= 2 {
             format!(" {}", "·".repeat(fill_space - 1))
         } else if fill_space == 1 {
@@ -346,7 +377,11 @@ fn render_task_line_with_options(
         } else {
             String::new()
         };
-        println!("{}{}", left_section, fill.dimmed());
+        if badge_str_len > 0 {
+            println!("{}{}{}", left_section, fill.dimmed(), badge_str.dimmed());
+        } else {
+            println!("{}{}", left_section, fill.dimmed());
+        }
     }
 }
 
