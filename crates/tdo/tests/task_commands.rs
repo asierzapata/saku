@@ -295,3 +295,83 @@ fn move_to_nonexistent_project() {
         .failure()
         .stderr(predicate::str::contains("not found"));
 }
+
+// --- Batch mode tests ---
+
+#[test]
+fn done_multiple_tasks_by_number() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+    tdo(&temp).args(["add", "Buy bread"]).assert().success();
+    tdo(&temp).args(["add", "Buy eggs"]).assert().success();
+
+    tdo(&temp)
+        .args(["done", "1", "2", "3"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Task completed: Buy milk"))
+        .stdout(predicate::str::contains("Task completed: Buy bread"))
+        .stdout(predicate::str::contains("Task completed: Buy eggs"));
+}
+
+#[test]
+fn delete_multiple_tasks_by_number() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+    tdo(&temp).args(["add", "Buy bread"]).assert().success();
+
+    tdo(&temp)
+        .args(["delete", "1", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Task deleted: Buy milk"))
+        .stdout(predicate::str::contains("Task deleted: Buy bread"));
+}
+
+#[test]
+fn restore_multiple_tasks_by_number() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+    tdo(&temp).args(["add", "Buy bread"]).assert().success();
+    tdo(&temp).args(["delete", "1", "2"]).assert().success();
+
+    tdo(&temp)
+        .args(["restore", "1", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Task restored: Buy milk"))
+        .stdout(predicate::str::contains("Task restored: Buy bread"));
+}
+
+#[test]
+fn move_multiple_tasks_to_today() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+    tdo(&temp).args(["add", "Buy bread"]).assert().success();
+
+    tdo(&temp)
+        .args(["move", "1", "2", "--today"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Task moved"))
+        .stdout(predicate::str::contains("#1"))
+        .stdout(predicate::str::contains("#2"));
+}
+
+#[test]
+fn done_batch_stops_on_first_error() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp).args(["add", "Buy milk"]).assert().success();
+
+    // Task 999 does not exist; should fail even though 1 would succeed
+    tdo(&temp)
+        .args(["done", "999", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
