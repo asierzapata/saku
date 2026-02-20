@@ -165,6 +165,32 @@ pub fn get_status_glyph(urgency: TaskUrgency) -> ColoredString {
     }
 }
 
+/// Build an abbreviated context string for a task (first 2 chars of each part)
+/// Used as a fallback when the full context doesn't fit on the line
+fn get_task_context_abbreviated(task: &Task, store: &Store) -> Option<String> {
+    if let Some(project_id) = task.project_id
+        && let Some(project) = store.get_project(project_id)
+    {
+        let proj_abbrev: String = project.name.chars().take(2).collect();
+        if let Some(area_id) = project.area_id
+            && let Some(area) = store.get_area(area_id)
+        {
+            let area_abbrev: String = area.name.chars().take(2).collect();
+            return Some(format!("{} / {}", area_abbrev, proj_abbrev));
+        }
+        return Some(proj_abbrev);
+    }
+
+    if let Some(area_id) = task.area_id
+        && let Some(area) = store.get_area(area_id)
+    {
+        let area_abbrev: String = area.name.chars().take(2).collect();
+        return Some(area_abbrev);
+    }
+
+    None
+}
+
 /// Build the context string for a task (Area/Project hierarchy)
 /// Returns None if task has no area or project associations
 pub fn get_task_context(task: &Task, store: &Store) -> Option<String> {
@@ -207,26 +233,80 @@ fn render_task_line_with_options(
     _show_completion_date: bool,
 ) {
     let terminal_width = get_terminal_width();
+    let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
 
     let id_str = format!("{:>3}", task.task_number);
-
-    // Calculate urgency
     let urgency = calculate_task_urgency(task);
-
-    // Get status glyph
     let glyph = get_status_glyph(urgency);
-
-    // Get date badge (always present now)
     let (date_str, badge_urgency) = get_task_date_badge(task);
 
-    // Style task title
-    let styled_title = if task.completed_at.is_some() {
-        task.title.dimmed()
-    } else {
-        task.title.white()
-    };
+    // Fixed overhead: " {id}  {glyph}  {badge}  " visible chars
+    // 1 (leading space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces)
+    let badge_visible_len = date_str.chars().count();
+    let fixed_overhead = 11 + badge_visible_len;
+    let available = effective_width.saturating_sub(fixed_overhead);
 
-    // Build left section with date badge
+    let title_chars: Vec<char> = task.title.chars().collect();
+    let title_len = title_chars.len();
+
+    // Context: full and abbreviated fallback
+    let context_full = get_task_context(task, store);
+    let context_abbrev = context_full
+        .as_ref()
+        .and_then(|_| get_task_context_abbreviated(task, store));
+
+    const ELLIPSIS: &str = "[…]";
+    const ELLIPSIS_LEN: usize = 3;
+    const MIN_SEP: usize = 3; // minimum " · " separator
+
+    // Decide what to display, in priority order:
+    //   1. Full title + full context
+    //   2. Full title + abbreviated context (first 2 letters of each part)
+    //   3. Truncated title[…] + abbreviated context
+    let (display_title, display_context): (String, Option<String>) =
+        if let Some(ref ctx_full) = context_full {
+            let ctx_full_len = ctx_full.chars().count();
+            let ctx_abbrev = context_abbrev.as_deref().unwrap_or("");
+            let ctx_abbrev_len = ctx_abbrev.chars().count();
+
+            if title_len + MIN_SEP + ctx_full_len <= available {
+                // Full title + full context fits
+                (task.title.clone(), Some(ctx_full.clone()))
+            } else if title_len + MIN_SEP + ctx_abbrev_len <= available {
+                // Full title + abbreviated context fits
+                (task.title.clone(), Some(ctx_abbrev.to_string()))
+            } else {
+                // Truncate title to fit alongside abbreviated context
+                let title_space = available.saturating_sub(MIN_SEP + ctx_abbrev_len);
+                let truncated = if title_space >= ELLIPSIS_LEN {
+                    title_chars[..title_space - ELLIPSIS_LEN]
+                        .iter()
+                        .collect::<String>()
+                        + ELLIPSIS
+                } else {
+                    title_chars[..title_space.min(title_len)].iter().collect()
+                };
+                (truncated, Some(ctx_abbrev.to_string()))
+            }
+        } else {
+            // No context: show full title or truncate if needed
+            if title_len <= available {
+                (task.title.clone(), None)
+            } else if available >= ELLIPSIS_LEN {
+                let truncated =
+                    title_chars[..available - ELLIPSIS_LEN].iter().collect::<String>() + ELLIPSIS;
+                (truncated, None)
+            } else {
+                (title_chars[..available.min(title_len)].iter().collect(), None)
+            }
+        };
+
+    // Build styled left section
+    let styled_title = if task.completed_at.is_some() {
+        display_title.as_str().dimmed()
+    } else {
+        display_title.as_str().white()
+    };
     let styled_badge = style_date_badge(&date_str, badge_urgency);
     let left_section = format!(
         " {}  {}  {}  {}",
@@ -236,37 +316,37 @@ fn render_task_line_with_options(
         styled_title
     );
 
-    let styled_left = left_section;
+    let display_title_len = display_title.chars().count();
+    let display_ctx_len = display_context
+        .as_ref()
+        .map(|c| c.chars().count())
+        .unwrap_or(0);
 
-    // Get context for right-aligned section
-    let context = get_task_context(task, store);
-
-    // Calculate visible lengths
-    // ID (3) + spaces (2) + glyph (1) + spaces (2) + badge (6) + spaces (2) + title
-    let left_visible_len = format!("  {}    {}  {}", id_str, "      ", task.title).len();
-
-    let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
-
-    // Render with dotted separator
-    if let Some(right_section) = context {
-        let right_dimmed = right_section.dimmed();
-        let right_visible_len = right_section.len();
-        let total_content = left_visible_len + right_visible_len;
-
-        if total_content + 4 < effective_width {
-            let gap = effective_width - total_content - 2;
-            let dots = format!(" {}{}", "·".repeat(gap - 2), " ");
-            println!("{}{}{}", styled_left, dots.dimmed(), right_dimmed);
-        } else {
-            // Fallback: compact inline separator
-            println!("{}  {}  {}", styled_left, "·".dimmed(), right_dimmed);
-        }
-    } else if left_visible_len + 2 < effective_width {
-        let gap = effective_width - left_visible_len - 1;
-        let dots = format!(" {}", "·".repeat(gap - 2));
-        println!("{}{}", styled_left, dots.dimmed());
+    if let Some(ref ctx) = display_context {
+        // Fill remaining space with dots between title and context
+        let sep_space =
+            effective_width.saturating_sub(fixed_overhead + display_title_len + display_ctx_len);
+        // sep_space is the budget for " " + dots + " "
+        let dots_count = sep_space.saturating_sub(2);
+        let separator = format!(" {}{}", "·".repeat(dots_count), " ");
+        println!(
+            "{}{}{}",
+            left_section,
+            separator.dimmed(),
+            ctx.as_str().dimmed()
+        );
     } else {
-        println!("{}", styled_left);
+        // No context: fill remaining space with dots
+        let fill_space =
+            effective_width.saturating_sub(fixed_overhead + display_title_len);
+        let fill = if fill_space >= 2 {
+            format!(" {}", "·".repeat(fill_space - 1))
+        } else if fill_space == 1 {
+            " ".to_string()
+        } else {
+            String::new()
+        };
+        println!("{}{}", left_section, fill.dimmed());
     }
 }
 
