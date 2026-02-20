@@ -488,7 +488,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
 /// Attempt to sync after a mutation.
 /// Tries server sync first (if configured), falls back to TDO_SYNC_DIR for local dev.
 /// Sync is best-effort: errors are printed as warnings but never abort.
-fn try_sync_after_mutation(storage_path: &std::path::Path) {
+fn try_sync(storage_path: &std::path::Path) {
     // Try server sync first (if the sync feature is enabled and configured)
     #[cfg(feature = "sync")]
     {
@@ -573,6 +573,12 @@ fn main() {
     }
 
     let storage = JsonFileStorage::new(storage_path.clone());
+
+    // Sync BEFORE loading store (unless this is a sync management command)
+    let is_sync_command = matches!(cli.command, Some(Commands::Sync { .. }));
+    if !is_sync_command {
+        try_sync(&storage_path);
+    }
 
     let mut store = match storage.load() {
         Ok(store) => store,
@@ -2593,6 +2599,6 @@ fn main() {
 
     // After mutation, attempt sync if TDO_SYNC_DIR is set
     if should_sync {
-        try_sync_after_mutation(&storage_path);
+        try_sync(&storage_path);
     }
 }
