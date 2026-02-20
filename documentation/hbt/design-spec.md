@@ -134,7 +134,7 @@ Represents the percentage of habits completed on that day:
 
 ## Views
 
-### Today — `hbt` / `hbt today`
+### Today — `hbt` / `hbt view today`
 
 Default view. Today's habits as a checklist with streaks right-aligned.
 
@@ -162,12 +162,12 @@ $ hbt
 
 ---
 
-### Week — `hbt week`
+### Week — `hbt view week`
 
 Current ISO week (Mon–Sun). Future days shown with `·`.
 
 ```text
-$ hbt week
+$ hbt view week
 
   Week (Feb 16–22)                                       5 habits
 
@@ -185,12 +185,12 @@ $ hbt week
 
 ---
 
-### Month — `hbt month [--month YYYY-MM]`
+### Month — `hbt view month [--month YYYY-MM]`
 
 All habits as rows, days of the month as columns.
 
 ```text
-$ hbt month
+$ hbt view month
 
   February 2026                                          5 habits
 
@@ -207,14 +207,14 @@ Designed for up to 80 terminal columns. If the terminal is wider, remaining days
 
 ---
 
-### Year — `hbt year [--year YYYY] [<habit>]`
+### Year — `hbt view year [--year YYYY] [<habit>]`
 
 GitHub contribution graph layout: rows are days of the week (Mon–Sun), columns are weeks, month labels appear at the top.
 
 **All habits (heatmap — density = % of habits done that day):**
 
 ```text
-$ hbt year
+$ hbt view year
 
   2026                                               All habits
 
@@ -232,7 +232,7 @@ $ hbt year
 **Single habit (binary — done/missed per day):**
 
 ```text
-$ hbt year exercise
+$ hbt view year "exercise"
 
   Exercise - 2026                         152 / 365  ·  41%  ·  14d streak
 
@@ -251,12 +251,12 @@ For quantitative habits in the single-habit year view, the density glyphs `░ �
 
 ---
 
-### Stats — `hbt stats [<habit>]`
+### Stats — `hbt view stats [<habit>]`
 
 **All habits:**
 
 ```text
-$ hbt stats
+$ hbt view stats
 
   Stats                                                  5 habits
 
@@ -272,7 +272,7 @@ $ hbt stats
 **Single habit:**
 
 ```text
-$ hbt stats exercise
+$ hbt view stats "exercise"
 
   Exercise                                           14d streak  ·  72%
 
@@ -293,12 +293,12 @@ For quantitative habits, a total amount line is appended:
 
 ---
 
-### Habit view — `hbt habit view <slug>`
+### Habit view — `hbt view habit "name"`
 
 Single-habit calendar (current month) with a stats footer.
 
 ```text
-$ hbt habit view exercise
+$ hbt view habit "exercise"
 
   Exercise                                               14d  ·  72%
 
@@ -315,10 +315,10 @@ $ hbt habit view exercise
 
 ---
 
-### Habit list — `hbt habit list`
+### Habit list — `hbt list habits`
 
 ```text
-$ hbt habit list
+$ hbt list habits
 
   Habits                                                 5 habits
 
@@ -332,10 +332,10 @@ $ hbt habit list
 
 ---
 
-### Category view — `hbt category view <slug>`
+### Category view — `hbt view category "name"`
 
 ```text
-$ hbt category view health
+$ hbt view category "health"
 
   Health                                                 2 habits
 
@@ -346,10 +346,10 @@ $ hbt category view health
 
 ---
 
-### Trash — `hbt trash`
+### Trash — `hbt view trash`
 
 ```text
-$ hbt trash
+$ hbt view trash
 
   Trash                                                  1 habit
 
@@ -414,17 +414,12 @@ Errors go to **stderr**. The message is always followed by actionable context.
 ```text
 Error: Habit 'exercie' not found
   Did you mean: exercise?
-  Run `hbt habit list` to see all habits
+  Run `hbt list habits` to see all habits
 ```
 
 ```text
 Error: No goal set for 'Exercise'
   Provide --amount or set a goal with `hbt habit edit exercise`
-```
-
-```text
-Error: Entry already exists for 'Exercise' on Feb 17
-  Use `hbt log exercise --amount 6` to overwrite, or `hbt unlog exercise` to remove
 ```
 
 ```text
