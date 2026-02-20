@@ -1,71 +1,63 @@
 # Recurring Tasks Implementation Plan
 
-## Overview
+## Core Idea
 
-Add recurring task support to `tdo`. When a recurring task is completed, the next instance is automatically spawned for the next scheduled date. Recurrence metadata lives on the task itself (no separate template entity), keeping the model simple.
+A recurring task is stored **once** in the store. Occurrences are computed on the fly when rendering any view, exactly like iCalendar clients do with RRULE. Completing an occurrence appends its date to `completed_occurrences` on the task — the task itself is never marked `completed_at` until the user explicitly cancels/stops the recurrence.
 
 ---
 
 ## Supported Recurrence Patterns
 
-Based on the docs:
-
-| User input              | Meaning                            |
-|-------------------------|------------------------------------|
-| `daily`                 | Every day                          |
-| `weekly`                | Every 7 days from the task's date  |
-| `monday`                | Every Monday                       |
-| `mon,wed,fri`           | Every Mon, Wed, and Fri            |
-| `monthly`               | Same day of month, every month     |
-| `1st of month`          | 1st of every month                 |
-| `15th of month`         | 15th of every month                |
-| `1st monday of month`   | 1st Monday of every month          |
-| `last friday of month`  | Last Friday of every month         |
-| `yearly`                | Same date, every year              |
+| User input              | RRULE equivalent                          |
+|-------------------------|-------------------------------------------|
+| `daily`                 | `FREQ=DAILY`                              |
+| `weekly`                | `FREQ=WEEKLY`                             |
+| `monday`                | `FREQ=WEEKLY;BYDAY=MO`                    |
+| `mon,wed,fri`           | `FREQ=WEEKLY;BYDAY=MO,WE,FR`             |
+| `monthly`               | `FREQ=MONTHLY;BYMONTHDAY=<dtstart.day>`  |
+| `1st of month`          | `FREQ=MONTHLY;BYMONTHDAY=1`              |
+| `15th of month`         | `FREQ=MONTHLY;BYMONTHDAY=15`             |
+| `1st monday of month`   | `FREQ=MONTHLY;BYDAY=1MO`                 |
+| `last friday of month`  | `FREQ=MONTHLY;BYDAY=-1FR`                |
+| `yearly`                | `FREQ=YEARLY`                             |
 
 ---
 
 ## Step 1: Data Model (`models/task.rs`)
 
-Add two new types and two new fields to `Task`.
-
 ### New types
 
 ```rust
-/// Describes when a recurring task repeats within a month
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum MonthlyAnchor {
-    /// e.g. "1st of month" → day = 1, "15th of month" → day = 15
-    DayOfMonth { day: u8 },
-    /// e.g. "1st monday of month" → nth = 1, weekday = Monday
-    NthWeekday { nth: u8, weekday: SerdeWeekday },
-    /// e.g. "last friday of month"
-    LastWeekday { weekday: SerdeWeekday },
-}
-
-/// Recurrence pattern
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RecurrencePattern {
+#[serde(rename_all = "snake_case")]
+pub enum Freq {
     Daily,
     Weekly,
-    /// Specific weekdays — at least one element
-    Weekdays { days: Vec<SerdeWeekday> },
-    Monthly { anchor: MonthlyAnchor },
+    Monthly,
     Yearly,
 }
 
-/// Full recurrence config attached to a task
+/// A BYDAY entry: optional ordinal (1, 2, -1 for last) + weekday.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Recurrence {
-    pub pattern: RecurrencePattern,
-    /// Recurrence ends after this date (inclusive). None = repeat forever.
-    pub until: Option<Date>,
+pub struct ByDay {
+    pub ordinal: Option<i8>,     // None = every occurrence, 1 = first, -1 = last
+    pub weekday: SerdeWeekday,
 }
 
-/// jiff::civil::Weekday is not Serialize; wrap it.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Copy)]
+/// RRULE-style recurrence rule.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Recurrence {
+    pub freq: Freq,
+    pub interval: u32,           // default 1
+    pub byday: Vec<ByDay>,       // weekday constraints
+    pub bymonthday: Option<i8>,  // day of month (negative = from end)
+    pub until: Option<Date>,     // end date (inclusive)
+    pub count: Option<u32>,      // max number of occurrences
+    pub dtstart: Date,           // anchor date for generating occurrences
+}
+
+/// Serializable weekday (jiff::civil::Weekday is not Serialize).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SerdeWeekday {
     Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday,
@@ -79,79 +71,85 @@ impl From<jiff::civil::Weekday> for SerdeWeekday { ... }
 
 ```rust
 pub struct Task {
-    // ... existing fields ...
+    // ... existing fields unchanged ...
 
-    /// Recurrence configuration. None = one-off task.
+    /// RRULE-style recurrence rule. None = one-off task.
     pub recurrence: Option<Recurrence>,
 
-    /// UUID of the first task in this recurrence chain.
-    /// None for non-recurring or the very first instance.
-    pub recurring_origin_id: Option<Uuid>,
+    /// Dates of occurrences that have been completed.
+    pub completed_occurrences: Vec<Date>,
 }
 ```
 
-`Task::default()` already works via `#[derive(Default)]`; the new fields default to `None` / `vec![]`.
+`Task::default()` covers both with `None` / empty `vec![]`.
 
-### Next-occurrence computation
+### Occurrence generator
 
-Add a free function in `models/task.rs`:
+A pure function that expands a rule into dates:
 
 ```rust
-/// Given a recurrence pattern and the date of the just-completed instance,
-/// return the next scheduled date (or None if past `until`).
-pub fn next_recurrence_date(
-    recurrence: &Recurrence,
-    completed_instance_date: Date,
-) -> Option<Date>
+/// Yields occurrence dates from `rule.dtstart` up to (and including) `up_to`.
+pub fn occurrences_up_to(rule: &Recurrence, up_to: Date) -> Vec<Date>
 ```
 
-Logic per pattern:
-- **Daily** → `completed_instance_date + 1 day`
-- **Weekly** → `completed_instance_date + 7 days`
-- **Weekdays** → find the next weekday in the set that is strictly after `completed_instance_date` (wraps week)
-- **Monthly / DayOfMonth** → same day next month (clamp to last day if needed)
-- **Monthly / NthWeekday** → nth occurrence of that weekday in next month
-- **Monthly / LastWeekday** → last occurrence of that weekday in next month
-- **Yearly** → same date next year
+Logic:
+- Start from `rule.dtstart`, walk forward by `rule.interval` periods according to `rule.freq`
+- Apply `byday` / `bymonthday` constraints to filter/select dates within each period
+- Stop when date > `up_to`, or > `rule.until` (if set), or `rule.count` is reached
 
-After computing, check `recurrence.until`: if next date > until, return `None`.
+### Helper: is an occurrence pending on a given date?
+
+```rust
+pub fn is_pending_on(task: &Task, date: Date) -> bool {
+    let Some(rule) = &task.recurrence else { return false };
+    let occurrences = occurrences_up_to(rule, date);
+    occurrences.contains(&date) && !task.completed_occurrences.contains(&date)
+}
+```
 
 ---
 
 ## Step 2: Recurrence Pattern Parser (`src/recurrence_parser.rs`)
 
-New file, analogous to `date_parser.rs`.
+New file — parses the `--every` CLI string into a `Recurrence`.
 
 ```rust
 pub enum RecurrenceParseError {
     UnknownPattern(String),
 }
 
-/// Parse a user-supplied `--every` string into a `RecurrencePattern`.
-pub fn parse_recurrence_pattern(input: &str) -> Result<RecurrencePattern, RecurrenceParseError>
+/// Parse a user-supplied `--every` string into a `Recurrence`.
+/// `dtstart` is passed in from the task's scheduled date (or today).
+pub fn parse_recurrence(input: &str, dtstart: Date) -> Result<Recurrence, RecurrenceParseError>
 ```
 
-Parsing rules (case-insensitive, trimmed):
+Rules (case-insensitive):
 
-| Input pattern                    | Result                                          |
-|----------------------------------|-------------------------------------------------|
-| `"daily"` / `"day"`              | `RecurrencePattern::Daily`                      |
-| `"weekly"` / `"week"`            | `RecurrencePattern::Weekly`                     |
-| `"monthly"` / `"month"`          | `RecurrencePattern::Monthly { anchor: DayOfMonth { day: 1 } }` (user can be specific) |
-| `"yearly"` / `"year"`            | `RecurrencePattern::Yearly`                     |
-| single weekday `"monday"` etc.   | `RecurrencePattern::Weekdays { days: [Monday] }` |
-| comma-separated `"mon,wed,fri"`  | `RecurrencePattern::Weekdays { days: [...] }`   |
-| `"1st of month"` / `"2nd of month"` … | `RecurrencePattern::Monthly { anchor: DayOfMonth { day: N } }` |
-| `"1st monday of month"` etc.     | `RecurrencePattern::Monthly { anchor: NthWeekday { nth: 1, weekday: Monday } }` |
-| `"last friday of month"` etc.    | `RecurrencePattern::Monthly { anchor: LastWeekday { weekday: Friday } }` |
+| Input | Resulting `Recurrence` |
+|-------|------------------------|
+| `"daily"` | `freq=Daily, interval=1, byday=[], bymonthday=None` |
+| `"weekly"` | `freq=Weekly, interval=1, byday=[]` |
+| `"monday"` | `freq=Weekly, byday=[{None, Monday}]` |
+| `"mon,wed,fri"` | `freq=Weekly, byday=[{None,Mon},{None,Wed},{None,Fri}]` |
+| `"monthly"` | `freq=Monthly, bymonthday=Some(dtstart.day())` |
+| `"1st of month"` | `freq=Monthly, bymonthday=Some(1)` |
+| `"1st monday of month"` | `freq=Monthly, byday=[{Some(1), Monday}]` |
+| `"last friday of month"` | `freq=Monthly, byday=[{Some(-1), Friday}]` |
+| `"yearly"` | `freq=Yearly, interval=1` |
 
-Ordinal helpers: `"1st"→1`, `"2nd"→2`, `"3rd"→3`, `"4th"→4`, `"5th"→5`.
+`until` and `count` are always `None` here — they come from `--until` / `--count` flags separately and are set by the caller after parsing.
 
-Include `Display` impl for `RecurrencePattern` (used in UI badge):
-- `Daily` → `"every day"`
-- `Weekdays([Mon, Wed, Fri])` → `"Mon, Wed, Fri"`
-- `Monthly { DayOfMonth(1) }` → `"1st of month"`
-- etc.
+Also add `Display` for `Recurrence` (used in UI badge):
+
+```
+Daily            → "every day"
+Weekly           → "every week"
+Weekdays MO,WE,FR → "Mon, Wed, Fri"
+Monthly day 1    → "1st of month"
+Monthly 1MO      → "1st Mon of month"
+Monthly -1FR     → "last Fri of month"
+Yearly           → "every year"
+```
 
 ---
 
@@ -161,30 +159,29 @@ Add `migrate_v6_to_v7`:
 
 ```rust
 fn migrate_v6_to_v7(value: &mut serde_json::Value) {
-    // Add recurrence: null and recurring_origin_id: null to every task
     if let Some(tasks) = value["tasks"].as_array_mut() {
         for task in tasks.iter_mut() {
             task["recurrence"] = serde_json::Value::Null;
-            task["recurring_origin_id"] = serde_json::Value::Null;
+            task["completed_occurrences"] = serde_json::json!([]);
         }
     }
     value["version"] = serde_json::json!(7);
 }
 ```
 
-Bump `CURRENT_VERSION` constant from `6` to `7`. Add the new step to `apply_migrations`.
+Bump `CURRENT_VERSION` from `6` to `7`.
 
 ---
 
-## Step 4: Store version bump (`models/store.rs`)
+## Step 4: Store (`models/store.rs`)
 
-Change `StoredStore::version` default/constant from `6` to `7`. No other store changes needed — the new fields serialize/deserialize automatically via serde.
+Bump version constant to `7`.
 
-Also add a query helper for the recurring view:
+Add query helper:
 
 ```rust
 impl Store {
-    /// Return all active (not completed, not deleted) tasks that have recurrence set.
+    /// Active tasks that have a recurrence rule set (not cancelled/deleted).
     pub fn get_recurring_tasks(&self) -> impl Iterator<Item = &Task> {
         self.get_active_tasks()
             .filter(|t| t.recurrence.is_some() && t.completed_at.is_none())
@@ -198,8 +195,6 @@ impl Store {
 
 ### 5a. `AddTaskParameters`
 
-Add field:
-
 ```rust
 pub struct AddTaskParameters {
     // ... existing ...
@@ -207,205 +202,125 @@ pub struct AddTaskParameters {
 }
 ```
 
-In `add_task`, after building the `Task`, set `task.recurrence = parameters.recurrence`.
+In `add_task`, copy `parameters.recurrence` onto the new task.
 
 ### 5b. `MoveTaskParameters`
-
-Add optional field for updating recurrence:
 
 ```rust
 pub struct MoveTaskParameters {
     // ... existing ...
-    pub recurrence: Option<Recurrence>,       // set a new recurrence
-    pub clear_recurrence: bool,               // remove recurrence
+    pub recurrence: Option<Recurrence>,
+    pub clear_recurrence: bool,
 }
 ```
 
-Apply in `move_task` similarly to how deadline is handled.
+### 5c. `complete_task` — two behaviors
 
-### 5c. `CompleteTaskResult` and `complete_task`
+Distinguish by whether the task is recurring:
 
-Update result type:
+**Non-recurring task** (existing behavior):
+- Set `completed_at = now`
+
+**Recurring task**:
+- Determine the occurrence date being completed (the task's `when` date, or today)
+- Append that date to `task.completed_occurrences`
+- Do **not** touch `completed_at` — the task stays alive
+
+**New service function: `cancel_recurrence`**:
+- Sets `completed_at = now` on a recurring task, effectively stopping it
+- Exposed as `tdo cancel <task_number>` or `tdo done --stop <task_number>`
+
+Update `CompleteTaskResult`:
 
 ```rust
 pub struct CompleteTaskResult {
     pub task: Task,
     pub newly_unblocked: Vec<Task>,
-    pub next_recurring_instance: Option<Task>,   // NEW
+    // next_recurring_instance removed — no longer needed
 }
-```
-
-In `complete_task`, after marking the task complete, add:
-
-```rust
-let next_recurring_instance = if let Some(recurrence) = &updated_task.recurrence {
-    // Determine the completed instance's scheduled date (or today as fallback)
-    let instance_date = match updated_task.when {
-        When::Scheduled { date } => date,
-        _ => jiff::Zoned::now().date(),
-    };
-
-    if let Some(next_date) = next_recurrence_date(recurrence, instance_date) {
-        let mut next_task = Task {
-            id: Uuid::new_v4(),
-            task_number: 0,                             // assigned by store.add_task
-            title: updated_task.title.clone(),
-            notes: updated_task.notes.clone(),
-            project_id: updated_task.project_id,
-            area_id: updated_task.area_id,
-            tags: updated_task.tags.clone(),
-            when: When::Scheduled { date: next_date },
-            deadline: None,                             // deadlines don't carry over
-            defer_until: None,
-            depends_on: vec![],
-            checklist: updated_task.checklist.iter().map(|item| ChecklistItem {
-                id: Uuid::new_v4(),
-                title: item.title.clone(),
-                completed: false,                       // reset checklist
-            }).collect(),
-            recurrence: Some(recurrence.clone()),
-            recurring_origin_id: Some(
-                updated_task.recurring_origin_id.unwrap_or(updated_task.id)
-            ),
-            completed_at: None,
-            deleted_at: None,
-            created_at: jiff::Timestamp::now(),
-            modified_at: crate::sync_clock::next_modified_at(),
-        };
-        store.add_task(next_task);  // add_task assigns task_number
-        Some(store.get_task(next_task.id).unwrap().clone())
-    } else {
-        None  // past `until` date
-    }
-} else {
-    None
-};
-
-// persist
-storage.save(store)?;
-
-Ok(CompleteTaskResult {
-    task: updated_task,
-    newly_unblocked,
-    next_recurring_instance,
-})
 ```
 
 ---
 
-## Step 6: CLI (`main.rs`)
+## Step 6: View rendering (`main.rs` / view handlers)
 
-### 6a. `Commands::Add` — new flags
+Every view that lists tasks needs to expand recurring tasks into their pending occurrences. The key change is in the filter/display pipeline:
 
-```rust
-Add {
-    // ... existing flags ...
-    /// Recurrence pattern, e.g. "daily", "monday", "mon,wed,fri", "1st of month"
-    #[arg(long, value_name = "PATTERN")]
-    every: Option<String>,
+**Today view**: include recurring tasks where `is_pending_on(task, today)` is true.
 
-    /// End date for recurrence, e.g. "2026-12-31"
-    #[arg(long, value_name = "DATE")]
-    until: Option<String>,
-}
-```
+**Upcoming view**: for each recurring task, call `occurrences_up_to(rule, end_of_window)`, subtract `completed_occurrences`, and inject virtual "occurrence rows" into the list (same task, different display date).
 
-Parsing in the `Add` arm:
+**Inbox / Someday / Logbook**: recurring tasks don't appear here — they always live in the scheduled space.
 
-```rust
-let recurrence = if let Some(pattern_str) = every {
-    let pattern = parse_recurrence_pattern(&pattern_str)
-        .map_err(|e| { eprintln!("Error: {}", e); std::process::exit(2); })?;
-    let until_date = until.map(|s| parse_natural_date(&s)
-        .map_err(|e| { eprintln!("Error: {}", e); std::process::exit(2); })
-        .unwrap());
-    Some(Recurrence { pattern, until: until_date })
-} else {
-    None
-};
-```
-
-Pass into `AddTaskParameters`.
-
-### 6b. `Commands::Move` — new flags
-
-Same `--every` / `--until` / `--clear-recurrence` flags. Pass into `MoveTaskParameters`.
-
-### 6c. `Commands::View` — new `Recurring` variant
-
-Add to the `ViewEntity` / view subcommand enum:
-
-```rust
-Recurring,
-```
-
-Handler:
+**Recurring view** (`tdo view recurring`):
 
 ```rust
 ViewEntity::Recurring => {
-    let store = load_store();
-    let tasks: Vec<&Task> = store.get_recurring_tasks().collect();
-    if tasks.is_empty() {
-        println!("No recurring tasks.");
-    } else {
-        println!("  Recurring  ({} tasks)\n", tasks.len());
-        for task in order_tasks(tasks) {
-            render_task_line(task, &store);
-        }
-    }
-}
-```
-
-### 6d. `Commands::Done` result handling
-
-Update the done output to announce the spawned next instance:
-
-```rust
-if let Some(next) = result.next_recurring_instance {
-    println!("  ↻ Next instance scheduled: #{} on {}", next.task_number, next.when_date_display());
+    // Show all tasks with recurrence set (not cancelled), one row each.
+    // Display the next pending occurrence date and the recurrence badge.
 }
 ```
 
 ---
 
-## Step 7: UI (`ui.rs`)
+## Step 7: CLI (`main.rs`)
 
-### Recurrence badge in task lines
-
-In `render_task_line`, after the context column, if `task.recurrence.is_some()`, append a dimmed recurrence indicator:
+### New flags on `Add` and `Move`
 
 ```
-42  ○  Team standup                     Work  ↻ Mon, Wed, Fri
-43  ○  Pay rent                         Personal  ↻ 1st of month
+--every <PATTERN>    Recurrence pattern ("daily", "monday", "mon,wed,fri", "1st of month", …)
+--until <DATE>       Stop recurring after this date
+--count <N>          Stop after N occurrences
+--clear-recurrence   (Move only) Remove recurrence from the task
 ```
 
-Use `↻` (or `⟳`) as the recurrence glyph, dimmed, followed by the pattern's display string.
+### New `done` flag
+
+```
+--stop               Cancel a recurring task permanently (sets completed_at)
+```
+
+### `tdo view recurring`
+
+Show all recurring tasks with their rule badge and next occurrence date.
 
 ---
 
-## Step 8: Tests
+## Step 8: UI (`ui.rs`)
+
+In `render_task_line`, if `task.recurrence.is_some()`, append a dimmed recurrence badge after the context:
+
+```
+42  ○  Team standup          Work  ↻ Mon, Wed, Fri   next: Mon Feb 23
+43  ○  Pay rent           Personal  ↻ 1st of month   next: Sun Mar 1
+```
+
+---
+
+## Step 9: Tests
 
 ### Unit tests in `models/task.rs`
 
-- `next_recurrence_date` for each `RecurrencePattern` variant
-- Edge cases: month-end clamping (Jan 31 → Feb 28/29), leap years, `until` boundary
+- `occurrences_up_to` for each `Freq` variant
+- Edge cases: month-end clamping (Jan 31 → Feb 28), leap years
+- `count` termination
+- `until` boundary (inclusive)
+- `is_pending_on` returns false for completed occurrences
 
 ### Unit tests in `recurrence_parser.rs`
 
-- All supported input strings parse correctly
-- Unknown strings return `RecurrenceParseError`
-- Case-insensitive and whitespace-tolerant
+- All input strings parse to correct `Recurrence`
+- Case-insensitive, whitespace-tolerant
+- Unknown strings return error
 
-### Integration tests in `tests/`
+### Integration tests (`tests/recurring_tasks.rs`)
 
-New file `tests/recurring_tasks.rs`:
-
-- `tdo add "standup" --every monday --project work` → task created with recurrence
-- `tdo view recurring` → shows the task
-- `tdo done <id>` → original marked complete, new instance created with correct date
-- `tdo done <id>` on last instance (past `--until`) → no next instance spawned
-- `tdo move <id> --clear-recurrence` → recurrence removed
-- Migration: v6 store JSON with no recurrence fields → loads correctly after migration
+- `tdo add "standup" --every monday` → task created
+- `tdo view recurring` → task appears
+- `tdo done <id>` → occurrence appended to `completed_occurrences`, task still active
+- `tdo done <id> --stop` → `completed_at` set, task disappears from views
+- `tdo done <id>` past `--until` → error or no-op
+- Migration: v6 JSON loads cleanly as v7
 
 ---
 
@@ -413,24 +328,24 @@ New file `tests/recurring_tasks.rs`:
 
 | File | Change |
 |------|--------|
-| `crates/tdo/src/models/task.rs` | Add `SerdeWeekday`, `MonthlyAnchor`, `RecurrencePattern`, `Recurrence` types; add `recurrence` + `recurring_origin_id` to `Task`; add `next_recurrence_date()` fn |
-| `crates/tdo/src/recurrence_parser.rs` | **New file** — parse `--every` strings |
+| `crates/tdo/src/models/task.rs` | Add `SerdeWeekday`, `Freq`, `ByDay`, `Recurrence` types; add `recurrence` + `completed_occurrences` to `Task`; add `occurrences_up_to()` + `is_pending_on()` |
+| `crates/tdo/src/recurrence_parser.rs` | **New file** — parse `--every` strings into `Recurrence` |
 | `crates/tdo/src/storage/migrations.rs` | Add `migrate_v6_to_v7`, bump `CURRENT_VERSION` to 7 |
 | `crates/tdo/src/models/store.rs` | Bump version to 7; add `get_recurring_tasks()` |
-| `crates/tdo/src/services/tasks.rs` | Extend `AddTaskParameters`, `MoveTaskParameters`, `CompleteTaskResult`; update `complete_task` to spawn next instance |
-| `crates/tdo/src/main.rs` | Add `--every`, `--until`, `--clear-recurrence` flags to `Add`/`Move`; add `View::Recurring` subcommand; print next-instance message on done |
-| `crates/tdo/src/ui.rs` | Add recurrence badge (↻ + pattern string) to `render_task_line` |
-| `crates/tdo/src/lib.rs` / `main.rs` | `mod recurrence_parser;` declaration |
+| `crates/tdo/src/services/tasks.rs` | Update `AddTaskParameters`, `MoveTaskParameters`; split `complete_task` behavior; add `cancel_recurrence` |
+| `crates/tdo/src/main.rs` | Add `--every`, `--until`, `--count`, `--clear-recurrence`, `--stop` flags; add `View::Recurring`; update view pipelines |
+| `crates/tdo/src/ui.rs` | Add recurrence badge + next-occurrence date to `render_task_line` |
+| `crates/tdo/src/lib.rs` | `mod recurrence_parser;` declaration |
 | `tests/recurring_tasks.rs` | **New file** — integration tests |
 
 ---
 
-## Suggested Implementation Order
+## Implementation Order
 
-1. `models/task.rs` — data types + `next_recurrence_date()`
-2. `recurrence_parser.rs` — pattern parser + unit tests
+1. `models/task.rs` — types + `occurrences_up_to` + `is_pending_on`
+2. `recurrence_parser.rs` — parser + unit tests
 3. `storage/migrations.rs` + `models/store.rs` — migration + version bump
-4. `services/tasks.rs` — wire recurrence into add/move/complete
-5. `main.rs` — CLI flags + `view recurring` + done output
+4. `services/tasks.rs` — complete_task split + cancel_recurrence
+5. `main.rs` — CLI flags + view pipeline changes
 6. `ui.rs` — recurrence badge
 7. Integration tests
