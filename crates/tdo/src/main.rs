@@ -18,9 +18,10 @@ use saku_tdo::{
         },
         tasks::{
             AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
-            DeleteTaskError, DeleteTaskParameters, EditTaskError, EditTaskParameters,
-            MoveTaskError, MoveTaskParameters, RestoreTaskError, RestoreTaskParameters, add_task,
-            complete_task, delete_task, edit_task, move_task, restore_task,
+            DeleteTaskError, DeleteTaskParameters, DependTaskError, DependTaskParameters,
+            EditTaskError, EditTaskParameters, MoveTaskError, MoveTaskParameters,
+            RestoreTaskError, RestoreTaskParameters, add_task, complete_task, delete_task,
+            depend_task, edit_task, move_task, restore_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
@@ -170,6 +171,20 @@ enum Commands {
 
     /// Complete a task
     Done { task_number_or_fuzzy_name: String },
+
+    /// Add or remove a dependency between tasks
+    Depend {
+        /// Task number of the blocked task
+        task_number: u64,
+
+        /// Task number this task depends on (adds a dependency)
+        #[arg(long)]
+        on: Option<u64>,
+
+        /// Task number to remove as a dependency
+        #[arg(long)]
+        remove: Option<u64>,
+    },
 
     /// Delete a task (move to trash)
     Delete { task_number_or_fuzzy_name: String },
@@ -380,6 +395,7 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
             Commands::Add { .. }
                 | Commands::Move { .. }
                 | Commands::Done { .. }
+                | Commands::Depend { .. }
                 | Commands::Delete { .. }
                 | Commands::Restore { .. }
                 | Commands::Create { .. }
@@ -407,7 +423,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
             }
         })
         .collect();
-    let overdue_tasks = saku_tdo::models::task::order_tasks(overdue_tasks);
+    let overdue_tasks = saku_tdo::models::task::order_tasks_with_store(overdue_tasks, &store);
 
     // Collect today tasks (scheduled or deadline == today, excluding overdue)
     let today_current: Vec<_> = store
@@ -430,7 +446,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
             }
         })
         .collect();
-    let today_current = saku_tdo::models::task::order_tasks(today_current);
+    let today_current = saku_tdo::models::task::order_tasks_with_store(today_current, &store);
 
     let total = overdue_tasks.len() + today_current.len();
 
@@ -577,7 +593,7 @@ fn main() {
                 .filter(|t| matches!(t.when, When::Inbox))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
-            let inbox_tasks = saku_tdo::models::task::order_tasks(inbox_tasks);
+            let inbox_tasks = saku_tdo::models::task::order_tasks_with_store(inbox_tasks, &store);
 
             // Display
             if inbox_tasks.is_empty() {
@@ -603,7 +619,7 @@ fn main() {
                 .filter(|t| matches!(t.when, When::Someday))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
-            let someday_tasks = saku_tdo::models::task::order_tasks(someday_tasks);
+            let someday_tasks = saku_tdo::models::task::order_tasks_with_store(someday_tasks, &store);
 
             // Display
             if someday_tasks.is_empty() {
@@ -627,7 +643,7 @@ fn main() {
 
             // Collect all active, incomplete tasks
             let all_tasks: Vec<_> = store.get_active_tasks().collect();
-            let all_tasks = saku_tdo::models::task::order_tasks(all_tasks);
+            let all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, &store);
 
             if all_tasks.is_empty() {
                 println!("No active tasks");
@@ -848,7 +864,7 @@ fn main() {
                         .filter(|t| matches!(t.when, When::Inbox))
                         .filter(|t| t.completed_at.is_none())
                         .collect();
-                    let inbox_tasks = saku_tdo::models::task::order_tasks(inbox_tasks);
+                    let inbox_tasks = saku_tdo::models::task::order_tasks_with_store(inbox_tasks, &store);
 
                     // Display
                     if inbox_tasks.is_empty() {
@@ -867,7 +883,7 @@ fn main() {
                         .filter(|t| matches!(t.when, When::Someday))
                         .filter(|t| t.completed_at.is_none())
                         .collect();
-                    let someday_tasks = saku_tdo::models::task::order_tasks(someday_tasks);
+                    let someday_tasks = saku_tdo::models::task::order_tasks_with_store(someday_tasks, &store);
 
                     // Display
                     if someday_tasks.is_empty() {
@@ -884,7 +900,7 @@ fn main() {
 
                     // Collect all active, incomplete tasks
                     let all_tasks: Vec<_> = store.get_active_tasks().collect();
-                    let all_tasks = saku_tdo::models::task::order_tasks(all_tasks);
+                    let all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, &store);
 
                     if all_tasks.is_empty() {
                         println!("No active tasks");
@@ -1387,9 +1403,20 @@ fn main() {
 
             // Call service
             match complete_task(&mut store, &storage, params) {
-                Ok(task) => {
-                    println!("✓ Task completed: {}", task.title);
-                    println!("  #{}", task.task_number);
+                Ok(result) => {
+                    println!("✓ Task completed: {}", result.task.title);
+                    println!("  #{}", result.task.task_number);
+                    if !result.newly_unblocked.is_empty() {
+                        println!();
+                        for unblocked in &result.newly_unblocked {
+                            println!(
+                                "  {} #{} {} is now unblocked",
+                                "→".green(),
+                                unblocked.task_number,
+                                unblocked.title
+                            );
+                        }
+                    }
                 }
                 Err(CompleteTaskError::TaskNotFound(identifier)) => {
                     eprintln!("Error: Task '{}' not found", identifier);
@@ -1405,6 +1432,60 @@ fn main() {
                 }
                 Err(CompleteTaskError::Storage(e)) => {
                     eprintln!("Error: Failed to save task: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Depend {
+            task_number,
+            on,
+            remove,
+        }) => {
+            if on.is_none() && remove.is_none() {
+                eprintln!("Error: Specify --on <task> to add a dependency or --remove <task> to remove one.");
+                std::process::exit(1);
+            }
+
+            let params = DependTaskParameters {
+                task_number,
+                add_dependency: on,
+                remove_dependency: remove,
+            };
+
+            match depend_task(&mut store, &storage, params) {
+                Ok(task) => {
+                    if on.is_some() {
+                        println!(
+                            "✓ #{} \"{}\" now depends on #{}",
+                            task.task_number,
+                            task.title,
+                            on.unwrap()
+                        );
+                    } else {
+                        println!(
+                            "✓ Dependency removed from #{} \"{}\"",
+                            task.task_number, task.title
+                        );
+                    }
+                }
+                Err(DependTaskError::TaskNotFound(id)) => {
+                    eprintln!("Error: Task '{}' not found", id);
+                    std::process::exit(1);
+                }
+                Err(DependTaskError::SelfDependency) => {
+                    eprintln!("Error: A task cannot depend on itself");
+                    std::process::exit(1);
+                }
+                Err(DependTaskError::CircularDependency) => {
+                    eprintln!("Error: This would create a circular dependency");
+                    std::process::exit(1);
+                }
+                Err(DependTaskError::AlreadyExists) => {
+                    eprintln!("Error: Dependency already exists");
+                    std::process::exit(1);
+                }
+                Err(DependTaskError::Storage(e)) => {
+                    eprintln!("Error: Failed to save: {}", e);
                     std::process::exit(1);
                 }
             }

@@ -30,6 +30,8 @@ pub struct Task {
     pub deadline: Option<Date>,
     /// Defered date when to surface again the task
     pub defer_until: Option<Date>,
+    /// IDs of tasks that must be completed before this task can start
+    pub depends_on: Vec<Uuid>,
     /// Sub tasks of the main task - Modeled as a lighter task called ChecklistItem
     pub checklist: Vec<ChecklistItem>,
     /// When the task was completed
@@ -167,8 +169,34 @@ pub struct ChecklistItem {
 }
 
 pub fn order_tasks(tasks: Vec<&Task>) -> Vec<&Task> {
+    order_tasks_impl(tasks, None)
+}
+
+pub fn order_tasks_with_store<'a>(
+    tasks: Vec<&'a Task>,
+    store: &crate::models::store::Store,
+) -> Vec<&'a Task> {
+    order_tasks_impl(tasks, Some(store))
+}
+
+fn order_tasks_impl<'a>(
+    tasks: Vec<&'a Task>,
+    store: Option<&crate::models::store::Store>,
+) -> Vec<&'a Task> {
     let mut ordered = tasks;
     ordered.sort_by(|a, b| {
+        // 0. Blocked tasks sort to the bottom
+        let a_blocked = store.is_some_and(|s| s.is_task_blocked(a));
+        let b_blocked = store.is_some_and(|s| s.is_task_blocked(b));
+        let blocked_ord = match (a_blocked, b_blocked) {
+            (true, false) => return Ordering::Greater,
+            (false, true) => return Ordering::Less,
+            _ => Ordering::Equal,
+        };
+        if blocked_ord != Ordering::Equal {
+            return blocked_ord;
+        }
+
         // 1. Deadline urgency: sooner deadlines first, no deadline last
         let deadline_ord = match (a.deadline, b.deadline) {
             (None, None) => Ordering::Equal,

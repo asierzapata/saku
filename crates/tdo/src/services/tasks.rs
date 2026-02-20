@@ -128,6 +128,7 @@ pub fn add_task(
         when: parameters.when,
         deadline,
         defer_until: None,
+        depends_on: vec![],
         checklist: vec![],
         completed_at: None,
         deleted_at: None,
@@ -291,6 +292,7 @@ pub fn move_task(
         area_id,
         tags: parameters.tags,
         defer_until: task.defer_until,
+        depends_on: task.depends_on.clone(),
         checklist: task.checklist.clone(),
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
@@ -329,7 +331,7 @@ pub fn complete_task(
     store: &mut Store,
     storage: &impl Storage,
     parameters: CompleteTaskParameters,
-) -> Result<Task, CompleteTaskError> {
+) -> Result<CompleteTaskResult, CompleteTaskError> {
     #[cfg(feature = "logging")]
     info!(identifier = %parameters.task_number_or_fuzzy_name, "Completing task");
 
@@ -374,6 +376,15 @@ pub fn complete_task(
     #[cfg(feature = "logging")]
     tracing::Span::current().record("task.number", task.task_number);
 
+    // Collect tasks that were blocked by this task before completing it
+    let task_id = task.id;
+    let previously_blocking: Vec<Task> = store
+        .get_blocking(task_id)
+        .into_iter()
+        .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+        .cloned()
+        .collect();
+
     // Mark task as completed
     let mut updated_task = task.clone();
     updated_task.completed_at = Some(jiff::Timestamp::now());
@@ -391,7 +402,23 @@ pub fn complete_task(
         "Task completed successfully"
     );
 
-    Ok(updated_task)
+    // Determine which previously-blocked tasks are now fully unblocked
+    let newly_unblocked: Vec<Task> = previously_blocking
+        .into_iter()
+        .filter(|t| !store.is_task_blocked(t))
+        .map(|t| store.get_task(t.id).unwrap().clone())
+        .collect();
+
+    Ok(CompleteTaskResult {
+        task: updated_task,
+        newly_unblocked,
+    })
+}
+
+/// Result returned by complete_task, including any tasks that became unblocked.
+pub struct CompleteTaskResult {
+    pub task: Task,
+    pub newly_unblocked: Vec<Task>,
 }
 
 #[derive(Debug, Error)]
@@ -704,6 +731,7 @@ pub fn edit_task(
         when,
         deadline,
         defer_until,
+        depends_on: task.depends_on.clone(),
         checklist,
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
@@ -742,6 +770,112 @@ fn parse_when_string(s: &str) -> Result<When, ()> {
                 .map_err(|_| ())
         }
     }
+}
+
+// ============================================================================
+// depend_task
+// ============================================================================
+
+#[derive(Debug, Error)]
+pub enum DependTaskError {
+    #[error("Task '{0}' not found")]
+    TaskNotFound(String),
+
+    #[error("A task cannot depend on itself")]
+    SelfDependency,
+
+    #[error("This would create a circular dependency")]
+    CircularDependency,
+
+    #[error("Dependency already exists")]
+    AlreadyExists,
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+}
+
+#[derive(Debug)]
+pub struct DependTaskParameters {
+    /// The task that gets the dependency (the blocked task)
+    pub task_number: u64,
+    /// Task number to add as a dependency (None = remove mode)
+    pub add_dependency: Option<u64>,
+    /// Task number to remove as a dependency
+    pub remove_dependency: Option<u64>,
+}
+
+/// Check for circular dependencies transitively: would adding `new_dep_id` as a
+/// dependency of `task_id` create a cycle?
+fn would_create_cycle(store: &Store, task_id: Uuid, new_dep_id: Uuid) -> bool {
+    // BFS/DFS: starting from new_dep_id, see if we can reach task_id through depends_on chains
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(new_dep_id);
+
+    while let Some(current) = queue.pop_front() {
+        if current == task_id {
+            return true;
+        }
+        if !visited.insert(current) {
+            continue;
+        }
+        if let Some(t) = store.tasks.get(&current) {
+            for dep in &t.depends_on {
+                queue.push_back(*dep);
+            }
+        }
+    }
+    false
+}
+
+pub fn depend_task(
+    store: &mut Store,
+    storage: &impl Storage,
+    parameters: DependTaskParameters,
+) -> Result<Task, DependTaskError> {
+    let task = store
+        .get_task_by_number(parameters.task_number)
+        .ok_or_else(|| DependTaskError::TaskNotFound(parameters.task_number.to_string()))?
+        .clone();
+
+    let mut updated = task.clone();
+
+    if let Some(dep_number) = parameters.add_dependency {
+        let dep = store
+            .get_task_by_number(dep_number)
+            .ok_or_else(|| DependTaskError::TaskNotFound(dep_number.to_string()))?
+            .clone();
+
+        if dep.id == task.id {
+            return Err(DependTaskError::SelfDependency);
+        }
+
+        if updated.depends_on.contains(&dep.id) {
+            return Err(DependTaskError::AlreadyExists);
+        }
+
+        if would_create_cycle(store, task.id, dep.id) {
+            return Err(DependTaskError::CircularDependency);
+        }
+
+        updated.depends_on.push(dep.id);
+    }
+
+    if let Some(rem_number) = parameters.remove_dependency {
+        let dep = store
+            .get_task_by_number(rem_number)
+            .ok_or_else(|| DependTaskError::TaskNotFound(rem_number.to_string()))?
+            .clone();
+
+        updated.depends_on.retain(|id| *id != dep.id);
+    }
+
+    updated.modified_at = crate::sync_clock::next_modified_at();
+    let task_id = updated.id;
+    store.update_task(updated);
+    storage.save(store)?;
+
+    Ok(store.get_task(task_id).unwrap().clone())
 }
 
 #[cfg(test)]
@@ -1437,7 +1571,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        let completed = result.unwrap();
+        let completed = result.unwrap().task;
         assert!(completed.completed_at.is_some());
     }
 
@@ -1456,7 +1590,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert!(result.unwrap().completed_at.is_some());
+        assert!(result.unwrap().task.completed_at.is_some());
     }
 
     #[test]
@@ -1475,7 +1609,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        let completed = result.unwrap();
+        let completed = result.unwrap().task;
         assert!(completed.completed_at.is_some());
         assert!(completed.completed_at.unwrap() >= before);
     }

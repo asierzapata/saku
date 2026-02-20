@@ -381,6 +381,7 @@ mod tests {
             when: When::Inbox,
             deadline: None,
             defer_until: None,
+            depends_on: vec![],
             checklist: vec![],
             completed_at: None,
             deleted_at: None,
@@ -434,6 +435,7 @@ mod tests {
             },
             deadline: Some("2026-03-15".parse::<Date>().unwrap()),
             defer_until: None,
+            depends_on: vec![],
             checklist: vec![
                 ChecklistItem {
                     id: Uuid::new_v4(),
@@ -604,6 +606,7 @@ Checklist:
             when: When::Inbox,
             deadline: None,
             defer_until: None,
+            depends_on: vec![],
             checklist: vec![],
             completed_at: None,
             deleted_at: None,
@@ -640,6 +643,7 @@ Checklist:
             when: When::Inbox,
             deadline: None,
             defer_until: None,
+            depends_on: vec![],
             checklist: vec![],
             completed_at: None,
             deleted_at: None,

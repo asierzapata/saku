@@ -12,6 +12,7 @@ fn get_migrations() -> Vec<MigrationFn> {
         migrate_v2_to_v3,
         migrate_v3_to_v4,
         migrate_v4_to_v5,
+        migrate_v5_to_v6,
     ]
 }
 
@@ -168,6 +169,25 @@ fn migrate_v4_to_v5(mut value: Value) -> Result<Value, StorageError> {
                 {
                     // Remove evening field if present
                     when_obj.remove("evening");
+                }
+            }
+        }
+    }
+
+    Ok(value)
+}
+
+fn migrate_v5_to_v6(mut value: Value) -> Result<Value, StorageError> {
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("version".to_string(), Value::from(6));
+
+        // Add depends_on: [] to all tasks
+        if let Some(tasks) = obj.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+            for task in tasks {
+                if let Some(task_obj) = task.as_object_mut() {
+                    task_obj
+                        .entry("depends_on")
+                        .or_insert_with(|| Value::Array(vec![]));
                 }
             }
         }
