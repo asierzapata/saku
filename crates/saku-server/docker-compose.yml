@@ -10,7 +10,7 @@ services:
       - ./config.example.toml:/etc/saku-server/config.toml:ro
     environment:
       - SAKU__DATABASE__PATH=/data/saku-server.db
-      - SAKU__STORAGE__ENDPOINT=http://localhost:9000
+      - SAKU__STORAGE__ENDPOINT=http://192.168.1.91:9000
       - SAKU__STORAGE__ACCESS_KEY_ID=minioadmin
       - SAKU__STORAGE__SECRET_ACCESS_KEY=minioadmin
       - SAKU__AUTH__JWT_SECRET=dev-jwt-secret-change-in-production
