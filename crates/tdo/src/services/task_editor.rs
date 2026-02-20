@@ -387,6 +387,8 @@ mod tests {
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
             modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            recurrence: None,
+            completed_occurrences: vec![],
         };
 
         let serialized = serialize_task_for_edit(&task, &store);
@@ -452,6 +454,8 @@ mod tests {
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
             modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            recurrence: None,
+            completed_occurrences: vec![],
         };
 
         let serialized = serialize_task_for_edit(&task, &store);
@@ -612,6 +616,8 @@ Checklist:
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
             modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            recurrence: None,
+            completed_occurrences: vec![],
         };
 
         let parsed = ParsedTaskEdit {
@@ -649,6 +655,8 @@ Checklist:
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
             modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            recurrence: None,
+            completed_occurrences: vec![],
         };
 
         let parsed = ParsedTaskEdit {

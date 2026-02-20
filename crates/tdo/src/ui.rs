@@ -217,12 +217,21 @@ pub fn get_task_context(task: &Task, store: &Store) -> Option<String> {
 
 /// Render a single task line with ID, glyph, title, and right-aligned context
 pub fn render_task_line(task: &Task, store: &Store) {
-    render_task_line_with_options(task, store, false, false);
+    render_task_line_with_options(task, store, false, false, None);
 }
 
 /// Render a task line with optional completion date display
 pub fn render_task_line_with_completion_date(task: &Task, store: &Store) {
-    render_task_line_with_options(task, store, false, true);
+    render_task_line_with_options(task, store, false, true, None);
+}
+
+/// Render a task line for the Recurring view, showing the next occurrence date.
+pub fn render_task_line_with_next_occurrence(
+    task: &Task,
+    store: &Store,
+    next_date: jiff::civil::Date,
+) {
+    render_task_line_with_options(task, store, false, false, Some(next_date));
 }
 
 /// Build a compact blocker badge string: "[blocked: #11]" or "[blocked: #11 +2]"
@@ -240,6 +249,7 @@ fn render_task_line_with_options(
     store: &Store,
     _is_overdue: bool,
     _show_completion_date: bool,
+    next_occurrence: Option<jiff::civil::Date>,
 ) {
     let terminal_width = get_terminal_width();
     let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
@@ -258,11 +268,37 @@ fn render_task_line_with_options(
     let title_chars: Vec<char> = task.title.chars().collect();
     let title_len = title_chars.len();
 
+    // Recurrence badge suffix (e.g. "↻ Mon, Wed, Fri")
+    let recurrence_badge: Option<String> = task.recurrence.as_ref().map(|r| {
+        if let Some(next) = next_occurrence {
+            let today = jiff::Zoned::now().date();
+            let next_str = format_date_compact(next, today, false);
+            format!("↻ {}  {}", r, next_str.trim())
+        } else {
+            format!("↻ {}", r)
+        }
+    });
+
     // Context: full and abbreviated fallback
     let context_full = get_task_context(task, store);
+    // Append recurrence badge to context if both exist, or use badge alone
+    let context_full = match (context_full, recurrence_badge.clone()) {
+        (Some(ctx), Some(badge)) => Some(format!("{}  {}", ctx, badge)),
+        (Some(ctx), None) => Some(ctx),
+        (None, Some(badge)) => Some(badge),
+        (None, None) => None,
+    };
     let context_abbrev = context_full
         .as_ref()
-        .and_then(|_| get_task_context_abbreviated(task, store));
+        .and_then(|_| {
+            let abbrev = get_task_context_abbreviated(task, store);
+            match (abbrev, recurrence_badge.as_ref()) {
+                (Some(a), Some(b)) => Some(format!("{}  {}", a, b)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b.clone()),
+                (None, None) => None,
+            }
+        });
 
     const ELLIPSIS: &str = "[…]";
     const ELLIPSIS_LEN: usize = 3;

@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::{
     models::{
         store::Store,
-        task::{Task, When},
+        task::{Recurrence, Task, When},
     },
     storage::{Storage, StorageError},
 };
@@ -43,6 +43,7 @@ pub struct AddTaskParameters {
     pub project: Option<String>,
     pub area: Option<String>,
     pub tags: Vec<String>,
+    pub recurrence: Option<Recurrence>,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number, task.uuid)))]
@@ -134,6 +135,8 @@ pub fn add_task(
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
         modified_at: crate::sync_clock::next_modified_at(),
+        recurrence: parameters.recurrence,
+        completed_occurrences: vec![],
     };
 
     let task_id = task.id;
@@ -205,6 +208,10 @@ pub struct MoveTaskParameters {
     pub project: Option<String>,
     pub area: Option<String>,
     pub tags: Vec<String>,
+    /// Set a new recurrence rule.
+    pub recurrence: Option<Recurrence>,
+    /// Remove the recurrence rule entirely.
+    pub clear_recurrence: bool,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
@@ -281,6 +288,14 @@ pub fn move_task(
         task.when.clone()
     };
 
+    let recurrence = if parameters.clear_recurrence {
+        None
+    } else if let Some(r) = parameters.recurrence {
+        Some(r)
+    } else {
+        task.recurrence.clone()
+    };
+
     let new_task = Task {
         id: task.id,
         task_number: task.task_number,
@@ -298,6 +313,8 @@ pub fn move_task(
         deleted_at: task.deleted_at,
         created_at: task.created_at,
         modified_at: crate::sync_clock::next_modified_at(),
+        recurrence,
+        completed_occurrences: task.completed_occurrences.clone(),
     };
 
     let task_id = task.id;
@@ -324,6 +341,9 @@ pub enum CompleteTaskError {
 #[derive(Debug)]
 pub struct CompleteTaskParameters {
     pub task_number_or_fuzzy_name: String,
+    /// If true and the task is recurring, cancel it permanently (sets completed_at).
+    /// For non-recurring tasks this flag is ignored and completed_at is always set.
+    pub stop: bool,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
@@ -385,10 +405,23 @@ pub fn complete_task(
         .cloned()
         .collect();
 
-    // Mark task as completed
+    // Mark task as completed — behaviour differs for recurring tasks.
     let mut updated_task = task.clone();
-    updated_task.completed_at = Some(jiff::Timestamp::now());
     updated_task.modified_at = crate::sync_clock::next_modified_at();
+
+    if task.recurrence.is_some() && !parameters.stop {
+        // Recurring task: record the occurrence date, do not set completed_at.
+        let occurrence_date = match task.when {
+            crate::models::task::When::Scheduled { date } => date,
+            _ => jiff::Zoned::now().date(),
+        };
+        if !updated_task.completed_occurrences.contains(&occurrence_date) {
+            updated_task.completed_occurrences.push(occurrence_date);
+        }
+    } else {
+        // Non-recurring or stop=true: mark the task as permanently done.
+        updated_task.completed_at = Some(jiff::Timestamp::now());
+    }
 
     // Update in store
     store.tasks.insert(updated_task.id, updated_task.clone());
@@ -737,6 +770,8 @@ pub fn edit_task(
         deleted_at: task.deleted_at,
         created_at: task.created_at,
         modified_at: crate::sync_clock::next_modified_at(),
+        recurrence: task.recurrence.clone(),
+        completed_occurrences: task.completed_occurrences.clone(),
     };
 
     let task_id = task.id;
@@ -974,6 +1009,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1002,6 +1039,8 @@ mod tests {
                 project: Some("Test".to_string()),
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1027,6 +1066,8 @@ mod tests {
                 project: None,
                 area: Some("work".to_string()),
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1051,6 +1092,7 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec!["urgent".to_string(), "bug".to_string()],
+                recurrence: None,
             },
         );
 
@@ -1075,6 +1117,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1099,6 +1143,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1123,6 +1169,8 @@ mod tests {
                 project: Some("NonExistent".to_string()),
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1147,6 +1195,8 @@ mod tests {
                 project: Some("Project".to_string()),
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1169,6 +1219,8 @@ mod tests {
                 project: None,
                 area: Some("NonExistent".to_string()),
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1193,6 +1245,8 @@ mod tests {
                 project: None,
                 area: Some("Area".to_string()),
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1215,6 +1269,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         );
 
@@ -1237,6 +1293,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         )
         .unwrap();
@@ -1252,6 +1310,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
             },
         )
         .unwrap();
@@ -1284,6 +1344,9 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1311,6 +1374,9 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1338,6 +1404,9 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1365,6 +1434,9 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1392,6 +1464,9 @@ mod tests {
                 project: Some("New".to_string()),
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1419,6 +1494,9 @@ mod tests {
                 project: None,
                 area: Some("personal".to_string()),
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1445,6 +1523,9 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1471,6 +1552,8 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec!["new-tag".to_string()],
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1496,6 +1579,9 @@ mod tests {
                 project: None,
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1521,6 +1607,9 @@ mod tests {
                 project: Some("NonExistent".to_string()),
                 area: None,
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1546,6 +1635,9 @@ mod tests {
                 project: None,
                 area: Some("NonExistent".to_string()),
                 tags: vec![],
+
+                recurrence: None,
+                clear_recurrence: false,
             },
         );
 
@@ -1567,6 +1659,7 @@ mod tests {
             &storage,
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: task.task_number.to_string(),
+                stop: false,
             },
         );
 
@@ -1586,6 +1679,7 @@ mod tests {
             &storage,
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: "unique".to_string(),
+                stop: false,
             },
         );
 
@@ -1605,6 +1699,7 @@ mod tests {
             &storage,
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: task.task_number.to_string(),
+                stop: false,
             },
         );
 
@@ -1624,6 +1719,7 @@ mod tests {
             &storage,
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: "999".to_string(),
+                stop: false,
             },
         );
 
@@ -1642,6 +1738,7 @@ mod tests {
             &storage,
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: "Task".to_string(),
+                stop: false,
             },
         );
 

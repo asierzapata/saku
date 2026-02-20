@@ -13,6 +13,7 @@ fn get_migrations() -> Vec<MigrationFn> {
         migrate_v3_to_v4,
         migrate_v4_to_v5,
         migrate_v5_to_v6,
+        migrate_v6_to_v7,
     ]
 }
 
@@ -193,6 +194,15 @@ fn migrate_v5_to_v6(mut value: Value) -> Result<Value, StorageError> {
         }
     }
 
+    Ok(value)
+}
+
+fn migrate_v6_to_v7(mut value: Value) -> Result<Value, StorageError> {
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("version".to_string(), Value::from(7));
+        // recurrence and completed_occurrences are handled by serde(default) on Task,
+        // so no field-adding loop is needed here.
+    }
     Ok(value)
 }
 
