@@ -2159,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "saku-tdo"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "assert_cmd",
  "assert_fs",
