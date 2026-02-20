@@ -115,10 +115,11 @@ enum Commands {
         notes: Option<String>,
     },
 
-    /// Moves a task
+    /// Moves one or more tasks
     Move {
-        /// Task number
-        task_number: String,
+        /// Task number(s) - provide multiple to move several tasks at once
+        #[arg(num_args(1..))]
+        task_numbers: Vec<String>,
 
         /// Schedule for today
         #[arg(long)]
@@ -169,8 +170,12 @@ enum Commands {
         notes: Option<String>,
     },
 
-    /// Complete a task
-    Done { task_number_or_fuzzy_name: String },
+    /// Complete one or more tasks
+    Done {
+        /// Task number(s) or fuzzy name(s) - provide multiple to complete several tasks at once
+        #[arg(num_args(1..))]
+        task_numbers_or_fuzzy_names: Vec<String>,
+    },
 
     /// Add or remove a dependency between tasks
     Depend {
@@ -186,11 +191,19 @@ enum Commands {
         remove: Option<u64>,
     },
 
-    /// Delete a task (move to trash)
-    Delete { task_number_or_fuzzy_name: String },
+    /// Delete one or more tasks (move to trash)
+    Delete {
+        /// Task number(s) or fuzzy name(s) - provide multiple to delete several tasks at once
+        #[arg(num_args(1..))]
+        task_numbers_or_fuzzy_names: Vec<String>,
+    },
 
-    /// Restore a task from trash
-    Restore { task_number: String },
+    /// Restore one or more tasks from trash
+    Restore {
+        /// Task number(s) - provide multiple to restore several tasks at once
+        #[arg(num_args(1..))]
+        task_numbers: Vec<String>,
+    },
 
     /// Create a new area or project
     Create {
@@ -1394,45 +1407,47 @@ fn main() {
             }
         }
         Some(Commands::Done {
-            task_number_or_fuzzy_name,
+            task_numbers_or_fuzzy_names,
         }) => {
-            // Build parameters
-            let params = CompleteTaskParameters {
-                task_number_or_fuzzy_name,
-            };
+            for task_number_or_fuzzy_name in task_numbers_or_fuzzy_names {
+                // Build parameters
+                let params = CompleteTaskParameters {
+                    task_number_or_fuzzy_name,
+                };
 
-            // Call service
-            match complete_task(&mut store, &storage, params) {
-                Ok(result) => {
-                    println!("✓ Task completed: {}", result.task.title);
-                    println!("  #{}", result.task.task_number);
-                    if !result.newly_unblocked.is_empty() {
-                        println!();
-                        for unblocked in &result.newly_unblocked {
-                            println!(
-                                "  {} #{} {} is now unblocked",
-                                "→".green(),
-                                unblocked.task_number,
-                                unblocked.title
-                            );
+                // Call service
+                match complete_task(&mut store, &storage, params) {
+                    Ok(result) => {
+                        println!("✓ Task completed: {}", result.task.title);
+                        println!("  #{}", result.task.task_number);
+                        if !result.newly_unblocked.is_empty() {
+                            println!();
+                            for unblocked in &result.newly_unblocked {
+                                println!(
+                                    "  {} #{} {} is now unblocked",
+                                    "→".green(),
+                                    unblocked.task_number,
+                                    unblocked.title
+                                );
+                            }
                         }
                     }
-                }
-                Err(CompleteTaskError::TaskNotFound(identifier)) => {
-                    eprintln!("Error: Task '{}' not found", identifier);
-                    std::process::exit(1);
-                }
-                Err(CompleteTaskError::AmbiguousTaskName(titles)) => {
-                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
-                    for title in titles {
-                        eprintln!("  - {}", title);
+                    Err(CompleteTaskError::TaskNotFound(identifier)) => {
+                        eprintln!("Error: Task '{}' not found", identifier);
+                        std::process::exit(1);
                     }
-                    eprintln!("\nPlease be more specific or use the task number.");
-                    std::process::exit(1);
-                }
-                Err(CompleteTaskError::Storage(e)) => {
-                    eprintln!("Error: Failed to save task: {}", e);
-                    std::process::exit(1);
+                    Err(CompleteTaskError::AmbiguousTaskName(titles)) => {
+                        eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                        for title in titles {
+                            eprintln!("  - {}", title);
+                        }
+                        eprintln!("\nPlease be more specific or use the task number.");
+                        std::process::exit(1);
+                    }
+                    Err(CompleteTaskError::Storage(e)) => {
+                        eprintln!("Error: Failed to save task: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -1688,93 +1703,99 @@ fn main() {
             }
         }
         Some(Commands::Delete {
-            task_number_or_fuzzy_name,
+            task_numbers_or_fuzzy_names,
         }) => {
-            // Build parameters
-            let params = DeleteTaskParameters {
-                task_number_or_fuzzy_name,
-            };
+            for task_number_or_fuzzy_name in task_numbers_or_fuzzy_names {
+                // Build parameters
+                let params = DeleteTaskParameters {
+                    task_number_or_fuzzy_name,
+                };
 
-            // Call service
-            match delete_task(&mut store, &storage, params) {
-                Ok(task) => {
-                    println!("✓ Task deleted: {}", task.title);
-                    println!("  #{}", task.task_number);
-                    println!("\nUse 'tdo trash' to view deleted items");
-                    println!(
-                        "Use 'tdo restore {}' to restore this task",
-                        task.task_number
-                    );
-                }
-                Err(DeleteTaskError::TaskNotFound(identifier)) => {
-                    eprintln!("Error: Task '{}' not found", identifier);
-                    std::process::exit(1);
-                }
-                Err(DeleteTaskError::AmbiguousTaskName(titles)) => {
-                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
-                    for title in titles {
-                        eprintln!("  - {}", title);
+                // Call service
+                match delete_task(&mut store, &storage, params) {
+                    Ok(task) => {
+                        println!("✓ Task deleted: {}", task.title);
+                        println!("  #{}", task.task_number);
+                        println!("\nUse 'tdo trash' to view deleted items");
+                        println!(
+                            "Use 'tdo restore {}' to restore this task",
+                            task.task_number
+                        );
                     }
-                    eprintln!("\nPlease be more specific or use the task number.");
-                    std::process::exit(1);
-                }
-                Err(DeleteTaskError::TaskAlreadyDeleted(title)) => {
-                    eprintln!("Error: Task '{}' is already deleted", title);
-                    eprintln!("\nUse 'tdo trash' to view deleted items.");
-                    std::process::exit(1);
-                }
-                Err(DeleteTaskError::Storage(e)) => {
-                    eprintln!("Error: Failed to delete task: {}", e);
-                    std::process::exit(1);
+                    Err(DeleteTaskError::TaskNotFound(identifier)) => {
+                        eprintln!("Error: Task '{}' not found", identifier);
+                        std::process::exit(1);
+                    }
+                    Err(DeleteTaskError::AmbiguousTaskName(titles)) => {
+                        eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                        for title in titles {
+                            eprintln!("  - {}", title);
+                        }
+                        eprintln!("\nPlease be more specific or use the task number.");
+                        std::process::exit(1);
+                    }
+                    Err(DeleteTaskError::TaskAlreadyDeleted(title)) => {
+                        eprintln!("Error: Task '{}' is already deleted", title);
+                        eprintln!("\nUse 'tdo trash' to view deleted items.");
+                        std::process::exit(1);
+                    }
+                    Err(DeleteTaskError::Storage(e)) => {
+                        eprintln!("Error: Failed to delete task: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
-        Some(Commands::Restore { task_number }) => {
-            // Parse task number
-            let parsed_task_number = match task_number.parse::<u64>() {
-                Ok(num) => num,
-                Err(_) => {
-                    eprintln!("Error: Invalid task number '{}'", task_number);
-                    eprintln!("\nTask number must be a numeric value.");
-                    eprintln!("Use 'tdo trash' to see deleted tasks with their numbers.");
-                    std::process::exit(1);
-                }
-            };
-
-            // Build parameters
-            let params = RestoreTaskParameters {
-                task_number: parsed_task_number,
-            };
-
-            // Call service
-            match restore_task(&mut store, &storage, params) {
-                Ok(task) => {
-                    println!("✓ Task restored: {}", task.title);
-                    println!("  #{}", task.task_number);
-                    if let Some(project_id) = task.project_id
-                        && let Some(project) = store.get_project(project_id)
-                    {
-                        println!("  Project: {}", project.name);
+        Some(Commands::Restore { task_numbers }) => {
+            for task_number_str in task_numbers {
+                // Parse task number
+                let parsed_task_number = match task_number_str.parse::<u64>() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        eprintln!("Error: Invalid task number '{}'", task_number_str);
+                        eprintln!("\nTask number must be a numeric value.");
+                        eprintln!("Use 'tdo trash' to see deleted tasks with their numbers.");
+                        std::process::exit(1);
                     }
-                }
-                Err(RestoreTaskError::TaskNotFound(identifier)) => {
-                    eprintln!("Error: Task '{}' not found", identifier);
-                    eprintln!("\nUse 'tdo trash' to see deleted tasks.");
-                    std::process::exit(1);
-                }
-                Err(RestoreTaskError::TaskNotDeleted(title)) => {
-                    eprintln!("Error: Task '{}' is not deleted", title);
-                    eprintln!("\nThis task is already active. Use 'tdo all' to see active tasks.");
-                    std::process::exit(1);
-                }
-                Err(RestoreTaskError::Storage(e)) => {
-                    eprintln!("Error: Failed to restore task: {}", e);
-                    std::process::exit(1);
+                };
+
+                // Build parameters
+                let params = RestoreTaskParameters {
+                    task_number: parsed_task_number,
+                };
+
+                // Call service
+                match restore_task(&mut store, &storage, params) {
+                    Ok(task) => {
+                        println!("✓ Task restored: {}", task.title);
+                        println!("  #{}", task.task_number);
+                        if let Some(project_id) = task.project_id
+                            && let Some(project) = store.get_project(project_id)
+                        {
+                            println!("  Project: {}", project.name);
+                        }
+                    }
+                    Err(RestoreTaskError::TaskNotFound(identifier)) => {
+                        eprintln!("Error: Task '{}' not found", identifier);
+                        eprintln!("\nUse 'tdo trash' to see deleted tasks.");
+                        std::process::exit(1);
+                    }
+                    Err(RestoreTaskError::TaskNotDeleted(title)) => {
+                        eprintln!("Error: Task '{}' is not deleted", title);
+                        eprintln!(
+                            "\nThis task is already active. Use 'tdo all' to see active tasks."
+                        );
+                        std::process::exit(1);
+                    }
+                    Err(RestoreTaskError::Storage(e)) => {
+                        eprintln!("Error: Failed to restore task: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
         Some(Commands::Move {
-            task_number,
+            task_numbers,
             today,
             tomorrow,
             next_week,
@@ -1812,116 +1833,120 @@ fn main() {
                 None
             };
 
-            let parsed_task_number = match task_number.parse::<u64>() {
-                Ok(num) => num,
-                Err(_) => {
-                    eprintln!("Error: Invalid task number '{}'", task_number);
-                    std::process::exit(1);
-                }
-            };
-
-            // Build parameters
-            let params = MoveTaskParameters {
-                task_number: parsed_task_number,
-                notes,
-                when,
-                deadline: due,
-                clear_schedule,
-                clear_deadline,
-                project,
-                area,
-                tags: tag,
-            };
-
-            // Call service
-            match move_task(&mut store, &storage, params) {
-                Ok(task) => {
-                    println!("✓ Task moved");
-                    println!("  #{}", task.task_number);
-                    if let Some(project_id) = task.project_id
-                        && let Some(project) = store.get_project(project_id)
-                    {
-                        println!("  Project: {}", project.name);
+            for task_number_str in task_numbers {
+                let parsed_task_number = match task_number_str.parse::<u64>() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        eprintln!("Error: Invalid task number '{}'", task_number_str);
+                        std::process::exit(1);
                     }
-                }
-                Err(MoveTaskError::TaskNotFound(identifier)) => {
-                    eprintln!("Error: Task '{}' not found", identifier);
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::AmbiguousTaskName(titles)) => {
-                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
-                    for title in titles {
-                        eprintln!("  - {}", title);
-                    }
-                    eprintln!("\nPlease be more specific or use the task number.");
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::AmbiguousTagName(names)) => {
-                    eprintln!("Error: Tag name is ambiguous. Multiple tags found:");
-                    for name in names {
-                        eprintln!("  - {}", name);
-                    }
-                    eprintln!("\nPlease be more specific.");
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::TagNotFound(name)) => {
-                    eprintln!("Error: Tag '{}' not found", name);
-                    // TODO: Suggest existing tags if any
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::ProjectNotFound(name)) => {
-                    eprintln!("Error: Project '{}' not found", name);
+                };
 
-                    // Suggest existing projects if any
-                    let projects: Vec<_> = store.projects.values().collect();
-                    if !projects.is_empty() {
-                        eprintln!("\nAvailable projects:");
-                        for project in projects {
-                            eprintln!("  - {}", project.name);
+                // Build parameters
+                let params = MoveTaskParameters {
+                    task_number: parsed_task_number,
+                    notes: notes.clone(),
+                    when: when.clone(),
+                    deadline: due.clone(),
+                    clear_schedule,
+                    clear_deadline,
+                    project: project.clone(),
+                    area: area.clone(),
+                    tags: tag.clone(),
+                };
+
+                // Call service
+                match move_task(&mut store, &storage, params) {
+                    Ok(task) => {
+                        println!("✓ Task moved");
+                        println!("  #{}", task.task_number);
+                        if let Some(project_id) = task.project_id
+                            && let Some(project) = store.get_project(project_id)
+                        {
+                            println!("  Project: {}", project.name);
                         }
-                    } else {
-                        eprintln!("\nNo projects exist yet. Create one first or omit --project.");
                     }
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::AmbiguousProjectName(names)) => {
-                    eprintln!("Error: Project name is ambiguous. Multiple projects found:");
-                    for name in names {
-                        eprintln!("  - {}", name);
+                    Err(MoveTaskError::TaskNotFound(identifier)) => {
+                        eprintln!("Error: Task '{}' not found", identifier);
+                        std::process::exit(1);
                     }
-                    eprintln!("\nPlease be more specific.");
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::AreaNotFound(name)) => {
-                    eprintln!("Error: Area '{}' not found", name);
-
-                    // Suggest existing areas if any
-                    let areas: Vec<_> = store.areas.values().collect();
-                    if !areas.is_empty() {
-                        eprintln!("\nAvailable areas:");
-                        for area in areas {
-                            eprintln!("  - {}", area.name);
+                    Err(MoveTaskError::AmbiguousTaskName(titles)) => {
+                        eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                        for title in titles {
+                            eprintln!("  - {}", title);
                         }
-                    } else {
-                        eprintln!("\nNo areas exist yet. Create one first or omit --area.");
+                        eprintln!("\nPlease be more specific or use the task number.");
+                        std::process::exit(1);
                     }
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::AmbiguousAreaName(names)) => {
-                    eprintln!("Error: Area name is ambiguous. Multiple areas found:");
-                    for name in names {
-                        eprintln!("  - {}", name);
+                    Err(MoveTaskError::AmbiguousTagName(names)) => {
+                        eprintln!("Error: Tag name is ambiguous. Multiple tags found:");
+                        for name in names {
+                            eprintln!("  - {}", name);
+                        }
+                        eprintln!("\nPlease be more specific.");
+                        std::process::exit(1);
                     }
-                    eprintln!("\nPlease be more specific.");
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::InvalidDeadline(date_str, error)) => {
-                    eprintln!("Error: Invalid deadline '{}': {}", date_str, error);
-                    std::process::exit(1);
-                }
-                Err(MoveTaskError::Storage(e)) => {
-                    eprintln!("Error: Failed to save task: {}", e);
-                    std::process::exit(1);
+                    Err(MoveTaskError::TagNotFound(name)) => {
+                        eprintln!("Error: Tag '{}' not found", name);
+                        // TODO: Suggest existing tags if any
+                        std::process::exit(1);
+                    }
+                    Err(MoveTaskError::ProjectNotFound(name)) => {
+                        eprintln!("Error: Project '{}' not found", name);
+
+                        // Suggest existing projects if any
+                        let projects: Vec<_> = store.projects.values().collect();
+                        if !projects.is_empty() {
+                            eprintln!("\nAvailable projects:");
+                            for project in projects {
+                                eprintln!("  - {}", project.name);
+                            }
+                        } else {
+                            eprintln!(
+                                "\nNo projects exist yet. Create one first or omit --project."
+                            );
+                        }
+                        std::process::exit(1);
+                    }
+                    Err(MoveTaskError::AmbiguousProjectName(names)) => {
+                        eprintln!("Error: Project name is ambiguous. Multiple projects found:");
+                        for name in names {
+                            eprintln!("  - {}", name);
+                        }
+                        eprintln!("\nPlease be more specific.");
+                        std::process::exit(1);
+                    }
+                    Err(MoveTaskError::AreaNotFound(name)) => {
+                        eprintln!("Error: Area '{}' not found", name);
+
+                        // Suggest existing areas if any
+                        let areas: Vec<_> = store.areas.values().collect();
+                        if !areas.is_empty() {
+                            eprintln!("\nAvailable areas:");
+                            for area in areas {
+                                eprintln!("  - {}", area.name);
+                            }
+                        } else {
+                            eprintln!("\nNo areas exist yet. Create one first or omit --area.");
+                        }
+                        std::process::exit(1);
+                    }
+                    Err(MoveTaskError::AmbiguousAreaName(names)) => {
+                        eprintln!("Error: Area name is ambiguous. Multiple areas found:");
+                        for name in names {
+                            eprintln!("  - {}", name);
+                        }
+                        eprintln!("\nPlease be more specific.");
+                        std::process::exit(1);
+                    }
+                    Err(MoveTaskError::InvalidDeadline(date_str, error)) => {
+                        eprintln!("Error: Invalid deadline '{}': {}", date_str, error);
+                        std::process::exit(1);
+                    }
+                    Err(MoveTaskError::Storage(e)) => {
+                        eprintln!("Error: Failed to save task: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
