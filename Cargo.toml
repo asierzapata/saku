@@ -17,7 +17,7 @@ publish = false
 
 [workspace.dependencies]
 # Internal dependencies
-saku-crypto = { version = "0.1.0", path = "crates/saku-crypto" }
+saku-crypto = { version = "0.1.1", path = "crates/saku-crypto" }
 saku-storage = { version = "0.1.0", path = "crates/saku-storage" }
 saku-sync = { version = "0.1.0", path = "crates/saku-sync" }
 

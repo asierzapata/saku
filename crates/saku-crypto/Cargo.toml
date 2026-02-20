@@ -1,6 +1,6 @@
 [package]
 name = "saku-crypto"
-version = "0.1.0"
+version = "0.1.1"
 description = "End-to-end encryption for the saku sync system"
 repository = "https://github.com/asierzapata/saku"
 authors.workspace = true
@@ -14,7 +14,7 @@ chacha20poly1305.workspace = true
 rand.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true
-keyring = { workspace = true, optional = true }
+keyring = { version = "3", features = ["apple-native", "sync-secret-service", "crypto-rust", "windows-native"], optional = true }
 
 [features]
 keychain = ["dep:keyring"]

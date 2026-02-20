@@ -5,7 +5,9 @@
       "mcp__acp__Bash",
       "Bash(cargo check:*)",
       "Bash(cargo run:*)",
-      "mcp__acp__Write"
+      "mcp__acp__Write",
+      "Bash(tdo list:*)",
+      "Bash(tdo view:*)"
     ]
   }
 }
