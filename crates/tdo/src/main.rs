@@ -317,6 +317,8 @@ enum ViewEntity {
     Upcoming,
     /// Show someday tasks
     Someday,
+    /// Show all tasks with deadlines, grouped by urgency
+    Deadlines,
     /// Show completed tasks (last 14 days)
     Logbook,
     /// Show deleted items
@@ -1007,6 +1009,105 @@ fn main() {
                                 date,
                             ));
                             for task in tasks {
+                                saku_tdo::ui::render_task_line(task, &store);
+                            }
+                        }
+                    }
+                }
+                ViewEntity::Deadlines => {
+                    let today = jiff::Zoned::now().date();
+
+                    // Collect all active, incomplete tasks that have a deadline set
+                    let mut deadline_tasks: Vec<_> = store
+                        .get_active_tasks()
+                        .filter(|t| t.completed_at.is_none() && t.deadline.is_some())
+                        .collect();
+
+                    if deadline_tasks.is_empty() {
+                        println!("No tasks with deadlines");
+                    } else {
+                        // Sort by deadline (earliest first), then by task number
+                        deadline_tasks.sort_by(|a, b| {
+                            a.deadline
+                                .cmp(&b.deadline)
+                                .then(a.task_number.cmp(&b.task_number))
+                        });
+
+                        saku_tdo::ui::render_view_header("Deadlines", deadline_tasks.len());
+
+                        // Partition into groups: Overdue, Today, This Week, Later
+                        let end_of_week = {
+                            // Find end of current week (Sunday), up to 6 days away
+                            let days_to_sunday = match today.weekday() {
+                                jiff::civil::Weekday::Sunday => 0,
+                                jiff::civil::Weekday::Monday => 6,
+                                jiff::civil::Weekday::Tuesday => 5,
+                                jiff::civil::Weekday::Wednesday => 4,
+                                jiff::civil::Weekday::Thursday => 3,
+                                jiff::civil::Weekday::Friday => 2,
+                                jiff::civil::Weekday::Saturday => 1,
+                            };
+                            today
+                                .checked_add(jiff::Span::new().days(days_to_sunday))
+                                .expect("valid date")
+                        };
+
+                        let overdue: Vec<_> = deadline_tasks
+                            .iter()
+                            .filter(|t| t.deadline.unwrap() < today)
+                            .collect();
+                        let due_today: Vec<_> = deadline_tasks
+                            .iter()
+                            .filter(|t| t.deadline.unwrap() == today)
+                            .collect();
+                        let this_week: Vec<_> = deadline_tasks
+                            .iter()
+                            .filter(|t| {
+                                let d = t.deadline.unwrap();
+                                d > today && d <= end_of_week
+                            })
+                            .collect();
+                        let later: Vec<_> = deadline_tasks
+                            .iter()
+                            .filter(|t| t.deadline.unwrap() > end_of_week)
+                            .collect();
+
+                        if !overdue.is_empty() {
+                            saku_tdo::ui::render_section_header(&format!(
+                                "Overdue ({})",
+                                overdue.len()
+                            ));
+                            for task in overdue {
+                                saku_tdo::ui::render_task_line(task, &store);
+                            }
+                        }
+
+                        if !due_today.is_empty() {
+                            saku_tdo::ui::render_section_header(&format!(
+                                "Today ({})",
+                                due_today.len()
+                            ));
+                            for task in due_today {
+                                saku_tdo::ui::render_task_line(task, &store);
+                            }
+                        }
+
+                        if !this_week.is_empty() {
+                            saku_tdo::ui::render_section_header(&format!(
+                                "This Week ({})",
+                                this_week.len()
+                            ));
+                            for task in this_week {
+                                saku_tdo::ui::render_task_line(task, &store);
+                            }
+                        }
+
+                        if !later.is_empty() {
+                            saku_tdo::ui::render_section_header(&format!(
+                                "Later ({})",
+                                later.len()
+                            ));
+                            for task in later {
                                 saku_tdo::ui::render_task_line(task, &store);
                             }
                         }
