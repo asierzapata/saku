@@ -436,7 +436,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
             }
         })
         .collect();
-    let overdue_tasks = saku_tdo::models::task::order_tasks_with_store(overdue_tasks, &store);
+    let overdue_tasks = saku_tdo::models::task::order_tasks_with_store(overdue_tasks, store);
 
     // Collect today tasks (scheduled or deadline == today, excluding overdue)
     let today_current: Vec<_> = store
@@ -459,7 +459,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
             }
         })
         .collect();
-    let today_current = saku_tdo::models::task::order_tasks_with_store(today_current, &store);
+    let today_current = saku_tdo::models::task::order_tasks_with_store(today_current, store);
 
     let total = overdue_tasks.len() + today_current.len();
 
@@ -1469,12 +1469,12 @@ fn main() {
 
             match depend_task(&mut store, &storage, params) {
                 Ok(task) => {
-                    if on.is_some() {
+                    if let Some(dep_id) = on {
                         println!(
                             "✓ #{} \"{}\" now depends on #{}",
                             task.task_number,
                             task.title,
-                            on.unwrap()
+                            dep_id
                         );
                     } else {
                         println!(
