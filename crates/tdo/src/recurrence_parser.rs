@@ -97,8 +97,8 @@ pub fn parse_recurrence(
     if let Some(rest) = s.strip_suffix(" of month") {
         let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
         if parts.len() == 2 {
-            if let Some(nth) = parse_ordinal(parts[0]) {
-                if let Some(weekday) = parse_weekday(parts[1]) {
+            if let Some(nth) = parse_ordinal(parts[0]).filter(|&n| (1..=5).contains(&n)) {
+                if let Some(weekday) = parse_weekday(parts[1].trim()) {
                     return Ok(Recurrence {
                         freq: Freq::Monthly,
                         weekdays: vec![],
@@ -173,13 +173,15 @@ impl IntoYearly for Recurrence {
 
 /// Parse ordinal strings: "1st"→1, "2nd"→2, "3rd"→3, "4th"→4, "5th"→5
 /// Also accepts bare numbers: "1"→1, "15"→15.
+/// Returns `None` for values outside 1..=31 (the widest valid range for any calendar field).
 fn parse_ordinal(s: &str) -> Option<u8> {
     let stripped = s
         .trim_end_matches("st")
         .trim_end_matches("nd")
         .trim_end_matches("rd")
         .trim_end_matches("th");
-    stripped.parse::<u8>().ok()
+    let value = stripped.parse::<u8>().ok()?;
+    if (1..=31).contains(&value) { Some(value) } else { None }
 }
 
 fn parse_weekday(s: &str) -> Option<SerdeWeekday> {

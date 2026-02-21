@@ -256,7 +256,9 @@ No new service function needed — the `stop` flag on `CompleteTaskParameters` c
 
 **Upcoming view**: for each recurring task, call `pending_occurrences_up_to(task, end_of_window)` and inject a row per pending occurrence date.
 
-**Inbox / Someday / Logbook**: recurring tasks never appear here.
+**Inbox**: recurring tasks appear here (with a recurrence badge), just like non-recurring tasks. Hiding them from Inbox is a possible future change.
+
+**Someday / Logbook**: recurring tasks never appear here.
 
 **Recurring view** (`tdo view recurring`): show all non-stopped recurring tasks, one row each, with their next pending occurrence date and recurrence badge.
 

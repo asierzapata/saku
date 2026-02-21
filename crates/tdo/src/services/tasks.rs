@@ -410,11 +410,8 @@ pub fn complete_task(
     updated_task.modified_at = crate::sync_clock::next_modified_at();
 
     if task.recurrence.is_some() && !parameters.stop {
-        // Recurring task: record the occurrence date, do not set completed_at.
-        let occurrence_date = match task.when {
-            crate::models::task::When::Scheduled { date } => date,
-            _ => jiff::Zoned::now().date(),
-        };
+        // Recurring task: record today as the completed occurrence, do not set completed_at.
+        let occurrence_date = jiff::Zoned::now().date();
         if !updated_task.completed_occurrences.contains(&occurrence_date) {
             updated_task.completed_occurrences.push(occurrence_date);
         }

@@ -518,14 +518,15 @@ pub fn pending_occurrences_up_to(task: &Task, up_to: Date) -> Vec<Date> {
                 } else {
                     month += 1;
                 }
-                if year > end.year() + 2 {
+                // Stop as soon as the current month/year is past the end date.
+                if year > end.year() || (year == end.year() && i16::from(month) > end.month() as i16) {
                     break;
                 }
             }
         }
         Freq::Yearly => {
             let mut year = rule.dtstart.year();
-            loop {
+            while year <= end.year() {
                 if let Ok(d) =
                     Date::new(year, rule.dtstart.month(), rule.dtstart.day())
                 {
@@ -537,14 +538,23 @@ pub fn pending_occurrences_up_to(task: &Task, up_to: Date) -> Vec<Date> {
                     }
                 }
                 year += 1;
-                if year > end.year() + 2 {
-                    break;
-                }
             }
         }
     }
 
     dates
+}
+
+/// Returns the first pending occurrence on or after `from`, within a 1-year look-ahead.
+/// More efficient than `pending_occurrences_up_to` for the "what's next?" use-case because
+/// it stops as soon as it finds one result and starts iteration from `from`, not `dtstart`.
+pub fn next_pending_occurrence(task: &Task, from: Date) -> Option<Date> {
+    let look_ahead = from
+        .checked_add(jiff::Span::new().years(1))
+        .unwrap_or(from);
+    pending_occurrences_up_to(task, look_ahead)
+        .into_iter()
+        .find(|&d| d >= from)
 }
 
 pub fn order_tasks(tasks: Vec<&Task>) -> Vec<&Task> {

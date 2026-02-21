@@ -5,7 +5,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::*;
 
 use saku_tdo::{
-    models::task::{When, WhenInstantiationError, is_pending_on, pending_occurrences_up_to},
+    models::task::{When, WhenInstantiationError, is_pending_on, next_pending_occurrence},
     recurrence_parser::parse_recurrence,
     services::{
         areas::{
@@ -449,11 +449,13 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
 fn render_today_view(store: &saku_tdo::models::store::Store) {
     let today = jiff::Zoned::now().date();
 
-    // Collect overdue tasks (scheduled or deadline < today)
+    // Collect overdue tasks (scheduled or deadline < today).
+    // Recurring tasks are never "overdue" based on their scheduled date — their
+    // pending-ness is derived entirely from the recurrence rule.
     let overdue_tasks: Vec<_> = store
         .get_active_tasks()
         .filter(|t| {
-            t.completed_at.is_none() && {
+            t.completed_at.is_none() && t.recurrence.is_none() && {
                 let scheduled_overdue = match t.when {
                     When::Scheduled { date, .. } => date < today,
                     _ => false,
@@ -477,13 +479,17 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
                 let deadline_today = t.deadline == Some(today);
                 let recurring_today = is_pending_on(t, today);
 
-                // Check if not already in overdue
+                // For non-recurring tasks, exclude those already in the overdue bucket.
+                // Recurring tasks are never moved to overdue, so always include them when pending.
+                if recurring_today {
+                    return true;
+                }
                 let is_overdue = match t.when {
                     When::Scheduled { date, .. } if date < today => true,
                     _ => t.deadline.is_some_and(|d| d < today),
                 };
 
-                (scheduled_today || deadline_today || recurring_today) && !is_overdue
+                (scheduled_today || deadline_today) && !is_overdue
             }
         })
         .collect();
@@ -1152,13 +1158,8 @@ fn main() {
                     } else {
                         saku_tdo::ui::render_view_header("Recurring", tasks.len());
                         for task in tasks {
-                            // Find and display next pending occurrence date
-                            let look_ahead = today
-                                .checked_add(jiff::Span::new().days(365))
-                                .unwrap_or(today);
-                            let next = pending_occurrences_up_to(task, look_ahead)
-                                .into_iter()
-                                .next();
+                            // Find the next pending occurrence on or after today
+                            let next = next_pending_occurrence(task, today);
                             if let Some(next_date) = next {
                                 saku_tdo::ui::render_task_line_with_next_occurrence(
                                     task, &store, next_date,
