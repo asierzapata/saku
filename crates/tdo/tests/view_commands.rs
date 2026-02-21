@@ -340,6 +340,112 @@ fn view_inbox_tasks_appear_in_number_order() {
     assert_order(&stdout, "BETA_TASK", "GAMMA_TASK");
 }
 
+// ── Deadlines view ────────────────────────────────────────────────────────────
+
+#[test]
+fn view_deadlines_empty() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["view", "deadlines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No tasks with deadlines"));
+}
+
+#[test]
+fn view_deadlines_shows_task_with_deadline() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "Ship the feature", "--due", "2030-06-15"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["view", "deadlines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Ship the feature"))
+        .stdout(predicate::str::contains("Deadlines"));
+}
+
+#[test]
+fn view_deadlines_does_not_show_tasks_without_deadline() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "No deadline task"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["view", "deadlines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No tasks with deadlines"));
+}
+
+#[test]
+fn view_deadlines_groups_overdue_before_later() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "OVERDUE_TASK", "--due", "2020-01-01"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["add", "FUTURE_TASK", "--due", "2030-12-31"])
+        .assert()
+        .success();
+
+    let assert = tdo(&temp).args(["view", "deadlines"]).assert().success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert_order(&stdout, "Overdue", "OVERDUE_TASK");
+    assert_order(&stdout, "OVERDUE_TASK", "Later");
+    assert_order(&stdout, "Later", "FUTURE_TASK");
+}
+
+#[test]
+fn view_deadlines_sorts_by_deadline_date() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "LATER_DEADLINE", "--due", "2030-12-31"])
+        .assert()
+        .success();
+
+    tdo(&temp)
+        .args(["add", "EARLIER_DEADLINE", "--due", "2030-06-01"])
+        .assert()
+        .success();
+
+    let assert = tdo(&temp).args(["view", "deadlines"]).assert().success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert_order(&stdout, "EARLIER_DEADLINE", "LATER_DEADLINE");
+}
+
+#[test]
+fn view_deadlines_does_not_show_completed_tasks() {
+    let temp = TempDir::new().unwrap();
+
+    tdo(&temp)
+        .args(["add", "Done task", "--due", "2030-06-15"])
+        .assert()
+        .success();
+
+    tdo(&temp).args(["done", "1"]).assert().success();
+
+    tdo(&temp)
+        .args(["view", "deadlines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No tasks with deadlines"));
+}
+
 #[test]
 fn view_today_tasks_appear_in_number_order() {
     let temp = TempDir::new().unwrap();

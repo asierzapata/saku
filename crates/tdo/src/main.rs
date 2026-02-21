@@ -1052,25 +1052,23 @@ fn main() {
                                 .expect("valid date")
                         };
 
-                        let overdue: Vec<_> = deadline_tasks
-                            .iter()
-                            .filter(|t| t.deadline.unwrap() < today)
-                            .collect();
-                        let due_today: Vec<_> = deadline_tasks
-                            .iter()
-                            .filter(|t| t.deadline.unwrap() == today)
-                            .collect();
-                        let this_week: Vec<_> = deadline_tasks
-                            .iter()
-                            .filter(|t| {
-                                let d = t.deadline.unwrap();
-                                d > today && d <= end_of_week
-                            })
-                            .collect();
-                        let later: Vec<_> = deadline_tasks
-                            .iter()
-                            .filter(|t| t.deadline.unwrap() > end_of_week)
-                            .collect();
+                        let mut overdue: Vec<&saku_tdo::models::task::Task> = Vec::new();
+                        let mut due_today: Vec<&saku_tdo::models::task::Task> = Vec::new();
+                        let mut this_week: Vec<&saku_tdo::models::task::Task> = Vec::new();
+                        let mut later: Vec<&saku_tdo::models::task::Task> = Vec::new();
+
+                        for task in &deadline_tasks {
+                            let d = task.deadline.unwrap();
+                            if d < today {
+                                overdue.push(task);
+                            } else if d == today {
+                                due_today.push(task);
+                            } else if d <= end_of_week {
+                                this_week.push(task);
+                            } else {
+                                later.push(task);
+                            }
+                        }
 
                         if !overdue.is_empty() {
                             saku_tdo::ui::render_section_header(&format!(
