@@ -1,8 +1,9 @@
 # Cleanup Task: Remove Deprecated "Anytime" and "Evening" Features
 
-**Status:** TODO  
-**Priority:** P0 (Documentation consistency)  
-**Estimated Effort:** 2-3 hours  
+**Status:** DONE ✅
+**Priority:** P0 (Documentation consistency)
+**Estimated Effort:** 2-3 hours
+**Completed:** Code-side `evening` field removed from `When::Scheduled`. Docs updated — no remaining references in user-facing docs.
 
 ---
 

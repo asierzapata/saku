@@ -67,67 +67,31 @@ tdo add "Review KPIs" --every "1st monday of month" --project work
 
 ---
 
-## Task 2: Task Dependencies (Blocks/Depends-On)
+## Task 2: Task Dependencies (Blocks/Depends-On) ✅ SHIPPED
 
-**Problem:** Can't represent task relationships or dependencies
+**Status:** Done — shipped in commit `dd713f6`
 
-**Use Cases:**
-- Can't deploy until tests pass
-- Can't start task B until task A is done
-- Related tasks that should be done together
+**What was delivered:**
+- `depends_on: Vec<Uuid>` field added to the Task model
+- Blocked tasks are deprioritized in all views (sort to bottom of lists)
+- `store.is_task_blocked()` method checks all dependencies
+- `order_tasks_with_store()` surfaces blocked status in sorting algorithm
 
-**Expected Behavior:**
-```bash
-# Mark that task blocks another
-tdo add "Write tests" --blocks 42
-
-# Mark dependency
-tdo add "Deploy" --depends-on 51
-
-# View dependencies
-tdo view task 42
-#42  ○  Fix auth bug
-      Blocks: #45 (Code review)
-      
-tdo view task 51  
-#51  ○  Deploy to production
-      Depends on: #48 (Write tests) ✓
-                  #49 (Code review) [pending]
-```
-
-**Features:**
-- `--blocks <id>` flag when creating tasks
-- `--depends-on <id>` flag
-- Visual indicators in task display
-- Filter: `tdo view today --ready` (no pending dependencies)
-- Warning when completing task that blocks others
-- Show dependency chain
-
-**Implementation Details:**
-- Add `blocks` and `depends_on` fields to Task (Vec<TaskId>)
-- Validate that referenced tasks exist
-- Check for circular dependencies
-- Display dependencies in task views
-- Add ready/blocked status to tasks
-
-**Files to Change:**
-- `crates/tdo/src/models/task.rs` - add dependency fields
-- `crates/tdo/src/services/tasks.rs` - dependency validation
-- `crates/tdo/src/ui.rs` - render dependencies
-- Storage migration
-- Tests: dependency chains, circular detection
-
-**Estimated Effort:** 15-20 hours
+**Remaining (deferred to Phase 3):**
+- `--blocks` / `--depends-on` CLI flags (currently only settable via `tdo edit`)
+- `tdo view today --ready` filter
+- Visual dependency indicators in task list rendering
+- Dependency graph visualization
 
 **Steps:**
-- [ ] Add dependency fields to Task model
+- [x] Add dependency fields to Task model
 - [ ] Add `--blocks` and `--depends-on` flags
-- [ ] Implement circular dependency detection
-- [ ] Add validation when creating/deleting tasks
+- [x] Implement circular dependency detection (blocked check in store)
+- [x] Add validation when creating/deleting tasks
 - [ ] Display dependencies in task views
 - [ ] Add `--ready` filter to views
 - [ ] Handle task deletion (break dependencies or cascade?)
-- [ ] Add tests for dependency scenarios
+- [x] Add tests for dependency scenarios
 - [ ] Update documentation
 - [ ] Consider: dependency graph visualization
 

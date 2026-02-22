@@ -153,13 +153,11 @@ tdo view all --project work-api --tag bug  # Multiple filters (AND)
 
 ---
 
-## Task 4: Add Dedicated Deadlines View
+## Task 4: Add Dedicated Deadlines View ✅ SHIPPED
 
-**Problem:** Deadlines are secondary in UI, easy to miss. No way to see all tasks with deadlines sorted by due date
+**Status:** Done — shipped in commits `4da5046` and `1f69b6b`
 
-**Current Workaround:** Use `tdo all` and manually look for deadline badges
-
-**Solution:** Add `tdo view deadlines` command
+**Solution:** `tdo view deadlines` command
 
 **Expected Behavior:**
 ```bash
@@ -208,23 +206,21 @@ tdo view deadlines --soon 7      # Deadlines within 7 days
 **Estimated Effort:** 5-6 hours
 
 **Steps:**
-- [ ] Add `Deadlines` view command
-- [ ] Implement deadline filtering and grouping
-- [ ] Create deadline-specific rendering (grouped by urgency)
-- [ ] Add color coding for urgency levels
+- [x] Add `Deadlines` view command
+- [x] Implement deadline filtering and grouping
+- [x] Create deadline-specific rendering (grouped by urgency)
+- [x] Add color coding for urgency levels
 - [ ] Add optional filters (upcoming, overdue, soon)
-- [ ] Add tests
-- [ ] Update documentation
+- [x] Add tests
+- [x] Update documentation
 
 ---
 
-## Task 5: Implement Bulk Operations
+## Task 5: Implement Bulk Operations ✅ SHIPPED (Batch Mode)
 
-**Problem:** Can't operate on multiple tasks at once, tedious for common workflows
+**Status:** Done — shipped in commit `e18b4e5`
 
-**Current Workaround:** Run command multiple times
-
-**Solution:** Support multiple task IDs in commands
+**Solution:** Batch mode added to task mutation commands
 
 **Expected Behavior:**
 ```bash
@@ -270,16 +266,16 @@ tdo move 42,51,67 --tag urgent
 **Estimated Effort:** 10-12 hours
 
 **Steps:**
-- [ ] Create task number parser (handles ranges, lists)
-- [ ] Update command definitions to accept multiple IDs
-- [ ] Implement bulk complete operation
-- [ ] Implement bulk delete operation
-- [ ] Implement bulk move/update operation
-- [ ] Add progress/summary output
+- [x] Create task number parser (handles ranges, lists)
+- [x] Update command definitions to accept multiple IDs
+- [x] Implement bulk complete operation
+- [x] Implement bulk delete operation
+- [x] Implement bulk move/update operation
+- [x] Add progress/summary output
 - [ ] Handle errors gracefully (partial success)
 - [ ] Add `--continue-on-error` flag
-- [ ] Add tests for all bulk scenarios
-- [ ] Update documentation
+- [x] Add tests for all bulk scenarios
+- [x] Update documentation
 
 ---
 

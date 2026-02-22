@@ -1,8 +1,9 @@
 # TDO CLI - Comprehensive QA & Product Review Report
 
-**Report Date:** February 19, 2026  
-**Reviewer:** QA Engineer & Product Manager Review  
-**Version Analyzed:** v0.4.0  
+**Report Date:** February 19, 2026 (updated February 22, 2026)
+**Reviewer:** QA Engineer & Product Manager Review
+**Version Analyzed:** v0.4.0 (status updated to v0.5.11)
+**Current Version:** v0.5.11
 
 ---
 
@@ -10,7 +11,8 @@
 
 **TDO is a well-architected, production-ready task management CLI** with clean code, strong fundamentals, and thoughtful design. However, there are **significant UX inconsistencies**, **missing features**, and **underdeveloped capabilities** that limit its usability and competitive position.
 
-**Overall Grade: B+ (Code Quality) / C+ (Feature Completeness & UX)**
+**Overall Grade (v0.4.0):** B+ (Code Quality) / C+ (Feature Completeness & UX)
+**Updated Grade (v0.5.11):** B+ (Code Quality) / B- (Feature Completeness & UX)
 
 ---
 
@@ -595,34 +597,34 @@ warning: function `format_completion_date` is never used
 
 ## 🚀 Recommended Prioritization
 
-### Phase 1: Fix Broken Basics (1-2 weeks)
+### Phase 1: Fix Broken Basics — COMPLETE ✅
 1. ✅ Clean up outdated documentation (remove "anytime" and "evening" references)
-2. ✅ Remove `evening` field from code (add migration v5)
-3. ✅ Add confirmation for fuzzy match operations
-4. ✅ Fix dead code warnings
-5. ✅ Fix clippy warnings
-6. ✅ Ensure all documentation matches implementation
+2. ✅ Remove `evening` field from `When::Scheduled` in code
+3. ❌ Add confirmation for fuzzy match operations (still pending)
+4. ✅ Fix dead code warnings (clippy pass in `964f73b`)
+5. ✅ Fix clippy warnings (clippy pass in `964f73b`)
+6. ✅ Command structure standardized: all views under `tdo view <subcommand>`
 
-### Phase 2: Essential Features (2-4 weeks)
-7. ✅ Add search command (`tdo search <query>`)
-8. ✅ Add filter flags to view commands
-9. ✅ Implement bulk operations (complete multiple tasks)
-10. ✅ Add dedicated deadlines view
-11. ✅ Improve checklist UX (CLI accessible)
+### Phase 2: Essential Features — PARTIALLY COMPLETE
+7. ❌ Add search command (`tdo search <query>`) — not yet built
+8. ❌ Add filter flags to view commands — not yet built
+9. ✅ Implement bulk operations — batch mode shipped in `e18b4e5`
+10. ✅ Add dedicated deadlines view — shipped in `4da5046` / `1f69b6b`
+11. ❌ Improve checklist UX (CLI accessible) — still editor-only
 
-### Phase 3: Power User Features (1-2 months)
-12. ✅ Recurring tasks
-13. ✅ Task dependencies (blocks/depends-on)
-14. ✅ Priority system
-15. ✅ Defer until properly implemented
-16. ✅ Export/import functionality
+### Phase 3: Power User Features — IN PROGRESS
+12. ❌ Recurring tasks — not started
+13. ⚠️ Task dependencies — data model shipped (`dd713f6`); CLI flags pending
+14. ❌ Priority system — not started
+15. ❌ Defer until properly implemented — field exists, CLI flags pending
+16. ⚠️ Export/import — JSON + CSV output shipped (`412c5d1`); import not started
 
-### Phase 4: Polish & Ecosystem (2-3 months)
-17. ✅ Interactive TUI mode
-18. ✅ Configuration file support
-19. ✅ Plugin/hook system
-20. ✅ Integrate sync functionality
-21. ✅ Advanced documentation
+### Phase 4: Polish & Ecosystem — NOT STARTED
+17. ❌ Interactive TUI mode
+18. ❌ Configuration file support
+19. ❌ Plugin/hook system
+20. ❌ Integrate sync functionality (saku-sync exists but not user-exposed)
+21. ❌ Advanced documentation
 
 ---
 
@@ -669,14 +671,15 @@ TDO could differentiate by being the **"developer-friendly task manager"** - CLI
 
 ## 📋 Issue Summary
 
-**Total Issues Found: 22**
+**Total Issues Found: 22** | Updated status as of v0.5.11
 
-- 🚨 **Critical (P0):** 3 issues (2 documentation cleanup, 1 command structure)
-- 🔴 **Major (P1):** 7 issues  
-- 🟡 **Feature Gaps (P2):** 9 issues
-- ⚪ **Code Quality:** 3 issues
+- 🚨 **Critical (P0):** 3 issues → **2 resolved** (docs cleanup ✅, code cleanup ✅) | 1 open (command confirmation UX)
+- 🔴 **Major (P1):** 7 issues → **2 resolved** (deadlines view ✅, bulk ops ✅) | 5 open
+- 🟡 **Feature Gaps (P2):** 9 issues → **1 partially resolved** (dependencies data model ✅, CLI pending) | 8 open
+- ⚪ **Code Quality:** 3 issues → **2 resolved** (clippy warnings ✅) | 1 open (test coverage)
 
-**Estimated effort to address all P0+P1 issues:** 4-6 weeks of focused development.
+**Resolved since v0.4.0:** Command structure refactored, evening/anytime removed, deadlines view, batch mode, task dependencies (model), JSON/CSV export.
+**Remaining to address all open issues:** ~6-8 weeks of focused development.
 
 **Note:** Issues #1-3 are documentation/cleanup tasks that can be completed quickly (see `/documentation/tdo/CLEANUP-ANYTIME-EVENING.md` for detailed instructions).
 
