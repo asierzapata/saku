@@ -96,20 +96,17 @@ pub fn parse_recurrence(
     // -- "<ordinal> <weekday> of month" e.g. "1st monday of month" --
     if let Some(rest) = s.strip_suffix(" of month") {
         let parts: Vec<&str> = rest.trim().splitn(2, ' ').collect();
-        if parts.len() == 2 {
-            if let Some(nth) = parse_ordinal(parts[0]).filter(|&n| (1..=5).contains(&n)) {
-                if let Some(weekday) = parse_weekday(parts[1].trim()) {
-                    return Ok(Recurrence {
-                        freq: Freq::Monthly,
-                        weekdays: vec![],
-                        monthly_anchor: Some(MonthlyAnchor::NthWeekday { nth, weekday }),
-                        until: None,
-                        dtstart,
-                    });
-                }
-            }
-            // "<ordinal> of month" — e.g. "1st of month" (parts[1] would be empty after strip)
-            // handled below
+        if parts.len() == 2
+            && let Some(nth) = parse_ordinal(parts[0]).filter(|&n| (1..=5).contains(&n))
+            && let Some(weekday) = parse_weekday(parts[1].trim())
+        {
+            return Ok(Recurrence {
+                freq: Freq::Monthly,
+                weekdays: vec![],
+                monthly_anchor: Some(MonthlyAnchor::NthWeekday { nth, weekday }),
+                until: None,
+                dtstart,
+            });
         }
 
         // "<ordinal> of month" (no weekday part, bare ordinal)
