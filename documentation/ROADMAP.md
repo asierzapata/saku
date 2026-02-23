@@ -224,7 +224,7 @@ Key constraint: decisions are immutable records, not editable notes. A changed d
 
 ---
 
-## Milestone 4 — The Work Loop: `ctx` + `tmr`
+## Milestone 4 — The Work Loop: `ctx`
 
 ### 4.1 `ctx` — Session Context
 
@@ -241,48 +241,6 @@ Human use: come back after a meeting and immediately remember where you were. Ag
 
 Key distinction from `tdo`: context is *mental state*, not task state. "Where was I in my thinking" vs. "what's on the list."
 
-### 4.2 `tmr` — Time Tracker
-
-Pomodoro-style focus sessions with time-on-task tracking. Links to tdo task IDs.
-
-```bash
-tmr start 42           # start timer for task #42
-tmr stop               # stop, record time
-tmr view today         # time breakdown today
-tmr view week          # weekly summary by project
-```
-
-Human use: focus sessions, capacity planning, understanding where time actually goes. Agent use: records time spent on tasks it executes — useful for estimating future work.
-
----
-
-## Milestone 5 — The Communication Loop: `msg` + `ppl`
-
-### 5.1 `msg` — Async Waiting
-
-Tracks things blocked on external parties. The gap every other system misses: work you're waiting on from people outside the team has no home. It drops.
-
-```bash
-msg add "Design review for dashboard" --from alice --sent 2026-02-20 --by 2026-02-25
-msg add "Security audit sign-off" --from security-team
-msg view             # everything I'm waiting on, sorted by how overdue
-msg done 3           # mark as received
-```
-
-Agent use: when the agent hits an external dependency, it creates a `msg` entry and surfaces it in the human's review queue. Human processes it, unblocks the agent's work.
-
-### 5.2 `ppl` — People Context
-
-Lightweight context about the people you work with. Not a CRM — a working memory layer.
-
-```bash
-ppl add "Alice Chen" --role "Design Lead" --note "Reviews code on Thursdays. Prefers async."
-ppl note alice "Agreed to send design specs by March 1. This unblocks frontend PR."
-ppl view alice
-```
-
-Human use: before a 1:1, instant context. After a meeting, capture what was agreed. Agent use: reads `ppl` to understand communication preferences and pending commitments.
-
 ---
 
 ## The Orchestrator: `saku`
@@ -293,7 +251,7 @@ Built last, after tools exist to orchestrate. The cross-tool layer that makes th
 saku context           # full situational picture across all tools
 saku context --json    # structured for agent consumption
 saku search "auth"     # search across tdo, nte, jrn, dcs simultaneously
-saku today             # today from tdo + jrn + cal combined
+saku today             # today from tdo + jrn combined
 saku sync              # sync everything
 saku status            # counts and health across all tools
 ```
@@ -326,8 +284,7 @@ saku status            # counts and health across all tools
 | **M1** | Daily | Search, filters, priority, defer, dependencies, recurrence, dates | Complete tdo as a human tool |
 | **M2** | Daily | `tdo context`, assignment, fuzzy confirmation, checklists | Make coordination explicit and first-class |
 | **M3** | Knowledge | `nte`, `dcs` | Give the agent memory and decision history |
-| **M4** | Work | `ctx`, `tmr` | Make session handoff and focus first-class |
-| **M5** | Communication | `msg`, `ppl` | Stop dropping things blocked on external parties |
+| **M4** | Work | `ctx` | Make session handoff first-class |
 | **`saku`** | Orchestrator | Cross-tool context, search, sync | Build when tools exist to orchestrate |
 
 ---

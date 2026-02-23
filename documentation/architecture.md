@@ -11,11 +11,10 @@ For the design intent behind the suite, see [PHILOSOPHY.md](PHILOSOPHY.md). For 
 Tools are organized around the recurring loops of a developer's day. Each tool serves one loop and no more.
 
 ```
-Daily Loop         → tdo, jrn
-Knowledge Loop     → nte, dcs
-Work Loop          → ctx, tmr
-Communication Loop → msg, ppl
-Orchestrator       → saku
+Daily Loop     → tdo, jrn
+Knowledge Loop → nte, dcs
+Work Loop      → ctx
+Orchestrator   → saku
 ```
 
 ### Current Status
@@ -27,9 +26,6 @@ Orchestrator       → saku
 | `nte` | Knowledge | Notes. Evergreen reference and architecture docs. | Planned |
 | `dcs` | Knowledge | Decision log. What was decided and why. | Planned |
 | `ctx` | Work | Session context. Save and restore where you left off. | Planned |
-| `tmr` | Work | Time tracker. Pomodoro and time-on-task. | Planned |
-| `msg` | Communication | Async waiting. What you're blocked on externally. | Planned |
-| `ppl` | Communication | People context. Notes about people you work with. | Planned |
 | `saku` | Orchestrator | Cross-tool context, search, and sync. | Planned |
 
 ---
@@ -47,9 +43,6 @@ saku/
 │   ├── nte/                      # Knowledge loop: notes (planned)
 │   ├── dcs/                      # Knowledge loop: decisions (planned)
 │   ├── ctx/                      # Work loop: session context (planned)
-│   ├── tmr/                      # Work loop: time tracking (planned)
-│   ├── msg/                      # Communication loop: async waiting (planned)
-│   ├── ppl/                      # Communication loop: people (planned)
 │   ├── saku/                     # Orchestrator (planned)
 │   ├── saku-storage/             # Shared storage abstraction
 │   ├── saku-crypto/              # Encryption utilities
@@ -149,7 +142,6 @@ Tools are independently useful but designed to compose. The integration surface 
 **Current integrations (planned):**
 
 - `ctx` reads active `tdo` tasks when saving session context
-- `tmr` links sessions to `tdo` task IDs for time attribution
 - `saku context` reads from all tool stores to produce the combined snapshot
 - `jrn` entries can reference `tdo` task IDs and `dcs` decision IDs
 - `tdo` tasks can carry a `nte` note reference for rich context
@@ -286,7 +278,6 @@ Unified configuration in `~/.config/saku/`:
 ~/.config/saku/
 ├── config.toml       # Suite-wide settings (planned)
 ├── tdo.toml          # Tool-specific overrides (planned)
-├── hbt.toml
 └── ...
 ```
 

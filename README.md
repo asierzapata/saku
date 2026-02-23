@@ -29,14 +29,6 @@ Tools are organized around the loops of a developer's day, not discrete categori
 | Tool | Description | Status |
 |---|---|---|
 | `ctx` | Session context. Saves and restores where you were — for yourself and for agents. | Planned |
-| `tmr` | Time tracker. Pomodoro and time-on-task. | Planned |
-
-### Communication Loop — Who am I waiting on?
-
-| Tool | Description | Status |
-|---|---|---|
-| `msg` | Async waiting. Tracks what you're blocked on from external parties. | Planned |
-| `ppl` | People context. Notes about the people you work with. | Planned |
 
 ### Orchestrator
 

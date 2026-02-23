@@ -41,12 +41,7 @@ This loop is slower — it accumulates over weeks and months. Notes that documen
 ### The Work Loop
 *What am I doing right now? Where did I leave off?*
 
-This loop is the most granular — minute-to-minute. Saving and restoring the mental model of a work session (`ctx`), so that whether the human resumes after a meeting or the agent resumes after being spawned, the thread is intact. Time tracking for introspection and capacity planning (`tmr`).
-
-### The Communication Loop
-*Who am I waiting on? What did I agree to follow up on?*
-
-This loop is the one most often dropped. Work that is blocked on external parties — design reviews, security sign-offs, replies from people outside the team — lives nowhere in most systems. It disappears into email or memory. `msg` tracks what you're waiting on and when it's overdue. `ppl` carries context about the people in your orbit, so decisions and agreements don't get lost.
+This loop is the most granular — minute-to-minute. Saving and restoring the mental model of a work session (`ctx`), so that whether the human resumes after a meeting or the agent resumes after being spawned, the thread is intact.
 
 ---
 
@@ -59,9 +54,6 @@ This loop is the one most often dropped. Work that is blocked on external partie
 | Knowledge | `nte` | Notes. Evergreen reference and architecture docs. |
 | Knowledge | `dcs` | Decision log. What was decided, why, and what alternatives were rejected. |
 | Work | `ctx` | Session context. Saves and restores where you were — for yourself and agents. |
-| Work | `tmr` | Time tracker. Pomodoro and time-on-task. |
-| Communication | `msg` | Async waiting. What you're blocked on from external parties. |
-| Communication | `ppl` | People context. Notes about the people you work with. |
 | Orchestrator | `saku` | Cross-tool context, search, and sync. |
 
 Together they form a **local-first productivity OS** — one the human operates through a keyboard and an agent operates through a shell.
