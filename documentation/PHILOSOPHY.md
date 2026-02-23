@@ -53,11 +53,6 @@ This loop is the one most often dropped. Work that is blocked on external partie
 
 This loop belongs to the human alone. Habits (`hbt`) track the behaviors that build capability over time — exercise, reading, writing. Agents don't have habits. This is one of the few tools in the suite that's explicitly human-only.
 
-### Exploration
-*What are we betting on? What are we learning?*
-
-This loop is often implicit but rarely captured. Running experiments — testing a hypothesis, measuring an outcome, recording a result — happens constantly in software development but gets lost in PRs or chat. `exp` gives experiments a lifecycle: hypothesis → testing → concluded, with the result stored where the team can find it.
-
 ---
 
 ## The Suite
@@ -74,7 +69,6 @@ This loop is often implicit but rarely captured. Running experiments — testing
 | Communication | `msg` | Async waiting. What you're blocked on from external parties. |
 | Communication | `ppl` | People context. Notes about the people you work with. |
 | Human Rhythms | `hbt` | Habit tracker. Daily streaks and consistency over time. |
-| Exploration | `exp` | Experiments. Hypothesis → testing → result lifecycle. |
 | Orchestrator | `saku` | Cross-tool context, search, and sync. |
 
 Together they form a **local-first productivity OS** — one the human operates through a keyboard and an agent operates through a shell.

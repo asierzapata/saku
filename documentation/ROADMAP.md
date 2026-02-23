@@ -285,9 +285,7 @@ Human use: before a 1:1, instant context. After a meeting, capture what was agre
 
 ---
 
-## Milestone 6 — Human Rhythms + Exploration: `hbt` + `exp`
-
-### 6.1 `hbt` — Habits
+## Milestone 6 — Human Rhythms: `hbt`
 
 Already designed. The human rhythms loop. Daily tracking with GitHub-style heatmap. Agent-independent — this loop belongs to the human.
 
@@ -296,22 +294,6 @@ hbt log exercise
 hbt view year
 hbt view stats
 ```
-
-### 6.2 `exp` — Experiments
-
-Hypothesis → testing → result. Prevents running the same failed experiment twice. Gives ongoing bets a home.
-
-```bash
-exp add "Edge functions cut API latency 30%" \
-    --project dashboard-v2 \
-    --method "A/B two endpoints for 1 week"
-exp update edge-functions --status running --note "Seeing 20% so far"
-exp close edge-functions --result "Confirmed 28% reduction. Shipping."
-exp view open
-exp search "latency"
-```
-
-Agent use: before proposing a change, reads `exp` to check if we already tried it. Human use: "what are we currently betting on?" — one command.
 
 ---
 
@@ -358,7 +340,7 @@ saku status            # counts and health across all tools
 | **M3** | Knowledge | `nte`, `dcs` | Give the agent memory and decision history |
 | **M4** | Work | `ctx`, `tmr` | Make session handoff and focus first-class |
 | **M5** | Communication | `msg`, `ppl` | Stop dropping things blocked on external parties |
-| **M6** | Rhythms + Exploration | `hbt`, `exp` | Complete the suite |
+| **M6** | Human Rhythms | `hbt` | Complete the suite |
 | **`saku`** | Orchestrator | Cross-tool context, search, sync | Build when tools exist to orchestrate |
 
 ---

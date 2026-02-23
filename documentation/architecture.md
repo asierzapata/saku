@@ -16,7 +16,6 @@ Knowledge Loop     → nte, dcs
 Work Loop          → ctx, tmr
 Communication Loop → msg, ppl
 Human Rhythms      → hbt
-Exploration        → exp
 Orchestrator       → saku
 ```
 
@@ -34,7 +33,6 @@ Orchestrator       → saku
 | `tmr` | Work | Time tracker. Pomodoro and time-on-task. | Planned |
 | `msg` | Communication | Async waiting. What you're blocked on externally. | Planned |
 | `ppl` | Communication | People context. Notes about people you work with. | Planned |
-| `exp` | Exploration | Experiments. Hypothesis → testing → result. | Planned |
 | `saku` | Orchestrator | Cross-tool context, search, and sync. | Planned |
 
 ---
@@ -57,7 +55,6 @@ saku/
 │   ├── msg/                      # Communication loop: async waiting (planned)
 │   ├── ppl/                      # Communication loop: people (planned)
 │   ├── hbt/                      # Human rhythms: habits (designed)
-│   ├── exp/                      # Exploration: experiments (planned)
 │   ├── saku/                     # Orchestrator (planned)
 │   ├── saku-storage/             # Shared storage abstraction
 │   ├── saku-crypto/              # Encryption utilities

@@ -45,12 +45,6 @@ Tools are organized around the loops of a developer's day, not discrete categori
 |---|---|---|
 | `hbt` | Habit tracker. Daily streaks, GitHub-style heatmap. | Designed |
 
-### Exploration — What are we betting on?
-
-| Tool | Description | Status |
-|---|---|---|
-| `exp` | Experiments. Hypothesis → testing → result lifecycle. | Planned |
-
 ### Orchestrator
 
 | Tool | Description | Status |
