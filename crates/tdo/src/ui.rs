@@ -1,5 +1,6 @@
 use colored::*;
 use jiff::civil::Date;
+use uuid::Uuid;
 
 use crate::models::{store::Store, task::Task};
 
@@ -418,6 +419,104 @@ fn render_task_line_with_options(
         } else {
             println!("{}{}", left_section, fill.dimmed());
         }
+    }
+}
+
+/// Render a single subtask line, indented under its parent
+pub fn render_subtask_line(task: &Task, store: &Store) {
+    let terminal_width = get_terminal_width();
+    let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
+
+    // Indent prefix: 6 chars visible ("    └─"), shown dimmed
+    let prefix = "    └─";
+    let prefix_len = 6usize;
+
+    let id_str = format!("{:>3}", task.task_number);
+    let urgency = calculate_task_urgency(task);
+    let glyph = get_status_glyph(urgency);
+    let (date_str, badge_urgency) = get_task_date_badge(task);
+
+    // Fixed overhead: prefix + " {id}  {glyph}  {badge}  "
+    // prefix_len + 1 (space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces)
+    let badge_visible_len = date_str.chars().count();
+    let fixed_overhead = prefix_len + 11 + badge_visible_len;
+    let available = effective_width.saturating_sub(fixed_overhead);
+
+    let title_chars: Vec<char> = task.title.chars().collect();
+    let title_len = title_chars.len();
+
+    const ELLIPSIS: &str = "[…]";
+    const ELLIPSIS_LEN: usize = 3;
+
+    let display_title = if title_len <= available {
+        task.title.clone()
+    } else if available >= ELLIPSIS_LEN {
+        title_chars[..available - ELLIPSIS_LEN].iter().collect::<String>() + ELLIPSIS
+    } else {
+        title_chars[..available.min(title_len)].iter().collect()
+    };
+
+    // Determine blocked state
+    let blockers = store.get_blockers(task);
+    let is_blocked = !blockers.is_empty();
+
+    let styled_title = if task.completed_at.is_some() || is_blocked {
+        display_title.as_str().dimmed()
+    } else {
+        display_title.as_str().white()
+    };
+    let styled_badge = style_date_badge(&date_str, badge_urgency);
+
+    let display_title_len = display_title.chars().count();
+    let badge_str = if is_blocked {
+        blocker_badge(&blockers)
+    } else {
+        String::new()
+    };
+    let badge_str_len = badge_str.chars().count();
+
+    // Fill remaining space with dots
+    let right_len = badge_str_len;
+    let fill_space = effective_width.saturating_sub(fixed_overhead + display_title_len + right_len);
+    let fill = if fill_space >= 2 {
+        format!(" {}", "·".repeat(fill_space - 1))
+    } else if fill_space == 1 {
+        " ".to_string()
+    } else {
+        String::new()
+    };
+
+    let left_section = format!(
+        "{}  {}  {}  {}",
+        id_str.italic().dimmed(),
+        glyph,
+        styled_badge,
+        styled_title
+    );
+
+    if badge_str_len > 0 {
+        println!(
+            "{} {}{}{}",
+            prefix.dimmed(),
+            left_section,
+            fill.dimmed(),
+            badge_str.dimmed()
+        );
+    } else {
+        println!("{} {}{}", prefix.dimmed(), left_section, fill.dimmed());
+    }
+}
+
+/// Render all non-deleted subtasks of a parent task, ordered by task_number
+pub fn render_subtask_children(parent_id: Uuid, store: &Store) {
+    let mut subtasks: Vec<&Task> = store
+        .tasks
+        .values()
+        .filter(|t| t.parent_task_id == Some(parent_id) && t.deleted_at.is_none())
+        .collect();
+    subtasks.sort_by_key(|t| t.task_number);
+    for subtask in subtasks {
+        render_subtask_line(subtask, store);
     }
 }
 

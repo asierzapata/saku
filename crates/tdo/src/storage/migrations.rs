@@ -200,9 +200,21 @@ fn migrate_v5_to_v6(mut value: Value) -> Result<Value, StorageError> {
 fn migrate_v6_to_v7(mut value: Value) -> Result<Value, StorageError> {
     if let Some(obj) = value.as_object_mut() {
         obj.insert("version".to_string(), Value::from(7));
-        // recurrence and completed_occurrences are handled by serde(default) on Task,
-        // so no field-adding loop is needed here.
+
+        // Add parent_task_id: null to all tasks, remove checklist field.
+        // recurrence and completed_occurrences are handled by serde(default) on Task.
+        if let Some(tasks) = obj.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+            for task in tasks {
+                if let Some(task_obj) = task.as_object_mut() {
+                    task_obj
+                        .entry("parent_task_id")
+                        .or_insert(Value::Null);
+                    task_obj.remove("checklist");
+                }
+            }
+        }
     }
+
     Ok(value)
 }
 
