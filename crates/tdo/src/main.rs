@@ -1050,31 +1050,141 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
     }
 }
 
+/// Split a store JSON value into one [`saku_sync::SyncDocument`] per entity.
+///
+/// Each task, project, and area becomes an independent sync unit keyed by its
+/// UUID.  The document path follows the scheme `{collection}/{uuid}`, e.g.
+/// `tasks/550e8400-e29b-41d4-a716-446655440000`.  The sync engine treats these
+/// as opaque byte slices; all schema awareness stays here in tdo.
+fn store_to_sync_documents(store_json: &serde_json::Value) -> Vec<saku_sync::SyncDocument> {
+    let mut docs = Vec::new();
+    for collection in &["tasks", "projects", "areas"] {
+        if let Some(arr) = store_json.get(collection).and_then(|v| v.as_array()) {
+            for entity in arr {
+                if let Some(id) = entity.get("id").and_then(|v| v.as_str()) {
+                    let path = format!("{}/{}", collection, id);
+                    let doc_key = format!("tdo/{}", path);
+                    if let Ok(content) = serde_json::to_vec(entity) {
+                        docs.push(saku_sync::SyncDocument {
+                            doc_key,
+                            tool: "tdo".to_string(),
+                            path,
+                            content,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    docs
+}
+
+/// Reassemble a store JSON value from a merged document set returned by the
+/// document sync engine.
+///
+/// Preserves store-level metadata (`version`, `next_task_number`) from
+/// `base_store`, then replaces the entity arrays with the merged content.
+/// Duplicate `task_number` values that can arise from parallel offline
+/// creation on multiple devices are resolved here.
+fn sync_documents_to_store(
+    base_store: &serde_json::Value,
+    merged_docs: &[saku_sync::SyncDocument],
+) -> serde_json::Value {
+    let mut tasks: Vec<serde_json::Value> = Vec::new();
+    let mut projects: Vec<serde_json::Value> = Vec::new();
+    let mut areas: Vec<serde_json::Value> = Vec::new();
+
+    for doc in merged_docs {
+        let entity: serde_json::Value = match serde_json::from_slice(&doc.content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if doc.path.starts_with("tasks/") {
+            tasks.push(entity);
+        } else if doc.path.starts_with("projects/") {
+            projects.push(entity);
+        } else if doc.path.starts_with("areas/") {
+            areas.push(entity);
+        }
+    }
+
+    // Resolve task_number collisions introduced by parallel offline creation.
+    let dedupe_next = saku_sync::conflict::fix_duplicate_task_numbers(&mut tasks);
+
+    let local_ntn = base_store
+        .get("next_task_number")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+
+    let mut result = base_store.clone();
+    result["tasks"] = serde_json::Value::Array(tasks);
+    result["projects"] = serde_json::Value::Array(projects);
+    result["areas"] = serde_json::Value::Array(areas);
+    result["next_task_number"] = serde_json::Value::from(local_ntn.max(dedupe_next));
+    result
+}
+
+/// Write merged documents back to disk if the sync completed.
+fn apply_document_sync_outcome(
+    storage_path: &std::path::Path,
+    base_store: &serde_json::Value,
+    outcome: saku_sync::DocumentSyncOutcome,
+) {
+    if let saku_sync::DocumentSyncOutcome::Completed { merged, .. } = outcome {
+        let merged_store = sync_documents_to_store(base_store, &merged);
+        match serde_json::to_vec_pretty(&merged_store) {
+            Ok(bytes) => {
+                let _ = std::fs::write(storage_path, &bytes);
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to write merged store: {}", e);
+            }
+        }
+    }
+}
+
 /// Attempt to sync after a mutation.
-/// Tries server sync first (if configured), falls back to TDO_SYNC_DIR for local dev.
-/// Sync is best-effort: errors are printed as warnings but never abort.
+///
+/// Uses document-based sync: each task, project, and area is an independent
+/// sync unit.  This avoids schema-aware merge logic inside the sync engine —
+/// every document is resolved with a simple LWW comparison on `modified_at`.
+///
+/// Tries server sync first (if configured), falls back to `TDO_SYNC_DIR` for
+/// local dev / testing.  Sync is best-effort: errors are printed as warnings
+/// but never abort.
 fn try_sync(storage_path: &std::path::Path) {
-    // Allow tests (and users) to fully disable sync without keychain prompts
+    // Allow tests (and users) to fully disable sync without keychain prompts.
     if std::env::var_os("TDO_NO_SYNC").is_some() {
         return;
     }
 
-    // Try server sync first (if the sync feature is enabled and configured)
+    // Read the current store so we can split it into documents.
+    let store_json = match std::fs::read(storage_path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+    {
+        Some(v) => v,
+        None => return,
+    };
+
+    // Try server sync first (if the sync feature is enabled and configured).
     #[cfg(feature = "sync")]
     {
         if let Ok(Some(config)) = saku_sync::config::load_sync_config() {
-            // Read passphrase from keychain
             match saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
                 .and_then(|ks| ks.get_passphrase())
             {
                 Ok(passphrase) => {
-                    match saku_sync::try_flush_if_online_server(
-                        storage_path,
+                    let documents = store_to_sync_documents(&store_json);
+                    match saku_sync::try_flush_documents_if_online_server(
+                        documents,
                         passphrase.as_bytes(),
                         &config.server_url,
                         &config.device_id,
                     ) {
-                        Ok(_) => {}
+                        Ok(outcome) => {
+                            apply_document_sync_outcome(storage_path, &store_json, outcome);
+                        }
                         Err(e) => {
                             eprintln!("Warning: sync failed: {}", e);
                         }
@@ -1082,18 +1192,21 @@ fn try_sync(storage_path: &std::path::Path) {
                     return;
                 }
                 Err(_) => {
-                    // No passphrase in keychain, fall through to local sync
+                    // No passphrase in keychain, fall through to local sync.
                 }
             }
         }
     }
 
-    // Fallback: local filesystem sync via TDO_SYNC_DIR env var
+    // Fallback: local filesystem sync via TDO_SYNC_DIR env var.
     if let Some(sync_dir) = std::env::var_os("TDO_SYNC_DIR") {
         let sync_dir = PathBuf::from(sync_dir);
         let passphrase = b"saku-dev-passphrase";
-        match saku_sync::try_flush_if_online(storage_path, passphrase, &sync_dir) {
-            Ok(_) => {}
+        let documents = store_to_sync_documents(&store_json);
+        match saku_sync::try_flush_documents_if_online(documents, passphrase, &sync_dir) {
+            Ok(outcome) => {
+                apply_document_sync_outcome(storage_path, &store_json, outcome);
+            }
             Err(e) => {
                 eprintln!("Warning: sync failed: {}", e);
             }

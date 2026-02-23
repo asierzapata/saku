@@ -67,11 +67,33 @@ fn extract_modified_at(entity: &Value) -> (i64, u64, String) {
     (wall_ms, lamport, device_id)
 }
 
+/// Select the winner between two document JSON byte slices using Last-Writer-Wins.
+///
+/// Compares the `modified_at` fields of both documents.  The document with the
+/// greater timestamp wins and its bytes are returned verbatim.  Local wins on a
+/// tie or if either side cannot be parsed as JSON.
+pub fn lww_merge_document(local: &[u8], remote: &[u8]) -> Vec<u8> {
+    let local_json: Value = match serde_json::from_slice(local) {
+        Ok(v) => v,
+        Err(_) => return local.to_vec(),
+    };
+    let remote_json: Value = match serde_json::from_slice(remote) {
+        Ok(v) => v,
+        Err(_) => return local.to_vec(),
+    };
+
+    if compare_modified_at(&remote_json, &local_json) == std::cmp::Ordering::Greater {
+        remote.to_vec()
+    } else {
+        local.to_vec()
+    }
+}
+
 /// Reassign task_numbers to any tasks that share a number with another task.
 /// Oldest task (by created_at, then id) keeps its number; duplicates get new numbers
 /// starting from max(existing_numbers) + 1.
 /// Returns the new next_task_number ceiling.
-fn fix_duplicate_task_numbers(tasks: &mut [Value]) -> u64 {
+pub fn fix_duplicate_task_numbers(tasks: &mut [Value]) -> u64 {
     use std::collections::HashMap;
 
     let mut by_number: HashMap<u64, Vec<usize>> = HashMap::new();
@@ -312,6 +334,60 @@ mod tests {
         assert_eq!(local_task["task_number"], 1, "Older task keeps number 1");
 
         assert!(merged["next_task_number"].as_u64().unwrap() >= 3);
+    }
+
+    #[test]
+    fn lww_merge_document_remote_wins() {
+        let local = serde_json::to_vec(&json!({
+            "id": "t1",
+            "title": "local",
+            "modified_at": {"wall_ms": 100, "lamport": 1, "device_id": "dev-a"}
+        }))
+        .unwrap();
+        let remote = serde_json::to_vec(&json!({
+            "id": "t1",
+            "title": "remote",
+            "modified_at": {"wall_ms": 200, "lamport": 1, "device_id": "dev-b"}
+        }))
+        .unwrap();
+
+        let result = lww_merge_document(&local, &remote);
+        let v: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(v["title"], "remote");
+    }
+
+    #[test]
+    fn lww_merge_document_local_wins_when_newer() {
+        let local = serde_json::to_vec(&json!({
+            "id": "t1",
+            "title": "local",
+            "modified_at": {"wall_ms": 300, "lamport": 1, "device_id": "dev-a"}
+        }))
+        .unwrap();
+        let remote = serde_json::to_vec(&json!({
+            "id": "t1",
+            "title": "remote",
+            "modified_at": {"wall_ms": 200, "lamport": 1, "device_id": "dev-b"}
+        }))
+        .unwrap();
+
+        let result = lww_merge_document(&local, &remote);
+        let v: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(v["title"], "local");
+    }
+
+    #[test]
+    fn lww_merge_document_invalid_remote_keeps_local() {
+        let local = serde_json::to_vec(&json!({
+            "id": "t1",
+            "title": "local",
+            "modified_at": {"wall_ms": 100, "lamport": 1, "device_id": "dev-a"}
+        }))
+        .unwrap();
+        let bad_remote = b"not valid json";
+
+        let result = lww_merge_document(&local, bad_remote);
+        assert_eq!(result, local);
     }
 
     #[test]

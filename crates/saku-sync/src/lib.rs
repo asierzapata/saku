@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod conflict;
+pub mod document;
 pub mod error;
 pub mod hash;
 pub mod merkle;
@@ -9,6 +10,7 @@ pub mod sync_engine;
 #[cfg(feature = "server")]
 pub mod config;
 
+pub use document::{DocumentSyncConfig, DocumentSyncEngine, DocumentSyncOutcome, SyncDocument};
 pub use error::SyncError;
 pub use sync_engine::{SyncConfig, SyncEngine, SyncOutcome, TrackedFile};
 
@@ -77,5 +79,55 @@ pub fn try_flush_if_online_server(
     };
 
     let mut engine = SyncEngine::new(config, backend)?;
+    engine.sync()
+}
+
+/// Document-based sync convenience function using a local filesystem backend.
+///
+/// Accepts pre-split documents (one per entity), syncs them at document
+/// granularity, and returns the merged set.  The caller reassembles those
+/// documents back into the on-disk store format.
+pub fn try_flush_documents_if_online(
+    documents: Vec<SyncDocument>,
+    passphrase: &[u8],
+    backend_root: &Path,
+) -> Result<DocumentSyncOutcome, SyncError> {
+    let backend = LocalFsSyncBackend::new(backend_root);
+
+    let db_path = saku_storage::device::saku_data_dir()
+        .map_err(SyncError::DeviceId)?
+        .join("sync.db");
+
+    let config = DocumentSyncConfig {
+        db_path,
+        passphrase: passphrase.to_vec(),
+        documents,
+    };
+
+    let mut engine = DocumentSyncEngine::new(config, backend)?;
+    engine.sync()
+}
+
+/// Document-based sync convenience function using the saku server backend.
+#[cfg(feature = "server")]
+pub fn try_flush_documents_if_online_server(
+    documents: Vec<SyncDocument>,
+    passphrase: &[u8],
+    server_url: &str,
+    device_id: &str,
+) -> Result<DocumentSyncOutcome, SyncError> {
+    let backend = backend::server::ServerSyncBackend::new(server_url, device_id)?;
+
+    let db_path = saku_storage::device::saku_data_dir()
+        .map_err(SyncError::DeviceId)?
+        .join("sync.db");
+
+    let config = DocumentSyncConfig {
+        db_path,
+        passphrase: passphrase.to_vec(),
+        documents,
+    };
+
+    let mut engine = DocumentSyncEngine::new(config, backend)?;
     engine.sync()
 }
