@@ -31,7 +31,7 @@ Most productivity suites map tools to categories (tasks, notes, calendar). We ma
 ### The Daily Loop
 *What's the plan? What happened? What do we hand off?*
 
-This loop runs every day. It includes knowing what's on the plate (`tdo`), recording what happened (`jrn`), and surfacing time constraints from the world outside the team (`cal`). At the end of every day, the human and agent exchange state through these tools — the human reviewing what the agent completed, the agent picking up what the human left for overnight.
+This loop runs every day. It includes knowing what's on the plate (`tdo`) and recording what happened (`jrn`). At the end of every day, the human and agent exchange state through these tools — the human reviewing what the agent completed, the agent picking up what the human left for overnight.
 
 ### The Knowledge Loop
 *What do we know? Why did we decide this?*
@@ -48,11 +48,6 @@ This loop is the most granular — minute-to-minute. Saving and restoring the me
 
 This loop is the one most often dropped. Work that is blocked on external parties — design reviews, security sign-offs, replies from people outside the team — lives nowhere in most systems. It disappears into email or memory. `msg` tracks what you're waiting on and when it's overdue. `ppl` carries context about the people in your orbit, so decisions and agreements don't get lost.
 
-### Human Rhythms
-*What do I do every day, regardless of what's on the task list?*
-
-This loop belongs to the human alone. Habits (`hbt`) track the behaviors that build capability over time — exercise, reading, writing. Agents don't have habits. This is one of the few tools in the suite that's explicitly human-only.
-
 ---
 
 ## The Suite
@@ -61,14 +56,12 @@ This loop belongs to the human alone. Habits (`hbt`) track the behaviors that bu
 |---|---|---|
 | Daily | `tdo` | Work queue. Work orders for human and agent. |
 | Daily | `jrn` | Daily journal. Chronological log of what happened. |
-| Daily | `cal` | Calendar. Time constraints and event-driven triggers. |
 | Knowledge | `nte` | Notes. Evergreen reference and architecture docs. |
 | Knowledge | `dcs` | Decision log. What was decided, why, and what alternatives were rejected. |
 | Work | `ctx` | Session context. Saves and restores where you were — for yourself and agents. |
 | Work | `tmr` | Time tracker. Pomodoro and time-on-task. |
 | Communication | `msg` | Async waiting. What you're blocked on from external parties. |
 | Communication | `ppl` | People context. Notes about the people you work with. |
-| Human Rhythms | `hbt` | Habit tracker. Daily streaks and consistency over time. |
 | Orchestrator | `saku` | Cross-tool context, search, and sync. |
 
 Together they form a **local-first productivity OS** — one the human operates through a keyboard and an agent operates through a shell.

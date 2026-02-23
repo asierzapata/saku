@@ -285,18 +285,6 @@ Human use: before a 1:1, instant context. After a meeting, capture what was agre
 
 ---
 
-## Milestone 6 — Human Rhythms: `hbt`
-
-Already designed. The human rhythms loop. Daily tracking with GitHub-style heatmap. Agent-independent — this loop belongs to the human.
-
-```bash
-hbt log exercise
-hbt view year
-hbt view stats
-```
-
----
-
 ## The Orchestrator: `saku`
 
 Built last, after tools exist to orchestrate. The cross-tool layer that makes the suite more than the sum of its parts.
@@ -340,7 +328,6 @@ saku status            # counts and health across all tools
 | **M3** | Knowledge | `nte`, `dcs` | Give the agent memory and decision history |
 | **M4** | Work | `ctx`, `tmr` | Make session handoff and focus first-class |
 | **M5** | Communication | `msg`, `ppl` | Stop dropping things blocked on external parties |
-| **M6** | Human Rhythms | `hbt` | Complete the suite |
 | **`saku`** | Orchestrator | Cross-tool context, search, sync | Build when tools exist to orchestrate |
 
 ---

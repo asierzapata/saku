@@ -11,11 +11,10 @@ For the design intent behind the suite, see [PHILOSOPHY.md](PHILOSOPHY.md). For 
 Tools are organized around the recurring loops of a developer's day. Each tool serves one loop and no more.
 
 ```
-Daily Loop         → tdo, jrn, cal
+Daily Loop         → tdo, jrn
 Knowledge Loop     → nte, dcs
 Work Loop          → ctx, tmr
 Communication Loop → msg, ppl
-Human Rhythms      → hbt
 Orchestrator       → saku
 ```
 
@@ -24,9 +23,7 @@ Orchestrator       → saku
 | Tool | Loop | Description | Status |
 |---|---|---|---|
 | `tdo` | Daily | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
-| `hbt` | Rhythms | Habit tracker. Daily streaks and consistency. | Designed |
 | `jrn` | Daily | Daily journal. Chronological log of what happened. | Planned |
-| `cal` | Daily | Calendar. Time constraints and event triggers. | Planned |
 | `nte` | Knowledge | Notes. Evergreen reference and architecture docs. | Planned |
 | `dcs` | Knowledge | Decision log. What was decided and why. | Planned |
 | `ctx` | Work | Session context. Save and restore where you left off. | Planned |
@@ -47,14 +44,12 @@ saku/
 ├── crates/
 │   ├── tdo/                      # Daily loop: task queue
 │   ├── jrn/                      # Daily loop: journal (planned)
-│   ├── cal/                      # Daily loop: calendar (planned)
 │   ├── nte/                      # Knowledge loop: notes (planned)
 │   ├── dcs/                      # Knowledge loop: decisions (planned)
 │   ├── ctx/                      # Work loop: session context (planned)
 │   ├── tmr/                      # Work loop: time tracking (planned)
 │   ├── msg/                      # Communication loop: async waiting (planned)
 │   ├── ppl/                      # Communication loop: people (planned)
-│   ├── hbt/                      # Human rhythms: habits (designed)
 │   ├── saku/                     # Orchestrator (planned)
 │   ├── saku-storage/             # Shared storage abstraction
 │   ├── saku-crypto/              # Encryption utilities

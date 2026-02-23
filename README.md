@@ -16,7 +16,6 @@ Tools are organized around the loops of a developer's day, not discrete categori
 |---|---|---|
 | `tdo` | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
 | `jrn` | Daily journal. Chronological log of what happened. | Planned |
-| `cal` | Calendar. Time constraints and event-driven triggers. | Planned |
 
 ### Knowledge Loop — What do we know? Why did we decide this?
 
@@ -38,12 +37,6 @@ Tools are organized around the loops of a developer's day, not discrete categori
 |---|---|---|
 | `msg` | Async waiting. Tracks what you're blocked on from external parties. | Planned |
 | `ppl` | People context. Notes about the people you work with. | Planned |
-
-### Human Rhythms — Recurring personal behaviors.
-
-| Tool | Description | Status |
-|---|---|---|
-| `hbt` | Habit tracker. Daily streaks, GitHub-style heatmap. | Designed |
 
 ### Orchestrator
 
