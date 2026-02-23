@@ -401,6 +401,11 @@ enum ViewEntity {
         /// Name of the tag
         name: String,
     },
+    /// Show all details of a single task
+    Task {
+        /// Task number or fuzzy title match
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -900,6 +905,50 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                         saku_tdo::ui::render_task_line(task, store);
                     }
                 }
+            }
+        }
+        ViewEntity::Task { id } => {
+            resolve_task_by_id_or_fuzzy(id, store, |task| {
+                saku_tdo::ui::render_task_detail_view(task, store);
+            });
+        }
+    }
+}
+
+/// Resolve a task by numeric ID or fuzzy title match, then call `f` with the task.
+/// Exits the process on error (not found / ambiguous).
+fn resolve_task_by_id_or_fuzzy<F>(id: &str, store: &saku_tdo::models::store::Store, f: F)
+where
+    F: FnOnce(&saku_tdo::models::task::Task),
+{
+    if let Ok(n) = id.parse::<u64>() {
+        match store.get_task_by_number(n) {
+            Some(task) => f(task),
+            None => {
+                eprintln!("Error: Task #{} not found", n);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let lower = id.to_lowercase();
+        let matches: Vec<_> = store
+            .tasks
+            .values()
+            .filter(|t| t.title.to_lowercase().contains(&lower))
+            .collect();
+        match matches.len() {
+            0 => {
+                eprintln!("Error: No task found matching '{}'", id);
+                std::process::exit(1);
+            }
+            1 => f(matches[0]),
+            _ => {
+                eprintln!("Error: Ambiguous match for '{}'. Multiple tasks found:", id);
+                for t in &matches {
+                    eprintln!("  #{} {}", t.task_number, t.title);
+                }
+                eprintln!("\nPlease be more specific.");
+                std::process::exit(1);
             }
         }
     }
@@ -2141,6 +2190,16 @@ fn main() {
                             output::OutputFormat::Pretty => unreachable!(),
                         }
                     }
+                }
+                ViewEntity::Task { id } => {
+                    resolve_task_by_id_or_fuzzy(&id, &store, |task| {
+                        let out = output::TaskOutput::from_task(task, &store);
+                        match fmt {
+                            output::OutputFormat::Json => output::print_json(&out),
+                            output::OutputFormat::Csv => output::print_csv(&[out]),
+                            output::OutputFormat::Pretty => unreachable!(),
+                        }
+                    });
                 }
             }
             } // close else { match entity { ... } }

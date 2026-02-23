@@ -599,3 +599,193 @@ pub fn format_month_header(timestamp: jiff::Timestamp) -> String {
     let zoned = jiff::Zoned::new(timestamp, jiff::tz::TimeZone::system());
     zoned.strftime("%B %Y").to_string()
 }
+
+/// Format a timestamp as a short human-readable date (e.g., "Feb 10, 2026")
+fn format_timestamp_short(ts: jiff::Timestamp) -> String {
+    let zoned = jiff::Zoned::new(ts, jiff::tz::TimeZone::system());
+    zoned.strftime("%b %-d, %Y").to_string()
+}
+
+/// Simple word-wrap: splits `text` into lines of at most `max_width` chars.
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            let word_len = word.chars().count();
+            if current.is_empty() {
+                if word_len > max_width {
+                    lines.push(word.to_string());
+                } else {
+                    current.push_str(word);
+                }
+            } else if current.chars().count() + 1 + word_len <= max_width {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                lines.push(current.clone());
+                current = word.to_string();
+            }
+        }
+        if !current.is_empty() || paragraph.is_empty() {
+            lines.push(current);
+        }
+    }
+    lines
+}
+
+/// Render a section header with a dashed fill for the detail view.
+fn render_detail_section_header(label: &str) {
+    let width = get_terminal_width().min(MAX_CONTENT_WIDTH);
+    let label_len = label.chars().count();
+    // "  ▌ " (4) + label + " " (1) + dashes
+    let dashes = width.saturating_sub(4 + 1 + label_len + 1);
+    println!(
+        "\n  {} {} {}\n",
+        "▌".truecolor(144, 238, 144).bold(),
+        label.truecolor(144, 238, 144).bold(),
+        "─".repeat(dashes).dimmed(),
+    );
+}
+
+/// Render a full detail view for a single task.
+pub fn render_task_detail_view(task: &Task, store: &Store) {
+    let urgency = calculate_task_urgency(task);
+    let glyph = get_status_glyph(urgency);
+
+    let title_styled = if task.completed_at.is_some() || task.deleted_at.is_some() {
+        task.title.as_str().dimmed()
+    } else {
+        task.title.as_str().white()
+    };
+
+    println!(
+        "\n  {} {}  {}  {}\n",
+        "▌".cyan().bold(),
+        format!("#{}", task.task_number).italic().dimmed(),
+        glyph,
+        title_styled,
+    );
+
+    // Helper closure: print a labeled field line
+    let field = |label: &str, value: ColoredString| {
+        println!("    {:<12}{}", label.dimmed(), value);
+    };
+
+    // Status
+    let status_str = if task.deleted_at.is_some() {
+        "Deleted".dimmed()
+    } else if task.completed_at.is_some() {
+        "Completed".dimmed()
+    } else {
+        "Active".white()
+    };
+    field("Status", status_str);
+
+    // When
+    let when_str = match &task.when {
+        crate::models::task::When::Inbox => "Inbox".to_string(),
+        crate::models::task::When::Someday => "Someday".to_string(),
+        crate::models::task::When::Scheduled { date } => format_date_header(*date),
+        crate::models::task::When::LegacyToday { .. } => "Today".to_string(),
+        crate::models::task::When::LegacyAnytime => "Someday".to_string(),
+    };
+    field("When", when_str.as_str().white());
+
+    // Deadline (only if set)
+    if let Some(deadline) = task.deadline {
+        let today = jiff::Zoned::now().date();
+        let dl_str = format!("⚑ {}", format_date_compact(deadline, today, false).trim());
+        field("Deadline", dl_str.as_str().white());
+    }
+
+    // Defer until (only if set)
+    if let Some(defer) = task.defer_until {
+        let today = jiff::Zoned::now().date();
+        let defer_str = format_date_compact(defer, today, false);
+        field("Defer until", defer_str.trim().white());
+    }
+
+    // Project / Area context (only if set)
+    if let Some(ctx) = get_task_context(task, store) {
+        field("Project", ctx.as_str().white());
+    }
+
+    // Tags (only if non-empty)
+    if !task.tags.is_empty() {
+        let tags_str = task
+            .tags
+            .iter()
+            .map(|t| format!("#{}", t))
+            .collect::<Vec<_>>()
+            .join("  ");
+        field("Tags", tags_str.as_str().white());
+    }
+
+    // Recurrence (only if set)
+    if let Some(ref recurrence) = task.recurrence {
+        let rec_str = format!("↻ {}", recurrence);
+        field("Recurrence", rec_str.as_str().white());
+    }
+
+    // Blocked by (only if non-empty active blockers)
+    let blockers = store.get_blockers(task);
+    if !blockers.is_empty() {
+        let blocker_str = blockers
+            .iter()
+            .map(|t| format!("#{}", t.task_number))
+            .collect::<Vec<_>>()
+            .join(", ");
+        field("Blocked by", blocker_str.as_str().white());
+    }
+
+    // Subtask of (only if set)
+    if let Some(parent_id) = task.parent_task_id {
+        if let Some(parent) = store.get_task(parent_id) {
+            let parent_str = format!("#{}  {}", parent.task_number, parent.title);
+            field("Subtask of", parent_str.as_str().white());
+        }
+    }
+
+    // Created
+    let created_str = format_timestamp_short(task.created_at);
+    field("Created", created_str.as_str().dimmed());
+
+    // Completed (only if set)
+    if let Some(completed_at) = task.completed_at {
+        let completed_str = format_timestamp_short(completed_at);
+        field("Completed", completed_str.as_str().dimmed());
+    }
+
+    println!();
+
+    // Notes section (only if present)
+    if let Some(ref notes) = task.notes {
+        render_detail_section_header("Notes");
+        let width = get_terminal_width().min(MAX_CONTENT_WIDTH);
+        let wrap_width = width.saturating_sub(4);
+        for wrapped_line in wrap_text(notes, wrap_width) {
+            println!("    {}", wrapped_line);
+        }
+        println!();
+    }
+
+    // Subtasks section (only if present)
+    let mut subtasks: Vec<&Task> = store
+        .tasks
+        .values()
+        .filter(|t| t.parent_task_id == Some(task.id) && t.deleted_at.is_none())
+        .collect();
+    subtasks.sort_by_key(|t| t.task_number);
+
+    if !subtasks.is_empty() {
+        render_detail_section_header(&format!("Subtasks ({})", subtasks.len()));
+        for subtask in &subtasks {
+            render_subtask_line(subtask, store);
+        }
+        println!();
+    }
+}
