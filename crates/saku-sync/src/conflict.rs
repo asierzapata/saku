@@ -67,8 +67,47 @@ fn extract_modified_at(entity: &Value) -> (i64, u64, String) {
     (wall_ms, lamport, device_id)
 }
 
+/// Reassign task_numbers to any tasks that share a number with another task.
+/// Oldest task (by created_at, then id) keeps its number; duplicates get new numbers
+/// starting from max(existing_numbers) + 1.
+/// Returns the new next_task_number ceiling.
+fn fix_duplicate_task_numbers(tasks: &mut Vec<Value>) -> u64 {
+    use std::collections::HashMap;
+
+    let mut by_number: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (i, task) in tasks.iter().enumerate() {
+        if let Some(n) = task.get("task_number").and_then(|v| v.as_u64()) {
+            by_number.entry(n).or_default().push(i);
+        }
+    }
+
+    let max_number = by_number.keys().max().copied().unwrap_or(0);
+    let mut next = max_number + 1;
+
+    for indices in by_number.values().filter(|v| v.len() > 1) {
+        let mut sorted = indices.clone();
+        sorted.sort_by(|&a, &b| {
+            let ca = tasks[a].get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let cb = tasks[b].get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let ia = tasks[a].get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let ib = tasks[b].get("id").and_then(|v| v.as_str()).unwrap_or("");
+            ca.cmp(cb).then(ia.cmp(ib))
+        });
+        // First entry keeps its number; reassign the rest
+        for &idx in &sorted[1..] {
+            if let Some(obj) = tasks[idx].as_object_mut() {
+                obj.insert("task_number".to_string(), Value::from(next));
+                next += 1;
+            }
+        }
+    }
+
+    next
+}
+
 /// Merge two complete store JSON values using LWW for tasks, projects, areas.
-/// Takes the maximum of `next_task_number`.
+/// Takes the maximum of `next_task_number` and deduplicates any task numbers
+/// introduced by parallel offline creation on multiple devices.
 pub fn lww_merge_store_json(local: &Value, remote: &Value) -> Value {
     let mut result = local.clone();
 
@@ -89,7 +128,12 @@ pub fn lww_merge_store_json(local: &Value, remote: &Value) -> Value {
         result[key] = Value::Array(merged);
     }
 
-    // Take max of next_task_number
+    // Fix duplicate task_numbers introduced by parallel offline creation
+    let mut tasks_arr = result["tasks"].as_array().cloned().unwrap_or_default();
+    let dedupe_next = fix_duplicate_task_numbers(&mut tasks_arr);
+    result["tasks"] = Value::Array(tasks_arr);
+
+    // next_task_number = max of both sides AND any new numbers allocated during dedup
     let local_ntn = local
         .get("next_task_number")
         .and_then(|v| v.as_u64())
@@ -98,7 +142,7 @@ pub fn lww_merge_store_json(local: &Value, remote: &Value) -> Value {
         .get("next_task_number")
         .and_then(|v| v.as_u64())
         .unwrap_or(1);
-    result["next_task_number"] = Value::Number(local_ntn.max(remote_ntn).into());
+    result["next_task_number"] = Value::Number(local_ntn.max(remote_ntn).max(dedupe_next).into());
 
     result
 }
@@ -219,6 +263,55 @@ mod tests {
 
         let tasks = merged["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn merge_deduplicates_task_numbers() {
+        let local = json!({
+            "version": 7,
+            "next_task_number": 2,
+            "tasks": [{
+                "id": "local-task-1",
+                "task_number": 1,
+                "title": "Local task",
+                "created_at": "2026-01-01T00:00:00Z",
+                "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
+            }],
+            "projects": [],
+            "areas": []
+        });
+
+        let remote = json!({
+            "version": 7,
+            "next_task_number": 2,
+            "tasks": [{
+                "id": "remote-task-1",
+                "task_number": 1,
+                "title": "Remote task",
+                "created_at": "2026-01-02T00:00:00Z",
+                "modified_at": {"wall_ms": 2000, "lamport": 1, "device_id": "dev-b"}
+            }],
+            "projects": [],
+            "areas": []
+        });
+
+        let merged = lww_merge_store_json(&local, &remote);
+
+        let tasks = merged["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 2, "Both tasks must be present after merge");
+
+        let mut numbers: Vec<u64> = tasks
+            .iter()
+            .filter_map(|t| t["task_number"].as_u64())
+            .collect();
+        numbers.sort_unstable();
+        numbers.dedup();
+        assert_eq!(numbers.len(), 2, "Task numbers must be unique after merge");
+
+        let local_task = tasks.iter().find(|t| t["id"] == "local-task-1").unwrap();
+        assert_eq!(local_task["task_number"], 1, "Older task keeps number 1");
+
+        assert!(merged["next_task_number"].as_u64().unwrap() >= 3);
     }
 
     #[test]

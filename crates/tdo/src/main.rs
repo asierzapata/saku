@@ -1054,6 +1054,11 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
 /// Tries server sync first (if configured), falls back to TDO_SYNC_DIR for local dev.
 /// Sync is best-effort: errors are printed as warnings but never abort.
 fn try_sync(storage_path: &std::path::Path) {
+    // Allow tests (and users) to fully disable sync without keychain prompts
+    if std::env::var_os("TDO_NO_SYNC").is_some() {
+        return;
+    }
+
     // Try server sync first (if the sync feature is enabled and configured)
     #[cfg(feature = "sync")]
     {

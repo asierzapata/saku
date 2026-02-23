@@ -296,6 +296,93 @@ fn note_conflict_creates_conflict_file() {
     );
 }
 
+/// Three devices each create task #1 offline, then all sync.
+/// The final merged store must have no duplicate task_numbers.
+#[test]
+fn three_device_offline_no_duplicates() {
+    let remote_dir = tempfile::tempdir().unwrap();
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+    let dir_c = tempfile::tempdir().unwrap();
+
+    let make_store = |device_id: &str, task_id: &str, created_at: &str, wall_ms: i64| {
+        json!({
+            "version": 7,
+            "next_task_number": 2,
+            "tasks": [{
+                "id": task_id,
+                "task_number": 1,
+                "title": format!("Task from {}", device_id),
+                "notes": null,
+                "project_id": null,
+                "area_id": null,
+                "parent_task_id": null,
+                "tags": [],
+                "when": {"type": "Inbox"},
+                "deadline": null,
+                "defer_until": null,
+                "completed_at": null,
+                "deleted_at": null,
+                "depends_on": [],
+                "created_at": created_at,
+                "modified_at": {"wall_ms": wall_ms, "lamport": 1, "device_id": device_id}
+            }],
+            "projects": [],
+            "areas": []
+        })
+    };
+
+    let store_a_path = dir_a.path().join("store.json");
+    let store_b_path = dir_b.path().join("store.json");
+    let store_c_path = dir_c.path().join("store.json");
+
+    write_store(&store_a_path, &make_store("dev-a", "task-aaa", "2026-01-01T00:00:00Z", 1000));
+    write_store(&store_b_path, &make_store("dev-b", "task-bbb", "2026-01-02T00:00:00Z", 2000));
+    write_store(&store_c_path, &make_store("dev-c", "task-ccc", "2026-01-03T00:00:00Z", 3000));
+
+    // Device A syncs first
+    let mut engine_a = SyncEngine::new_in_memory(
+        make_config(store_a_path.clone(), dir_a.path().join("sync.db")),
+        LocalFsSyncBackend::new(remote_dir.path()),
+    ).unwrap();
+    engine_a.sync().unwrap();
+
+    // Device B syncs
+    let mut engine_b = SyncEngine::new_in_memory(
+        make_config(store_b_path.clone(), dir_b.path().join("sync.db")),
+        LocalFsSyncBackend::new(remote_dir.path()),
+    ).unwrap();
+    engine_b.sync().unwrap();
+
+    // Device C syncs
+    let mut engine_c = SyncEngine::new_in_memory(
+        make_config(store_c_path.clone(), dir_c.path().join("sync.db")),
+        LocalFsSyncBackend::new(remote_dir.path()),
+    ).unwrap();
+    engine_c.sync().unwrap();
+
+    // Device A syncs again to pull B and C
+    let mut engine_a2 = SyncEngine::new_in_memory(
+        make_config(store_a_path.clone(), dir_a.path().join("sync2.db")),
+        LocalFsSyncBackend::new(remote_dir.path()),
+    ).unwrap();
+    engine_a2.sync().unwrap();
+
+    let final_store: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&store_a_path).unwrap()).unwrap();
+
+    let tasks = final_store["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 3, "All 3 tasks must be present");
+
+    let mut numbers: Vec<u64> = tasks
+        .iter()
+        .filter_map(|t| t["task_number"].as_u64())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    assert_eq!(numbers.len(), 3, "All task numbers must be unique: {:?}", numbers);
+}
+
 /// Offline queue: Backend unreachable -> ops queue -> backend comes back -> flush succeeds
 #[test]
 fn offline_queue_flushes_when_online() {
