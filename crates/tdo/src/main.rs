@@ -5,7 +5,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::*;
 
 use saku_tdo::{
-    models::task::{When, WhenInstantiationError},
+    models::task::{When, WhenInstantiationError, is_pending_on, next_pending_occurrence},
+    recurrence_parser::parse_recurrence,
     services::{
         areas::{
             CreateAreaError, CreateAreaParameters, DeleteAreaError, DeleteAreaParameters,
@@ -123,6 +124,14 @@ enum Commands {
         /// Add notes
         #[arg(short, long)]
         notes: Option<String>,
+
+        /// Recurrence pattern, e.g. "daily", "monday", "mon,wed,fri", "1st of month"
+        #[arg(long, value_name = "PATTERN")]
+        every: Option<String>,
+
+        /// End date for recurrence (e.g. "2026-12-31")
+        #[arg(long, value_name = "DATE")]
+        until: Option<String>,
     },
 
     /// Moves one or more tasks
@@ -178,6 +187,18 @@ enum Commands {
         /// Add notes
         #[arg(short, long)]
         notes: Option<String>,
+
+        /// Recurrence pattern, e.g. "daily", "monday", "mon,wed,fri", "1st of month"
+        #[arg(long, value_name = "PATTERN")]
+        every: Option<String>,
+
+        /// End date for recurrence (e.g. "2026-12-31")
+        #[arg(long, value_name = "DATE")]
+        until: Option<String>,
+
+        /// Remove recurrence from this task
+        #[arg(long)]
+        clear_recurrence: bool,
     },
 
     /// Complete one or more tasks
@@ -185,6 +206,10 @@ enum Commands {
         /// Task number(s) or fuzzy name(s) - provide multiple to complete several tasks at once
         #[arg(num_args(1..))]
         task_numbers_or_fuzzy_names: Vec<String>,
+
+        /// Permanently cancel a recurring task (stops it from repeating)
+        #[arg(long)]
+        stop: bool,
     },
 
     /// Add or remove a dependency between tasks
@@ -351,6 +376,8 @@ enum ViewEntity {
     Trash,
     /// Show all active tasks
     All,
+    /// Show all recurring tasks
+    Recurring,
     /// Show projects in an area
     Area {
         /// Name of the area
@@ -450,11 +477,13 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
 fn render_today_view(store: &saku_tdo::models::store::Store) {
     let today = jiff::Zoned::now().date();
 
-    // Collect overdue tasks (scheduled or deadline < today)
+    // Collect overdue tasks (scheduled or deadline < today).
+    // Recurring tasks are never "overdue" based on their scheduled date — their
+    // pending-ness is derived entirely from the recurrence rule.
     let overdue_tasks: Vec<_> = store
         .get_active_tasks()
         .filter(|t| {
-            t.completed_at.is_none() && {
+            t.completed_at.is_none() && t.recurrence.is_none() && {
                 let scheduled_overdue = match t.when {
                     When::Scheduled { date, .. } => date < today,
                     _ => false,
@@ -466,7 +495,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
         .collect();
     let overdue_tasks = saku_tdo::models::task::order_tasks_with_store(overdue_tasks, store);
 
-    // Collect today tasks (scheduled or deadline == today, excluding overdue)
+    // Collect today tasks (scheduled or deadline == today, or a recurring occurrence today)
     let today_current: Vec<_> = store
         .get_active_tasks()
         .filter(|t| {
@@ -476,8 +505,13 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
                     _ => false,
                 };
                 let deadline_today = t.deadline == Some(today);
+                let recurring_today = is_pending_on(t, today);
 
-                // Check if not already in overdue
+                // For non-recurring tasks, exclude those already in the overdue bucket.
+                // Recurring tasks are never moved to overdue, so always include them when pending.
+                if recurring_today {
+                    return true;
+                }
                 let is_overdue = match t.when {
                     When::Scheduled { date, .. } if date < today => true,
                     _ => t.deadline.is_some_and(|d| d < today),
@@ -1330,6 +1364,28 @@ fn main() {
                         }
                     }
                 }
+                ViewEntity::Recurring => {
+                    let today = jiff::Zoned::now().date();
+                    let mut tasks: Vec<_> = store.get_recurring_tasks().collect();
+                    tasks.sort_by_key(|t| t.task_number);
+
+                    if tasks.is_empty() {
+                        println!("No recurring tasks.");
+                    } else {
+                        saku_tdo::ui::render_view_header("Recurring", tasks.len());
+                        for task in tasks {
+                            // Find the next pending occurrence on or after today
+                            let next = next_pending_occurrence(task, today);
+                            if let Some(next_date) = next {
+                                saku_tdo::ui::render_task_line_with_next_occurrence(
+                                    task, &store, next_date,
+                                );
+                            } else {
+                                saku_tdo::ui::render_task_line(task, &store);
+                            }
+                        }
+                    }
+                }
                 ViewEntity::Project { name } => {
                     let matching: Vec<_> = store
                         .get_active_projects()
@@ -1563,6 +1619,8 @@ fn main() {
             area,
             tag,
             notes,
+            every,
+            until,
         }) => {
             // Parse when flags
             let when = match When::from_command_flags(today, tomorrow, next_week, someday, on) {
@@ -1584,6 +1642,34 @@ fn main() {
                 }
             };
 
+            // Parse recurrence
+            let recurrence = if let Some(pattern) = every {
+                let dtstart = match &when {
+                    When::Scheduled { date } => *date,
+                    _ => jiff::Zoned::now().date(),
+                };
+                let mut r = match parse_recurrence(&pattern, dtstart) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+                if let Some(until_str) = until {
+                    use saku_tdo::date_parser::parse_natural_date;
+                    match parse_natural_date(&until_str) {
+                        Ok(d) => r.until = Some(d),
+                        Err(e) => {
+                            eprintln!("Error: Invalid --until date '{}': {}", until_str, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Some(r)
+            } else {
+                None
+            };
+
             // Build parameters
             let params = AddTaskParameters {
                 title,
@@ -1593,6 +1679,7 @@ fn main() {
                 project,
                 area,
                 tags: tag,
+                recurrence,
             };
 
             // Call service
@@ -1604,6 +1691,9 @@ fn main() {
                         && let Some(project) = store.get_project(project_id)
                     {
                         println!("  Project: {}", project.name);
+                    }
+                    if let Some(ref r) = task.recurrence {
+                        println!("  ↻ Repeats: {}", r);
                     }
                 }
                 Err(AddTaskError::ProjectNotFound(name)) => {
@@ -1664,18 +1754,25 @@ fn main() {
         }
         Some(Commands::Done {
             task_numbers_or_fuzzy_names,
+            stop,
         }) => {
             for task_number_or_fuzzy_name in task_numbers_or_fuzzy_names {
                 // Build parameters
                 let params = CompleteTaskParameters {
                     task_number_or_fuzzy_name,
+                    stop,
                 };
 
                 // Call service
                 match complete_task(&mut store, &storage, params) {
                     Ok(result) => {
-                        println!("✓ Task completed: {}", result.task.title);
-                        println!("  #{}", result.task.task_number);
+                        if result.task.recurrence.is_some() && !stop {
+                            println!("↻ Occurrence marked done: {}", result.task.title);
+                            println!("  #{}", result.task.task_number);
+                        } else {
+                            println!("✓ Task completed: {}", result.task.title);
+                            println!("  #{}", result.task.task_number);
+                        }
                         if !result.newly_unblocked.is_empty() {
                             println!();
                             for unblocked in &result.newly_unblocked {
@@ -2064,6 +2161,9 @@ fn main() {
             area,
             tag,
             notes,
+            every,
+            until,
+            clear_recurrence,
         }) => {
             // Parse when flags (if any scheduling flag is provided)
             let when = if today || tomorrow || next_week || someday || on.is_some() {
@@ -2089,6 +2189,34 @@ fn main() {
                 None
             };
 
+            // Parse recurrence (shared across all task numbers in this move)
+            let recurrence = if let Some(ref pattern) = every {
+                let dtstart = match &when {
+                    Some(When::Scheduled { date }) => *date,
+                    _ => jiff::Zoned::now().date(),
+                };
+                let mut r = match parse_recurrence(pattern, dtstart) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+                if let Some(ref until_str) = until {
+                    use saku_tdo::date_parser::parse_natural_date;
+                    match parse_natural_date(until_str) {
+                        Ok(d) => r.until = Some(d),
+                        Err(e) => {
+                            eprintln!("Error: Invalid --until date '{}': {}", until_str, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Some(r)
+            } else {
+                None
+            };
+
             for task_number_str in task_numbers {
                 let parsed_task_number = match task_number_str.parse::<u64>() {
                     Ok(num) => num,
@@ -2109,6 +2237,8 @@ fn main() {
                     project: project.clone(),
                     area: area.clone(),
                     tags: tag.clone(),
+                    recurrence: recurrence.clone(),
+                    clear_recurrence,
                 };
 
                 // Call service

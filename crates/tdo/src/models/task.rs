@@ -8,6 +8,146 @@ use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// ============================================================================
+// Recurrence types
+// ============================================================================
+
+/// Serializable weekday (jiff::civil::Weekday does not implement Serialize/Deserialize).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SerdeWeekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+impl SerdeWeekday {
+    pub fn short_name(self) -> &'static str {
+        match self {
+            SerdeWeekday::Monday => "Mon",
+            SerdeWeekday::Tuesday => "Tue",
+            SerdeWeekday::Wednesday => "Wed",
+            SerdeWeekday::Thursday => "Thu",
+            SerdeWeekday::Friday => "Fri",
+            SerdeWeekday::Saturday => "Sat",
+            SerdeWeekday::Sunday => "Sun",
+        }
+    }
+}
+
+impl From<SerdeWeekday> for jiff::civil::Weekday {
+    fn from(w: SerdeWeekday) -> Self {
+        match w {
+            SerdeWeekday::Monday => jiff::civil::Weekday::Monday,
+            SerdeWeekday::Tuesday => jiff::civil::Weekday::Tuesday,
+            SerdeWeekday::Wednesday => jiff::civil::Weekday::Wednesday,
+            SerdeWeekday::Thursday => jiff::civil::Weekday::Thursday,
+            SerdeWeekday::Friday => jiff::civil::Weekday::Friday,
+            SerdeWeekday::Saturday => jiff::civil::Weekday::Saturday,
+            SerdeWeekday::Sunday => jiff::civil::Weekday::Sunday,
+        }
+    }
+}
+
+impl From<jiff::civil::Weekday> for SerdeWeekday {
+    fn from(w: jiff::civil::Weekday) -> Self {
+        match w {
+            jiff::civil::Weekday::Monday => SerdeWeekday::Monday,
+            jiff::civil::Weekday::Tuesday => SerdeWeekday::Tuesday,
+            jiff::civil::Weekday::Wednesday => SerdeWeekday::Wednesday,
+            jiff::civil::Weekday::Thursday => SerdeWeekday::Thursday,
+            jiff::civil::Weekday::Friday => SerdeWeekday::Friday,
+            jiff::civil::Weekday::Saturday => SerdeWeekday::Saturday,
+            jiff::civil::Weekday::Sunday => SerdeWeekday::Sunday,
+        }
+    }
+}
+
+/// Base frequency of a recurrence.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Freq {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+/// Monthly recurrence anchor — the three cases are mutually exclusive.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MonthlyAnchor {
+    /// e.g. "1st of month" (day=1) or "monthly" (day=dtstart.day())
+    DayOfMonth { day: u8 },
+    /// e.g. "1st monday of month" (nth=1, weekday=Monday)
+    NthWeekday { nth: u8, weekday: SerdeWeekday },
+    /// e.g. "last friday of month"
+    LastWeekday { weekday: SerdeWeekday },
+}
+
+/// RRULE-style recurrence rule stored on the task.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Recurrence {
+    pub freq: Freq,
+    /// For Weekly: weekdays to recur on (empty = same weekday as dtstart).
+    pub weekdays: Vec<SerdeWeekday>,
+    /// For Monthly: how to anchor within the month.
+    pub monthly_anchor: Option<MonthlyAnchor>,
+    /// End date (inclusive). None = repeat forever.
+    pub until: Option<Date>,
+    /// First occurrence / recurrence anchor date.
+    pub dtstart: Date,
+}
+
+impl std::fmt::Display for Recurrence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.freq {
+            Freq::Daily => write!(f, "every day"),
+            Freq::Weekly => {
+                if self.weekdays.is_empty() {
+                    write!(f, "every week")
+                } else {
+                    let days: Vec<&str> = self.weekdays.iter().map(|w| w.short_name()).collect();
+                    write!(f, "{}", days.join(", "))
+                }
+            }
+            Freq::Monthly => match &self.monthly_anchor {
+                Some(MonthlyAnchor::DayOfMonth { day }) => {
+                    let suffix = ordinal_suffix(*day);
+                    write!(f, "{}{} of month", day, suffix)
+                }
+                Some(MonthlyAnchor::NthWeekday { nth, weekday }) => {
+                    let suffix = ordinal_suffix(*nth);
+                    write!(f, "{}{} {} of month", nth, suffix, weekday.short_name())
+                }
+                Some(MonthlyAnchor::LastWeekday { weekday }) => {
+                    write!(f, "last {} of month", weekday.short_name())
+                }
+                None => write!(f, "every month"),
+            },
+            Freq::Yearly => write!(f, "every year"),
+        }
+    }
+}
+
+fn ordinal_suffix(n: u8) -> &'static str {
+    match (n % 100, n % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    }
+}
+
+// ============================================================================
+// Task struct
+// ============================================================================
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Task {
     /// UUID to identify the task
@@ -42,6 +182,12 @@ pub struct Task {
     pub created_at: Timestamp,
     /// Hybrid logical clock timestamp for sync conflict resolution
     pub modified_at: HybridTimestamp,
+    /// Recurrence rule. None = one-off task.
+    #[serde(default)]
+    pub recurrence: Option<Recurrence>,
+    /// Dates of occurrences that have already been completed.
+    #[serde(default)]
+    pub completed_occurrences: Vec<Date>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
@@ -166,6 +312,249 @@ pub struct ChecklistItem {
     pub id: Uuid,
     pub title: String,
     pub completed: bool,
+}
+
+// ============================================================================
+// Recurrence helpers
+// ============================================================================
+
+/// Number of days in a given month.
+fn days_in_month(year: i16, month: i8) -> u8 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if year % 400 == 0 || (year % 4 == 0 && year % 100 != 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+/// Date of the nth occurrence of `weekday` in (year, month), or None if it doesn't exist.
+fn nth_weekday_of_month(year: i16, month: i8, nth: u8, weekday: SerdeWeekday) -> Option<Date> {
+    let first = Date::new(year, month, 1).ok()?;
+    let target = jiff::civil::Weekday::from(weekday);
+    let first_wd = first.weekday();
+    let days_to_first = ((target as i64 - first_wd as i64 + 7) % 7) as i8;
+    let day = 1 + days_to_first + 7 * (nth as i8 - 1);
+    let last = days_in_month(year, month) as i8;
+    if day < 1 || day > last {
+        return None;
+    }
+    Date::new(year, month, day).ok()
+}
+
+/// Date of the last occurrence of `weekday` in (year, month).
+fn last_weekday_of_month(year: i16, month: i8, weekday: SerdeWeekday) -> Option<Date> {
+    let last_day = days_in_month(year, month) as i8;
+    let last = Date::new(year, month, last_day).ok()?;
+    let target = jiff::civil::Weekday::from(weekday);
+    let last_wd = last.weekday();
+    let days_back = ((last_wd as i64 - target as i64 + 7) % 7) as i8;
+    let day = last_day - days_back;
+    if day < 1 {
+        return None;
+    }
+    Date::new(year, month, day).ok()
+}
+
+/// Returns true if `date` is the nth occurrence of `weekday` in its month.
+fn is_nth_weekday_of_month(date: Date, nth: u8, weekday: SerdeWeekday) -> bool {
+    if date.weekday() != jiff::civil::Weekday::from(weekday) {
+        return false;
+    }
+    // Count = ceil(day / 7) = (day - 1) / 7 + 1
+    let count = (date.day() as u8 - 1) / 7 + 1;
+    count == nth
+}
+
+/// Returns true if `date` is the last occurrence of `weekday` in its month.
+fn is_last_weekday_of_month(date: Date, weekday: SerdeWeekday) -> bool {
+    if date.weekday() != jiff::civil::Weekday::from(weekday) {
+        return false;
+    }
+    let last_day = days_in_month(date.year(), date.month());
+    date.day() as u8 + 7 > last_day
+}
+
+/// Returns true if `date` is a pending (not yet completed) occurrence of the task's recurrence.
+pub fn is_pending_on(task: &Task, date: Date) -> bool {
+    let Some(rule) = &task.recurrence else {
+        return false;
+    };
+    if task.completed_at.is_some() {
+        return false;
+    }
+    if date < rule.dtstart {
+        return false;
+    }
+    if rule.until.is_some_and(|u| date > u) {
+        return false;
+    }
+
+    let is_occurrence = match &rule.freq {
+        Freq::Daily => true,
+        Freq::Weekly => {
+            if rule.weekdays.is_empty() {
+                date.weekday() == rule.dtstart.weekday()
+            } else {
+                rule.weekdays
+                    .iter()
+                    .any(|w| date.weekday() == jiff::civil::Weekday::from(*w))
+            }
+        }
+        Freq::Monthly => match rule.monthly_anchor.as_ref() {
+            Some(MonthlyAnchor::DayOfMonth { day }) => date.day() as u8 == *day,
+            Some(MonthlyAnchor::NthWeekday { nth, weekday }) => {
+                is_nth_weekday_of_month(date, *nth, *weekday)
+            }
+            Some(MonthlyAnchor::LastWeekday { weekday }) => {
+                is_last_weekday_of_month(date, *weekday)
+            }
+            None => date.day() == rule.dtstart.day(),
+        },
+        Freq::Yearly => {
+            date.month() == rule.dtstart.month() && date.day() == rule.dtstart.day()
+        }
+    };
+
+    is_occurrence && !task.completed_occurrences.contains(&date)
+}
+
+/// Returns all pending (not yet completed) occurrence dates of the task's recurrence up to `up_to`.
+pub fn pending_occurrences_up_to(task: &Task, up_to: Date) -> Vec<Date> {
+    let Some(rule) = &task.recurrence else {
+        return vec![];
+    };
+    if task.completed_at.is_some() {
+        return vec![];
+    }
+
+    let end = if let Some(until) = rule.until {
+        up_to.min(until)
+    } else {
+        up_to
+    };
+
+    if rule.dtstart > end {
+        return vec![];
+    }
+
+    let mut dates = Vec::new();
+
+    match &rule.freq {
+        Freq::Daily => {
+            let mut d = rule.dtstart;
+            while d <= end {
+                if !task.completed_occurrences.contains(&d) {
+                    dates.push(d);
+                }
+                d = d.checked_add(jiff::Span::new().days(1)).unwrap();
+            }
+        }
+        Freq::Weekly => {
+            if rule.weekdays.is_empty() {
+                let mut d = rule.dtstart;
+                while d <= end {
+                    if !task.completed_occurrences.contains(&d) {
+                        dates.push(d);
+                    }
+                    d = d.checked_add(jiff::Span::new().days(7)).unwrap();
+                }
+            } else {
+                let mut d = rule.dtstart;
+                while d <= end {
+                    if rule
+                        .weekdays
+                        .iter()
+                        .any(|w| d.weekday() == jiff::civil::Weekday::from(*w))
+                        && !task.completed_occurrences.contains(&d)
+                    {
+                        dates.push(d);
+                    }
+                    d = d.checked_add(jiff::Span::new().days(1)).unwrap();
+                }
+            }
+        }
+        Freq::Monthly => {
+            let mut year = rule.dtstart.year();
+            let mut month = rule.dtstart.month();
+            loop {
+                let candidate = match rule.monthly_anchor.as_ref() {
+                    Some(MonthlyAnchor::DayOfMonth { day }) => {
+                        let last = days_in_month(year, month) as i8;
+                        let d = (*day as i8).min(last);
+                        Date::new(year, month, d).ok()
+                    }
+                    Some(MonthlyAnchor::NthWeekday { nth, weekday }) => {
+                        nth_weekday_of_month(year, month, *nth, *weekday)
+                    }
+                    Some(MonthlyAnchor::LastWeekday { weekday }) => {
+                        last_weekday_of_month(year, month, *weekday)
+                    }
+                    None => {
+                        let last = days_in_month(year, month) as i8;
+                        let d = rule.dtstart.day().min(last);
+                        Date::new(year, month, d).ok()
+                    }
+                };
+
+                if let Some(d) = candidate {
+                    if d > end {
+                        break;
+                    }
+                    if d >= rule.dtstart && !task.completed_occurrences.contains(&d) {
+                        dates.push(d);
+                    }
+                }
+
+                if month == 12 {
+                    month = 1;
+                    year += 1;
+                } else {
+                    month += 1;
+                }
+                // Stop as soon as the current month/year is past the end date.
+                if year > end.year() || (year == end.year() && i16::from(month) > end.month() as i16) {
+                    break;
+                }
+            }
+        }
+        Freq::Yearly => {
+            let mut year = rule.dtstart.year();
+            while year <= end.year() {
+                if let Ok(d) =
+                    Date::new(year, rule.dtstart.month(), rule.dtstart.day())
+                {
+                    if d > end {
+                        break;
+                    }
+                    if d >= rule.dtstart && !task.completed_occurrences.contains(&d) {
+                        dates.push(d);
+                    }
+                }
+                year += 1;
+            }
+        }
+    }
+
+    dates
+}
+
+/// Returns the first pending occurrence on or after `from`, within a 1-year look-ahead.
+/// More efficient than `pending_occurrences_up_to` for the "what's next?" use-case because
+/// it stops as soon as it finds one result and starts iteration from `from`, not `dtstart`.
+pub fn next_pending_occurrence(task: &Task, from: Date) -> Option<Date> {
+    let look_ahead = from
+        .checked_add(jiff::Span::new().years(1))
+        .unwrap_or(from);
+    pending_occurrences_up_to(task, look_ahead)
+        .into_iter()
+        .find(|&d| d >= from)
 }
 
 pub fn order_tasks(tasks: Vec<&Task>) -> Vec<&Task> {

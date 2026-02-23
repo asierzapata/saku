@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::models::{area::Area, project::Project, task::Task};
 
 /// Current schema version
-pub const CURRENT_VERSION: u32 = 6;
+pub const CURRENT_VERSION: u32 = 7;
 
 /// Storage representation (how data lives on disk as JSON)
 #[derive(Serialize, Deserialize)]
@@ -220,5 +220,11 @@ impl Store {
             .values()
             .filter(|t| t.depends_on.contains(&task_id))
             .collect()
+    }
+
+    /// Active tasks that have a recurrence rule and have not been permanently stopped.
+    pub fn get_recurring_tasks(&self) -> impl Iterator<Item = &Task> {
+        self.get_active_tasks()
+            .filter(|t| t.recurrence.is_some() && t.completed_at.is_none())
     }
 }
