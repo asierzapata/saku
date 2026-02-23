@@ -743,11 +743,11 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
     }
 
     // Subtask of (only if set)
-    if let Some(parent_id) = task.parent_task_id {
-        if let Some(parent) = store.get_task(parent_id) {
-            let parent_str = format!("#{}  {}", parent.task_number, parent.title);
-            field("Subtask of", parent_str.as_str().white());
-        }
+    if let Some(parent_id) = task.parent_task_id
+        && let Some(parent) = store.get_task(parent_id)
+    {
+        let parent_str = format!("#{}  {}", parent.task_number, parent.title);
+        field("Subtask of", parent_str.as_str().white());
     }
 
     // Created

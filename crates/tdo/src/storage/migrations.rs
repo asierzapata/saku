@@ -223,7 +223,7 @@ fn migrate_v6_to_v7(mut value: Value) -> Result<Value, StorageError> {
 /// Oldest task (by created_at, then id) keeps its number; duplicates get new numbers
 /// starting from max(existing_numbers) + 1.
 /// Returns the new next_task_number ceiling.
-fn fix_duplicate_task_numbers(tasks: &mut Vec<Value>) -> u64 {
+fn fix_duplicate_task_numbers(tasks: &mut [Value]) -> u64 {
     use std::collections::HashMap;
 
     let mut by_number: HashMap<u64, Vec<usize>> = HashMap::new();

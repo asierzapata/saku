@@ -71,7 +71,7 @@ fn extract_modified_at(entity: &Value) -> (i64, u64, String) {
 /// Oldest task (by created_at, then id) keeps its number; duplicates get new numbers
 /// starting from max(existing_numbers) + 1.
 /// Returns the new next_task_number ceiling.
-fn fix_duplicate_task_numbers(tasks: &mut Vec<Value>) -> u64 {
+fn fix_duplicate_task_numbers(tasks: &mut [Value]) -> u64 {
     use std::collections::HashMap;
 
     let mut by_number: HashMap<u64, Vec<usize>> = HashMap::new();
