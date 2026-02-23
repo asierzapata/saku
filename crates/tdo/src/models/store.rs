@@ -196,6 +196,19 @@ impl Store {
             .filter(move |t| t.area_id == Some(area_id) && t.project_id.is_none())
     }
 
+    /// Find non-deleted subtasks of a given parent task
+    pub fn get_subtasks(&self, parent_id: Uuid) -> impl Iterator<Item = &Task> {
+        self.tasks
+            .values()
+            .filter(move |t| t.parent_task_id == Some(parent_id) && t.deleted_at.is_none())
+    }
+
+    /// Returns true if the task has at least one incomplete, non-deleted subtask.
+    pub fn has_incomplete_subtasks(&self, task_id: Uuid) -> bool {
+        self.get_subtasks(task_id)
+            .any(|t| t.completed_at.is_none())
+    }
+
     /// Returns true if the task has at least one incomplete, non-deleted dependency.
     pub fn is_task_blocked(&self, task: &Task) -> bool {
         task.depends_on.iter().any(|dep_id| {

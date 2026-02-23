@@ -38,6 +38,8 @@ pub struct TaskOutput {
     pub notes: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
+    /// Parent task number if this is a subtask, otherwise None
+    pub parent_id: Option<u64>,
 }
 
 impl TaskOutput {
@@ -76,6 +78,11 @@ impl TaskOutput {
                     .map(|a| a.name.clone())
             });
 
+        let parent_id = task
+            .parent_task_id
+            .and_then(|id| store.get_task(id))
+            .map(|t| t.task_number);
+
         Self {
             id: task.task_number,
             title: task.title.clone(),
@@ -89,6 +96,7 @@ impl TaskOutput {
             notes: task.notes.clone(),
             created_at: task.created_at.to_string(),
             completed_at: task.completed_at.map(|t| t.to_string()),
+            parent_id,
         }
     }
 }

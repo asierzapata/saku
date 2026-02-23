@@ -30,6 +30,15 @@ pub enum AddTaskError {
     #[error("Invalid deadline date '{0}': {1}")]
     InvalidDeadline(String, String),
 
+    #[error("Parent task #{0} not found")]
+    ParentTaskNotFound(u64),
+
+    #[error("Cannot create a subtask of a subtask (only one level of nesting is allowed)")]
+    ParentIsSubtask,
+
+    #[error("Subtasks inherit project and area from their parent; --project and --area cannot be used with --parent")]
+    SubtaskCannotHaveProjectOrArea,
+
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
 }
@@ -44,6 +53,8 @@ pub struct AddTaskParameters {
     pub area: Option<String>,
     pub tags: Vec<String>,
     pub recurrence: Option<Recurrence>,
+    /// If set, this task becomes a subtask of the given task number
+    pub parent_task_number: Option<u64>,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number, task.uuid)))]
@@ -55,55 +66,82 @@ pub fn add_task(
     #[cfg(feature = "logging")]
     info!(title = %parameters.title, when = ?parameters.when, "Adding new task");
 
-    // 1. Validate and resolve project name to project ID
-    let project_id = if let Some(project_name) = parameters.project {
-        let matching_projects: Vec<_> = store
-            .get_active_projects()
-            .filter(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()))
-            .collect();
+    // 1. If parent_task_number is provided, resolve parent and inherit context
+    let (project_id, area_id, parent_task_id) =
+        if let Some(parent_number) = parameters.parent_task_number {
+            // Validate no project/area specified alongside --parent
+            if parameters.project.is_some() || parameters.area.is_some() {
+                return Err(AddTaskError::SubtaskCannotHaveProjectOrArea);
+            }
 
-        match matching_projects.len() {
-            0 => {
-                #[cfg(feature = "logging")]
-                error!(project = %project_name, "Project not found");
-                return Err(AddTaskError::ProjectNotFound(project_name));
-            }
-            1 => Some(matching_projects[0].id),
-            _ => {
-                let names: Vec<String> = matching_projects.iter().map(|p| p.name.clone()).collect();
-                #[cfg(feature = "logging")]
-                error!(project = %project_name, matching = ?names, "Ambiguous project name");
-                return Err(AddTaskError::AmbiguousProjectName(names));
-            }
-        }
-    } else {
-        None
-    };
+            let parent = store
+                .get_task_by_number(parent_number)
+                .ok_or(AddTaskError::ParentTaskNotFound(parent_number))?;
 
-    // 2. Validate and resolve area name to area ID
-    let area_id = if let Some(area_name) = parameters.area {
-        let matching_areas: Vec<_> = store
-            .get_active_areas()
-            .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
-            .collect();
+            // Enforce one-level nesting
+            if parent.parent_task_id.is_some() {
+                return Err(AddTaskError::ParentIsSubtask);
+            }
 
-        match matching_areas.len() {
-            0 => {
-                #[cfg(feature = "logging")]
-                error!(area = %area_name, "Area not found");
-                return Err(AddTaskError::AreaNotFound(area_name));
-            }
-            1 => Some(matching_areas[0].id),
-            _ => {
-                let names: Vec<String> = matching_areas.iter().map(|a| a.name.clone()).collect();
-                #[cfg(feature = "logging")]
-                error!(area = %area_name, matching = ?names, "Ambiguous area name");
-                return Err(AddTaskError::AmbiguousAreaName(names));
-            }
-        }
-    } else {
-        None
-    };
+            let inherited_project_id = parent.project_id;
+            let inherited_area_id = parent.area_id;
+            let parent_id = parent.id;
+            (inherited_project_id, inherited_area_id, Some(parent_id))
+        } else {
+            // 1a. Validate and resolve project name to project ID
+            let project_id = if let Some(project_name) = parameters.project {
+                let matching_projects: Vec<_> = store
+                    .get_active_projects()
+                    .filter(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()))
+                    .collect();
+
+                match matching_projects.len() {
+                    0 => {
+                        #[cfg(feature = "logging")]
+                        error!(project = %project_name, "Project not found");
+                        return Err(AddTaskError::ProjectNotFound(project_name));
+                    }
+                    1 => Some(matching_projects[0].id),
+                    _ => {
+                        let names: Vec<String> =
+                            matching_projects.iter().map(|p| p.name.clone()).collect();
+                        #[cfg(feature = "logging")]
+                        error!(project = %project_name, matching = ?names, "Ambiguous project name");
+                        return Err(AddTaskError::AmbiguousProjectName(names));
+                    }
+                }
+            } else {
+                None
+            };
+
+            // 1b. Validate and resolve area name to area ID
+            let area_id = if let Some(area_name) = parameters.area {
+                let matching_areas: Vec<_> = store
+                    .get_active_areas()
+                    .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
+                    .collect();
+
+                match matching_areas.len() {
+                    0 => {
+                        #[cfg(feature = "logging")]
+                        error!(area = %area_name, "Area not found");
+                        return Err(AddTaskError::AreaNotFound(area_name));
+                    }
+                    1 => Some(matching_areas[0].id),
+                    _ => {
+                        let names: Vec<String> =
+                            matching_areas.iter().map(|a| a.name.clone()).collect();
+                        #[cfg(feature = "logging")]
+                        error!(area = %area_name, matching = ?names, "Ambiguous area name");
+                        return Err(AddTaskError::AmbiguousAreaName(names));
+                    }
+                }
+            } else {
+                None
+            };
+
+            (project_id, area_id, None)
+        };
 
     // 3. Parse deadline if provided
     let deadline = if let Some(deadline_str) = parameters.deadline {
@@ -130,7 +168,7 @@ pub fn add_task(
         deadline,
         defer_until: None,
         depends_on: vec![],
-        checklist: vec![],
+        parent_task_id,
         completed_at: None,
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
@@ -308,7 +346,7 @@ pub fn move_task(
         tags: parameters.tags,
         defer_until: task.defer_until,
         depends_on: task.depends_on.clone(),
-        checklist: task.checklist.clone(),
+        parent_task_id: task.parent_task_id,
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
@@ -333,6 +371,9 @@ pub enum CompleteTaskError {
 
     #[error("Task name is ambiguous. Multiple tasks found: {}", .0.join(", "))]
     AmbiguousTaskName(Vec<String>),
+
+    #[error("Cannot complete task: it has incomplete subtasks")]
+    HasIncompleteSubtasks,
 
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
@@ -396,8 +437,14 @@ pub fn complete_task(
     #[cfg(feature = "logging")]
     tracing::Span::current().record("task.number", task.task_number);
 
-    // Collect tasks that were blocked by this task before completing it
     let task_id = task.id;
+
+    // Prevent completing a task that has incomplete subtasks
+    if store.has_incomplete_subtasks(task_id) {
+        return Err(CompleteTaskError::HasIncompleteSubtasks);
+    }
+
+    // Collect tasks that were blocked by this task before completing it
     let previously_blocking: Vec<Task> = store
         .get_blocking(task_id)
         .into_iter()
@@ -521,6 +568,19 @@ pub fn delete_task(
     // Update in store
     store.tasks.insert(task_id, updated_task.clone());
 
+    // Cascade soft-delete all non-deleted subtasks
+    let subtask_ids: Vec<uuid::Uuid> = store
+        .get_subtasks(task_id)
+        .map(|t| t.id)
+        .collect();
+    let now = jiff::Timestamp::now();
+    for subtask_id in subtask_ids {
+        if let Some(subtask) = store.get_task_mut(subtask_id) {
+            subtask.deleted_at = Some(now);
+            subtask.modified_at = crate::sync_clock::next_modified_at();
+        }
+    }
+
     // Persist to storage
     storage.save(store)?;
 
@@ -627,7 +687,6 @@ pub fn edit_task(
     parameters: EditTaskParameters,
 ) -> Result<Task, EditTaskError> {
     use crate::services::task_editor;
-    use uuid::Uuid;
 
     // 1. Find task by number or fuzzy name match
     let task = if let Ok(task_number) = parameters.task_number_or_fuzzy_name.parse::<u64>() {
@@ -738,18 +797,7 @@ pub fn edit_task(
             None
         };
 
-    // 11. Build checklist
-    let checklist: Vec<_> = parsed
-        .checklist
-        .into_iter()
-        .map(|(title, completed)| crate::models::task::ChecklistItem {
-            id: Uuid::new_v4(),
-            title,
-            completed,
-        })
-        .collect();
-
-    // 12. Build updated task
+    // 11. Build updated task
     let updated_task = Task {
         id: task.id,
         task_number: task.task_number,
@@ -762,7 +810,7 @@ pub fn edit_task(
         deadline,
         defer_until,
         depends_on: task.depends_on.clone(),
-        checklist,
+        parent_task_id: task.parent_task_id,
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
@@ -1008,6 +1056,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1038,6 +1087,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1065,6 +1115,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1090,6 +1141,7 @@ mod tests {
                 area: None,
                 tags: vec!["urgent".to_string(), "bug".to_string()],
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1116,6 +1168,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1142,6 +1195,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1168,6 +1222,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1194,6 +1249,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1218,6 +1274,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1244,6 +1301,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1268,6 +1326,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         );
 
@@ -1292,6 +1351,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         )
         .unwrap();
@@ -1309,6 +1369,7 @@ mod tests {
                 tags: vec![],
 
                 recurrence: None,
+                parent_task_number: None,
             },
         )
         .unwrap();
