@@ -14,6 +14,7 @@ fn get_migrations() -> Vec<MigrationFn> {
         migrate_v4_to_v5,
         migrate_v5_to_v6,
         migrate_v6_to_v7,
+        migrate_v7_to_v8,
     ]
 }
 
@@ -218,6 +219,59 @@ fn migrate_v6_to_v7(mut value: Value) -> Result<Value, StorageError> {
     Ok(value)
 }
 
+/// Reassign task_numbers to any tasks that share a number with another task.
+/// Oldest task (by created_at, then id) keeps its number; duplicates get new numbers
+/// starting from max(existing_numbers) + 1.
+/// Returns the new next_task_number ceiling.
+fn fix_duplicate_task_numbers(tasks: &mut Vec<Value>) -> u64 {
+    use std::collections::HashMap;
+
+    let mut by_number: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (i, task) in tasks.iter().enumerate() {
+        if let Some(n) = task.get("task_number").and_then(|v| v.as_u64()) {
+            by_number.entry(n).or_default().push(i);
+        }
+    }
+
+    let max_number = by_number.keys().max().copied().unwrap_or(0);
+    let mut next = max_number + 1;
+
+    for indices in by_number.values().filter(|v| v.len() > 1) {
+        let mut sorted = indices.clone();
+        sorted.sort_by(|&a, &b| {
+            let ca = tasks[a].get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let cb = tasks[b].get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let ia = tasks[a].get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let ib = tasks[b].get("id").and_then(|v| v.as_str()).unwrap_or("");
+            ca.cmp(cb).then(ia.cmp(ib))
+        });
+        // First entry keeps its number; reassign the rest
+        for &idx in &sorted[1..] {
+            if let Some(obj) = tasks[idx].as_object_mut() {
+                obj.insert("task_number".to_string(), Value::from(next));
+                next += 1;
+            }
+        }
+    }
+
+    next
+}
+
+fn migrate_v7_to_v8(mut value: Value) -> Result<Value, StorageError> {
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("version".to_string(), Value::from(8));
+        if let Some(tasks) = obj.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+            let dedupe_next = fix_duplicate_task_numbers(tasks);
+            let current_ntn = obj.get("next_task_number").and_then(|v| v.as_u64()).unwrap_or(1);
+            obj.insert(
+                "next_task_number".to_string(),
+                Value::from(current_ntn.max(dedupe_next)),
+            );
+        }
+    }
+    Ok(value)
+}
+
 /// Returns 1 if version field is missing (assumes v1, our first versioned schema)
 pub fn detect_version(content: &str) -> Result<u32, StorageError> {
     let value: Value = serde_json::from_str(content).map_err(|e| StorageError::ParseFailed {
@@ -271,6 +325,57 @@ pub fn apply_migrations(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_migrate_v7_to_v8_fixes_duplicate_task_numbers() {
+        let v7_json = serde_json::json!({
+            "version": 7,
+            "next_task_number": 108,
+            "tasks": [
+                {
+                    "id": "aaa",
+                    "task_number": 1,
+                    "title": "Oldest",
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 0, "lamport": 0, "device_id": ""}
+                },
+                {
+                    "id": "bbb",
+                    "task_number": 1,
+                    "title": "Middle",
+                    "created_at": "2025-01-02T00:00:00Z",
+                    "modified_at": {"wall_ms": 0, "lamport": 0, "device_id": ""}
+                },
+                {
+                    "id": "ccc",
+                    "task_number": 1,
+                    "title": "Newest",
+                    "created_at": "2025-01-03T00:00:00Z",
+                    "modified_at": {"wall_ms": 0, "lamport": 0, "device_id": ""}
+                }
+            ],
+            "projects": [],
+            "areas": []
+        });
+
+        let result = migrate_v7_to_v8(v7_json).unwrap();
+
+        assert_eq!(result["version"], 8);
+
+        let tasks = result["tasks"].as_array().unwrap();
+        let mut numbers: Vec<u64> = tasks
+            .iter()
+            .filter_map(|t| t["task_number"].as_u64())
+            .collect();
+        numbers.sort_unstable();
+        numbers.dedup();
+        assert_eq!(numbers.len(), 3, "All task numbers must be unique");
+
+        let oldest = tasks.iter().find(|t| t["id"] == "aaa").unwrap();
+        assert_eq!(oldest["task_number"], 1, "Oldest task must keep its number");
+
+        assert!(result["next_task_number"].as_u64().unwrap() >= 108);
+    }
 
     #[test]
     fn test_detect_version_with_version_field() {

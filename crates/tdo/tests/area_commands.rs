@@ -7,6 +7,7 @@ use predicates::prelude::*;
 fn tdo(temp_dir: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("tdo").unwrap();
     cmd.env("TDO_DATA_DIR", temp_dir.path());
+    cmd.env("TDO_NO_SYNC", "1");
     cmd
 }
 
