@@ -186,26 +186,11 @@ Data model exists. Expose it. Agents use checklists to record granular progress 
 
 ---
 
-## Milestone 3 — The Knowledge Loop: `nte` + `dcs`
+## Milestone 3 — The Knowledge Loop: `dcs`
 
-The knowledge loop is the highest-value loop after the daily loop. An agent that can read what the team knows and why decisions were made doesn't repeat past mistakes and doesn't ask questions already answered.
+The knowledge loop is the highest-value loop after the daily loop. An agent that can read why decisions were made doesn't repeat past mistakes and doesn't re-propose what was already rejected.
 
-### 3.1 `nte` — Notes
-
-Evergreen reference. Architecture docs, runbooks, how-things-work. Linked from tdo tasks via a note reference. Structured around the same areas and projects as tdo.
-
-```bash
-nte add "Auth architecture" --project auth-service
-nte add "How to deploy to staging" --project ops --tag runbook
-nte view project "auth-service"
-nte search "token refresh"
-```
-
-Agent use: read before starting work on a project. Write when discovering something that should be remembered. Human use: reference while working, review after agent sessions to see what it learned.
-
-Key constraint: `nte` notes are evergreen — they get updated, not replaced. The journal (`jrn`) is where ephemeral dated entries go. Notes are the permanent layer.
-
-### 3.2 `dcs` — Decision Log
+### 3.1 `dcs` — Decision Log
 
 Structured records of choices: what was decided, why, what alternatives were considered, what the consequence is expected to be. The architecture decision record (ADR) format, but terminal-native and queryable.
 
@@ -250,7 +235,7 @@ Built last, after tools exist to orchestrate. The cross-tool layer that makes th
 ```bash
 saku context           # full situational picture across all tools
 saku context --json    # structured for agent consumption
-saku search "auth"     # search across tdo, nte, jrn, dcs simultaneously
+saku search "auth"     # search across tdo, jrn, dcs simultaneously
 saku today             # today from tdo + jrn combined
 saku sync              # sync everything
 saku status            # counts and health across all tools
@@ -283,7 +268,7 @@ saku status            # counts and health across all tools
 | **M0** | Daily | Execution notes, `--ready`, agent conventions, note previews | Prove the thesis with minimal code |
 | **M1** | Daily | Search, filters, priority, defer, dependencies, recurrence, dates | Complete tdo as a human tool |
 | **M2** | Daily | `tdo context`, assignment, fuzzy confirmation, checklists | Make coordination explicit and first-class |
-| **M3** | Knowledge | `nte`, `dcs` | Give the agent memory and decision history |
+| **M3** | Knowledge | `dcs` | Give the agent decision history so it doesn't re-litigate closed questions |
 | **M4** | Work | `ctx` | Make session handoff first-class |
 | **`saku`** | Orchestrator | Cross-tool context, search, sync | Build when tools exist to orchestrate |
 

@@ -34,9 +34,9 @@ Most productivity suites map tools to categories (tasks, notes, calendar). We ma
 This loop runs every day. It includes knowing what's on the plate (`tdo`) and recording what happened (`jrn`). At the end of every day, the human and agent exchange state through these tools — the human reviewing what the agent completed, the agent picking up what the human left for overnight.
 
 ### The Knowledge Loop
-*What do we know? Why did we decide this?*
+*Why did we decide this?*
 
-This loop is slower — it accumulates over weeks and months. Notes that document how the system works (`nte`). Decisions that record why it was built that way, what alternatives were rejected, and what the expected consequences were (`dcs`). An agent drawing on the knowledge loop doesn't ask questions the team has already answered. It reads first.
+This loop is slower — it accumulates over weeks and months. Decisions that record why the system was built a certain way, what alternatives were rejected, and what the expected consequences were (`dcs`). An agent drawing on the knowledge loop doesn't re-litigate closed questions. It reads the decision log first.
 
 ### The Work Loop
 *What am I doing right now? Where did I leave off?*
@@ -51,7 +51,6 @@ This loop is the most granular — minute-to-minute. Saving and restoring the me
 |---|---|---|
 | Daily | `tdo` | Work queue. Work orders for human and agent. |
 | Daily | `jrn` | Daily journal. Chronological log of what happened. |
-| Knowledge | `nte` | Notes. Evergreen reference and architecture docs. |
 | Knowledge | `dcs` | Decision log. What was decided, why, and what alternatives were rejected. |
 | Work | `ctx` | Session context. Saves and restores where you were — for yourself and agents. |
 | Orchestrator | `saku` | Cross-tool context, search, and sync. |
@@ -67,7 +66,6 @@ In most productivity tools, items are reminders — strings of text that jog you
 In Saku, every item in every tool is a **self-contained record**. Not just a label, but enough context for whoever engages with it — human or agent — to do so without asking follow-up questions.
 
 A task in `tdo`: the title says what, the notes say how and what done looks like, the dependencies say what must happen first.
-A note in `nte`: evergreen enough that an agent reading it cold has the context it needs.
 A decision in `dcs`: the full reasoning — what was chosen, what was rejected, what the consequence is — not just the outcome.
 A session in `ctx`: the mental state, not just the task list — where I was in my thinking, not just what's on the list.
 
@@ -85,7 +83,7 @@ When an agent discovers something while working — a bug to fix, a decision nee
 
 Neither party needs to be online at the same time. The inbox is the async channel between them.
 
-This pattern generalizes across the suite: `jrn` entries from the agent are reviewed by the human in the morning; `dcs` records the human creates are read by the agent before proposing changes; `ctx` saves from one session are read by the next.
+This pattern generalizes across the suite: `jrn` entries from the agent are reviewed by the human in the morning; `dcs` decisions the human records are read by the agent before proposing changes; `ctx` saves from one session are read by the next.
 
 ---
 

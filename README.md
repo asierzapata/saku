@@ -17,11 +17,10 @@ Tools are organized around the loops of a developer's day, not discrete categori
 | `tdo` | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
 | `jrn` | Daily journal. Chronological log of what happened. | Planned |
 
-### Knowledge Loop — What do we know? Why did we decide this?
+### Knowledge Loop — Why did we decide this?
 
 | Tool | Description | Status |
 |---|---|---|
-| `nte` | Notes. Evergreen reference and architecture docs. | Planned |
 | `dcs` | Decision log. What was decided, why, and what alternatives were considered. | Planned |
 
 ### Work Loop — What am I doing right now? Where did I leave off?

@@ -12,7 +12,7 @@ Tools are organized around the recurring loops of a developer's day. Each tool s
 
 ```
 Daily Loop     → tdo, jrn
-Knowledge Loop → nte, dcs
+Knowledge Loop → dcs
 Work Loop      → ctx
 Orchestrator   → saku
 ```
@@ -23,7 +23,6 @@ Orchestrator   → saku
 |---|---|---|---|
 | `tdo` | Daily | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
 | `jrn` | Daily | Daily journal. Chronological log of what happened. | Planned |
-| `nte` | Knowledge | Notes. Evergreen reference and architecture docs. | Planned |
 | `dcs` | Knowledge | Decision log. What was decided and why. | Planned |
 | `ctx` | Work | Session context. Save and restore where you left off. | Planned |
 | `saku` | Orchestrator | Cross-tool context, search, and sync. | Planned |
@@ -40,7 +39,6 @@ saku/
 ├── crates/
 │   ├── tdo/                      # Daily loop: task queue
 │   ├── jrn/                      # Daily loop: journal (planned)
-│   ├── nte/                      # Knowledge loop: notes (planned)
 │   ├── dcs/                      # Knowledge loop: decisions (planned)
 │   ├── ctx/                      # Work loop: session context (planned)
 │   ├── saku/                     # Orchestrator (planned)
@@ -144,7 +142,6 @@ Tools are independently useful but designed to compose. The integration surface 
 - `ctx` reads active `tdo` tasks when saving session context
 - `saku context` reads from all tool stores to produce the combined snapshot
 - `jrn` entries can reference `tdo` task IDs and `dcs` decision IDs
-- `tdo` tasks can carry a `nte` note reference for rich context
 
 **Cross-tool reference format:**
 
