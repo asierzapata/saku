@@ -136,6 +136,10 @@ enum Commands {
         /// End date for recurrence (e.g. "2026-12-31")
         #[arg(long, value_name = "DATE")]
         until: Option<String>,
+
+        /// Make this a subtask of another task (by task number)
+        #[arg(long)]
+        parent: Option<u64>,
     },
 
     /// Moves one or more tasks
@@ -879,6 +883,25 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 }
             }
         }
+        ViewEntity::Recurring => {
+            let today = jiff::Zoned::now().date();
+            let mut tasks: Vec<_> = store.get_recurring_tasks().collect();
+            tasks.sort_by_key(|t| t.task_number);
+
+            if tasks.is_empty() {
+                println!("No recurring tasks.");
+            } else {
+                saku_tdo::ui::render_view_header("Recurring", tasks.len());
+                for task in tasks {
+                    let next = next_pending_occurrence(task, today);
+                    if let Some(next_date) = next {
+                        saku_tdo::ui::render_task_line_with_next_occurrence(task, store, next_date);
+                    } else {
+                        saku_tdo::ui::render_task_line(task, store);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -904,11 +927,12 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
 fn render_today_view(store: &saku_tdo::models::store::Store) {
     let today = jiff::Zoned::now().date();
 
-    // Collect overdue tasks (scheduled or deadline < today).
+    // Collect overdue tasks (scheduled or deadline < today), excluding subtasks.
     // Recurring tasks are never "overdue" based on their scheduled date — their
     // pending-ness is derived entirely from the recurrence rule.
     let overdue_tasks: Vec<_> = store
         .get_active_tasks()
+        .filter(|t| t.parent_task_id.is_none())
         .filter(|t| {
             t.completed_at.is_none() && t.recurrence.is_none() && {
                 let scheduled_overdue = match t.when {
@@ -922,9 +946,10 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
         .collect();
     let overdue_tasks = saku_tdo::models::task::order_tasks_with_store(overdue_tasks, store);
 
-    // Collect today tasks (scheduled or deadline == today, or a recurring occurrence today)
+    // Collect today tasks (scheduled or deadline == today, or a recurring occurrence today), excluding subtasks
     let today_current: Vec<_> = store
         .get_active_tasks()
+        .filter(|t| t.parent_task_id.is_none())
         .filter(|t| {
             t.completed_at.is_none() && {
                 let scheduled_today = match t.when {
@@ -962,6 +987,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
             saku_tdo::ui::render_section_header("Overdue");
             for task in overdue_tasks {
                 saku_tdo::ui::render_task_line(task, store);
+                saku_tdo::ui::render_subtask_children(task.id, store);
             }
         }
 
@@ -969,6 +995,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
         if !today_current.is_empty() {
             for task in today_current {
                 saku_tdo::ui::render_task_line(task, store);
+                saku_tdo::ui::render_subtask_children(task.id, store);
             }
         }
     }
@@ -1098,9 +1125,10 @@ fn main() {
             eprintln!("{}", "This command will be removed in v1.0.0.".yellow());
             eprintln!();
 
-            // Filter inbox tasks
+            // Filter inbox tasks (excluding subtasks)
             let inbox_tasks: Vec<_> = store
                 .get_active_tasks()
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| matches!(t.when, When::Inbox))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
@@ -1113,6 +1141,7 @@ fn main() {
                 saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                 for task in inbox_tasks {
                     saku_tdo::ui::render_task_line(task, &store);
+                    saku_tdo::ui::render_subtask_children(task.id, &store);
                 }
             }
         }
@@ -1124,9 +1153,10 @@ fn main() {
             eprintln!("{}", "This command will be removed in v1.0.0.".yellow());
             eprintln!();
 
-            // Filter someday tasks
+            // Filter someday tasks (excluding subtasks)
             let someday_tasks: Vec<_> = store
                 .get_active_tasks()
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| matches!(t.when, When::Someday))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
@@ -1139,6 +1169,7 @@ fn main() {
                 saku_tdo::ui::render_view_header("Someday", someday_tasks.len());
                 for task in someday_tasks {
                     saku_tdo::ui::render_task_line(task, &store);
+                    saku_tdo::ui::render_subtask_children(task.id, &store);
                 }
             }
         }
@@ -1152,8 +1183,11 @@ fn main() {
 
             use std::collections::HashMap;
 
-            // Collect all active, incomplete tasks
-            let all_tasks: Vec<_> = store.get_active_tasks().collect();
+            // Collect all active, incomplete tasks (excluding subtasks)
+            let all_tasks: Vec<_> = store
+                .get_active_tasks()
+                .filter(|t| t.parent_task_id.is_none())
+                .collect();
             let all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, &store);
 
             if all_tasks.is_empty() {
@@ -1181,6 +1215,7 @@ fn main() {
                         saku_tdo::ui::render_view_header(group_name, tasks.len());
                         for task in tasks {
                             saku_tdo::ui::render_task_line(task, &store);
+                            saku_tdo::ui::render_subtask_children(task.id, &store);
                         }
                     }
                 }
@@ -1199,9 +1234,10 @@ fn main() {
 
             let today = jiff::Zoned::now().date();
 
-            // Collect upcoming tasks (scheduled or deadline in the future)
+            // Collect upcoming tasks (scheduled or deadline in the future), excluding subtasks
             let upcoming_tasks: Vec<_> = store
                 .get_active_tasks()
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| {
                     t.completed_at.is_none() && {
                         let scheduled_future = match t.when {
@@ -1248,6 +1284,7 @@ fn main() {
                     saku_tdo::ui::render_section_header(&saku_tdo::ui::format_date_header(date));
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, &store);
+                        saku_tdo::ui::render_subtask_children(task.id, &store);
                     }
                 }
             }
@@ -1262,10 +1299,11 @@ fn main() {
 
             use std::collections::BTreeMap;
 
-            // Collect completed tasks from last 14 days
+            // Collect completed top-level tasks from last 14 days (excluding subtasks)
             let completed_tasks: Vec<_> = store
                 .tasks
                 .values()
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| {
                     if let Some(completed_at) = t.completed_at {
                         saku_tdo::ui::is_within_days(completed_at, 14)
@@ -1305,6 +1343,7 @@ fn main() {
 
                     for task in sorted_tasks {
                         saku_tdo::ui::render_task_line_with_completion_date(task, &store);
+                        saku_tdo::ui::render_subtask_children(task.id, &store);
                     }
                 }
             }
@@ -1317,8 +1356,11 @@ fn main() {
             eprintln!("{}", "This command will be removed in v1.0.0.".yellow());
             eprintln!();
 
-            // Collect deleted items
-            let deleted_tasks: Vec<_> = store.get_deleted_tasks().collect();
+            // Collect deleted items (exclude cascade-deleted subtasks from top-level list)
+            let deleted_tasks: Vec<_> = store
+                .get_deleted_tasks()
+                .filter(|t| t.parent_task_id.is_none())
+                .collect();
             let deleted_projects: Vec<_> = store.get_deleted_projects().collect();
             let deleted_areas: Vec<_> = store.get_deleted_areas().collect();
 
@@ -1439,6 +1481,7 @@ fn main() {
                 ViewEntity::Inbox => {
                     let inbox_tasks: Vec<_> = store
                         .get_active_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| matches!(t.when, When::Inbox))
                         .filter(|t| t.completed_at.is_none())
                         .collect();
@@ -1451,6 +1494,7 @@ fn main() {
                             saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                             for task in inbox_tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
+                                saku_tdo::ui::render_subtask_children(task.id, &store);
                             }
                         }
                     } else {
@@ -1468,6 +1512,7 @@ fn main() {
                 ViewEntity::Someday => {
                     let someday_tasks: Vec<_> = store
                         .get_active_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| matches!(t.when, When::Someday))
                         .filter(|t| t.completed_at.is_none())
                         .collect();
@@ -1480,6 +1525,7 @@ fn main() {
                             saku_tdo::ui::render_view_header("Someday", someday_tasks.len());
                             for task in someday_tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
+                                saku_tdo::ui::render_subtask_children(task.id, &store);
                             }
                         }
                     } else {
@@ -1497,7 +1543,10 @@ fn main() {
                 ViewEntity::All => {
                     use std::collections::HashMap;
 
-                    let all_tasks: Vec<_> = store.get_active_tasks().collect();
+                    let all_tasks: Vec<_> = store
+                        .get_active_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
+                        .collect();
                     if matches!(fmt, output::OutputFormat::Pretty) {
                         let all_tasks =
                             saku_tdo::models::task::order_tasks_with_store(all_tasks, &store);
@@ -1523,6 +1572,7 @@ fn main() {
                                     saku_tdo::ui::render_view_header(group_name, tasks.len());
                                     for task in tasks {
                                         saku_tdo::ui::render_task_line(task, &store);
+                                        saku_tdo::ui::render_subtask_children(task.id, &store);
                                     }
                                 }
                             }
@@ -1547,6 +1597,7 @@ fn main() {
 
                     let upcoming_tasks: Vec<_> = store
                         .get_active_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| {
                             t.completed_at.is_none() && {
                                 let scheduled_future = match t.when {
@@ -1588,6 +1639,7 @@ fn main() {
                                 );
                                 for task in tasks {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                         }
@@ -1608,6 +1660,7 @@ fn main() {
 
                     let mut deadline_tasks: Vec<_> = store
                         .get_active_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| t.completed_at.is_none() && t.deadline.is_some())
                         .collect();
 
@@ -1658,6 +1711,7 @@ fn main() {
                                 ));
                                 for task in overdue {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                             if !due_today.is_empty() {
@@ -1667,6 +1721,7 @@ fn main() {
                                 ));
                                 for task in due_today {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                             if !this_week.is_empty() {
@@ -1676,6 +1731,7 @@ fn main() {
                                 ));
                                 for task in this_week {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                             if !later.is_empty() {
@@ -1685,6 +1741,7 @@ fn main() {
                                 ));
                                 for task in later {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                         }
@@ -1706,6 +1763,7 @@ fn main() {
                     let completed_tasks: Vec<_> = store
                         .tasks
                         .values()
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| {
                             if let Some(completed_at) = t.completed_at {
                                 saku_tdo::ui::is_within_days(completed_at, 14)
@@ -1743,6 +1801,7 @@ fn main() {
                                     saku_tdo::ui::render_task_line_with_completion_date(
                                         task, &store,
                                     );
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                         }
@@ -1759,7 +1818,10 @@ fn main() {
                     }
                 }
                 ViewEntity::Trash => {
-                    let deleted_tasks: Vec<_> = store.get_deleted_tasks().collect();
+                    let deleted_tasks: Vec<_> = store
+                        .get_deleted_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
+                        .collect();
                     let deleted_projects: Vec<_> = store.get_deleted_projects().collect();
                     let deleted_areas: Vec<_> = store.get_deleted_areas().collect();
 
@@ -1884,6 +1946,7 @@ fn main() {
 
                     let mut tasks: Vec<_> = store
                         .get_tasks_for_project(project.id)
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                         .collect();
                     tasks.sort_by_key(|t| t.task_number);
@@ -1919,6 +1982,7 @@ fn main() {
                                 saku_tdo::ui::render_view_header(&header, tasks.len());
                                 for task in tasks {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                             }
                         }
@@ -1955,6 +2019,7 @@ fn main() {
 
                     let mut direct_tasks: Vec<_> = store
                         .get_tasks_for_area(area.id)
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                         .collect();
                     direct_tasks.sort_by_key(|t| t.task_number);
@@ -1970,6 +2035,7 @@ fn main() {
                         .map(|p| {
                             let mut tasks: Vec<_> = store
                                 .get_tasks_for_project(p.id)
+                                .filter(|t| t.parent_task_id.is_none())
                                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                                 .collect();
                             tasks.sort_by_key(|t| t.task_number);
@@ -2012,6 +2078,7 @@ fn main() {
                                 saku_tdo::ui::render_view_header(&area.name, total_tasks);
                                 for task in &direct_tasks {
                                     saku_tdo::ui::render_task_line(task, &store);
+                                    saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
                                 for (i, (project, tasks)) in project_tasks.iter().enumerate() {
                                     if !direct_tasks.is_empty() || i > 0 {
@@ -2021,6 +2088,7 @@ fn main() {
                                     }
                                     for task in tasks {
                                         saku_tdo::ui::render_task_line(task, &store);
+                                        saku_tdo::ui::render_subtask_children(task.id, &store);
                                     }
                                 }
                             }
@@ -2030,6 +2098,7 @@ fn main() {
                 ViewEntity::Tag { name } => {
                     let mut tasks: Vec<_> = store
                         .get_active_tasks()
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| {
                             t.completed_at.is_none()
                                 && t.tags
@@ -2058,6 +2127,7 @@ fn main() {
                             saku_tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
                             for task in tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
+                                saku_tdo::ui::render_subtask_children(task.id, &store);
                             }
                         }
                     } else {
@@ -2089,6 +2159,7 @@ fn main() {
             notes,
             every,
             until,
+            parent,
         }) => {
             // Parse when flags
             let when = match When::from_command_flags(today, tomorrow, next_week, someday, on) {
@@ -2148,6 +2219,7 @@ fn main() {
                 area,
                 tags: tag,
                 recurrence,
+                parent_task_number: parent,
             };
 
             // Call service
@@ -2214,6 +2286,18 @@ fn main() {
                     eprintln!("Error: Invalid deadline '{}': {}", date_str, error);
                     std::process::exit(1);
                 }
+                Err(AddTaskError::ParentTaskNotFound(n)) => {
+                    eprintln!("Error: Parent task #{} not found", n);
+                    std::process::exit(1);
+                }
+                Err(AddTaskError::ParentIsSubtask) => {
+                    eprintln!("Error: Cannot create a subtask of a subtask (only one level of nesting is allowed)");
+                    std::process::exit(1);
+                }
+                Err(AddTaskError::SubtaskCannotHaveProjectOrArea) => {
+                    eprintln!("Error: Subtasks inherit project and area from their parent; --project and --area cannot be used with --parent");
+                    std::process::exit(1);
+                }
                 Err(AddTaskError::Storage(e)) => {
                     eprintln!("Error: Failed to save task: {}", e);
                     std::process::exit(1);
@@ -2263,6 +2347,10 @@ fn main() {
                             eprintln!("  - {}", title);
                         }
                         eprintln!("\nPlease be more specific or use the task number.");
+                        std::process::exit(1);
+                    }
+                    Err(CompleteTaskError::HasIncompleteSubtasks) => {
+                        eprintln!("Error: Cannot complete task: complete all subtasks first.");
                         std::process::exit(1);
                     }
                     Err(CompleteTaskError::Storage(e)) => {
@@ -3123,6 +3211,7 @@ fn main() {
 
             let mut tasks: Vec<_> = store
                 .get_tasks_for_project(project.id)
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                 .collect();
             tasks.sort_by_key(|t| t.task_number);
@@ -3158,6 +3247,7 @@ fn main() {
                         saku_tdo::ui::render_view_header(&header, tasks.len());
                         for task in tasks {
                             saku_tdo::ui::render_task_line(task, &store);
+                            saku_tdo::ui::render_subtask_children(task.id, &store);
                         }
                     }
                 }
@@ -3199,6 +3289,7 @@ fn main() {
 
             let mut direct_tasks: Vec<_> = store
                 .get_tasks_for_area(area.id)
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                 .collect();
             direct_tasks.sort_by_key(|t| t.task_number);
@@ -3214,6 +3305,7 @@ fn main() {
                 .map(|p| {
                     let mut tasks: Vec<_> = store
                         .get_tasks_for_project(p.id)
+                        .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                         .collect();
                     tasks.sort_by_key(|t| t.task_number);
@@ -3252,6 +3344,7 @@ fn main() {
                         saku_tdo::ui::render_view_header(&area.name, total_tasks);
                         for task in &direct_tasks {
                             saku_tdo::ui::render_task_line(task, &store);
+                            saku_tdo::ui::render_subtask_children(task.id, &store);
                         }
                         for (i, (project, tasks)) in project_tasks.iter().enumerate() {
                             if !direct_tasks.is_empty() || i > 0 {
@@ -3261,6 +3354,7 @@ fn main() {
                             }
                             for task in tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
+                                saku_tdo::ui::render_subtask_children(task.id, &store);
                             }
                         }
                     }
@@ -3326,6 +3420,7 @@ fn main() {
             let fmt = output::OutputFormat::from_flags(json, csv);
             let mut tasks: Vec<_> = store
                 .get_active_tasks()
+                .filter(|t| t.parent_task_id.is_none())
                 .filter(|t| {
                     t.completed_at.is_none()
                         && t.tags
@@ -3354,6 +3449,7 @@ fn main() {
                     saku_tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, &store);
+                        saku_tdo::ui::render_subtask_children(task.id, &store);
                     }
                 }
             } else {

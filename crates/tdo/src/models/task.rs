@@ -172,8 +172,8 @@ pub struct Task {
     pub defer_until: Option<Date>,
     /// IDs of tasks that must be completed before this task can start
     pub depends_on: Vec<Uuid>,
-    /// Sub tasks of the main task - Modeled as a lighter task called ChecklistItem
-    pub checklist: Vec<ChecklistItem>,
+    /// Parent task ID if this is a subtask (one level deep only)
+    pub parent_task_id: Option<Uuid>,
     /// When the task was completed
     pub completed_at: Option<Timestamp>,
     /// When the task was deleted
@@ -305,13 +305,6 @@ impl When {
             Ok(When::Inbox)
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ChecklistItem {
-    pub id: Uuid,
-    pub title: String,
-    pub completed: bool,
 }
 
 // ============================================================================

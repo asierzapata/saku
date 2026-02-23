@@ -88,14 +88,7 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
         output.push_str(&defer_until.to_string());
     }
     output.push('\n');
-    output.push_str("# Format: YYYY-MM-DD or leave empty\n\n");
-
-    // Checklist
-    output.push_str("Checklist:\n");
-    for item in &task.checklist {
-        let checkbox = if item.completed { "[x]" } else { "[ ]" };
-        output.push_str(&format!("{} {}\n", checkbox, item.title));
-    }
+    output.push_str("# Format: YYYY-MM-DD or leave empty\n");
 
     output
 }
@@ -165,7 +158,6 @@ pub struct ParsedTaskEdit {
     pub when: String,
     pub deadline: Option<String>,
     pub defer_until: Option<String>,
-    pub checklist: Vec<(String, bool)>, // (title, completed)
 }
 
 /// Parse the edited content back into structured fields
@@ -178,10 +170,8 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
     let mut when: Option<String> = None;
     let mut deadline: Option<String> = None;
     let mut defer_until: Option<String> = None;
-    let mut checklist: Vec<(String, bool)> = Vec::new();
 
     let mut in_notes = false;
-    let mut in_checklist = false;
 
     for line in content.lines() {
         // Skip comment lines
@@ -197,27 +187,22 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
             || line.starts_with("Tags:")
             || line.starts_with("When:")
             || line.starts_with("Deadline:")
-            || line.starts_with("Defer Until:")
-            || line.starts_with("Checklist:");
+            || line.starts_with("Defer Until:");
 
         if is_field_header {
             // Process field header
             if line.starts_with("Title: ") {
                 title = Some(line.trim_start_matches("Title: ").trim().to_string());
                 in_notes = false;
-                in_checklist = false;
             } else if line.starts_with("Notes:") {
                 in_notes = true;
-                in_checklist = false;
                 notes_lines.clear();
             } else if line.starts_with("Project: ") {
                 project = Some(line.trim_start_matches("Project: ").trim().to_string());
                 in_notes = false;
-                in_checklist = false;
             } else if line.starts_with("Area: ") {
                 area = Some(line.trim_start_matches("Area: ").trim().to_string());
                 in_notes = false;
-                in_checklist = false;
             } else if line.starts_with("Tags: ") {
                 let tags_str = line.trim_start_matches("Tags: ").trim();
                 tags = tags_str
@@ -226,34 +211,18 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
                     .filter(|s| !s.is_empty())
                     .collect();
                 in_notes = false;
-                in_checklist = false;
             } else if line.starts_with("When: ") {
                 when = Some(line.trim_start_matches("When: ").trim().to_string());
                 in_notes = false;
-                in_checklist = false;
             } else if line.starts_with("Deadline: ") {
                 deadline = Some(line.trim_start_matches("Deadline: ").trim().to_string());
                 in_notes = false;
-                in_checklist = false;
             } else if line.starts_with("Defer Until: ") {
                 defer_until = Some(line.trim_start_matches("Defer Until: ").trim().to_string());
-                in_notes = false;
-                in_checklist = false;
-            } else if line.starts_with("Checklist:") {
-                in_checklist = true;
                 in_notes = false;
             }
         } else if in_notes {
             notes_lines.push(line.to_string());
-        } else if in_checklist {
-            let trimmed = line.trim();
-            if trimmed.starts_with("[ ]") || trimmed.starts_with("[x]") {
-                let completed = trimmed.starts_with("[x]");
-                let item_title = trimmed[3..].trim().to_string();
-                if !item_title.is_empty() {
-                    checklist.push((item_title, completed));
-                }
-            }
         }
     }
 
@@ -289,7 +258,6 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
         when,
         deadline,
         defer_until,
-        checklist,
     })
 }
 
@@ -337,18 +305,6 @@ pub fn has_changes(original_task: &Task, parsed: &ParsedTaskEdit, store: &Store)
         return true;
     }
 
-    if original_task.checklist.len() != parsed.checklist.len() {
-        return true;
-    }
-    for (i, original_item) in original_task.checklist.iter().enumerate() {
-        if let Some((parsed_title, parsed_completed)) = parsed.checklist.get(i)
-            && (original_item.title != *parsed_title
-                || original_item.completed != *parsed_completed)
-        {
-            return true;
-        }
-    }
-
     false
 }
 
@@ -358,7 +314,7 @@ mod tests {
     use crate::models::{
         area::Area,
         project::Project,
-        task::{ChecklistItem, Task},
+        task::Task,
     };
     use jiff::civil::Date;
     use uuid::Uuid;
@@ -382,7 +338,7 @@ mod tests {
             deadline: None,
             defer_until: None,
             depends_on: vec![],
-            checklist: vec![],
+            parent_task_id: None,
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
@@ -438,18 +394,7 @@ mod tests {
             deadline: Some("2026-03-15".parse::<Date>().unwrap()),
             defer_until: None,
             depends_on: vec![],
-            checklist: vec![
-                ChecklistItem {
-                    id: Uuid::new_v4(),
-                    title: "Step 1".to_string(),
-                    completed: false,
-                },
-                ChecklistItem {
-                    id: Uuid::new_v4(),
-                    title: "Step 2".to_string(),
-                    completed: true,
-                },
-            ],
+            parent_task_id: None,
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
@@ -470,8 +415,6 @@ mod tests {
         let today_str = jiff::Zoned::now().date().to_string();
         assert!(serialized.contains(&format!("When: {}", today_str)));
         assert!(serialized.contains("Deadline: 2026-03-15"));
-        assert!(serialized.contains("[ ] Step 1"));
-        assert!(serialized.contains("[x] Step 2"));
     }
 
     #[test]
@@ -537,37 +480,6 @@ Checklist:
     }
 
     #[test]
-    fn test_parse_checklist() {
-        let content = r#"Title: Task with checklist
-
-Notes:
-
-Project:
-
-Area:
-
-Tags:
-
-When: inbox
-
-Deadline:
-
-Defer Until:
-
-Checklist:
-[ ] Item 1
-[x] Item 2
-[ ] Item 3
-"#;
-
-        let parsed = parse_edited_task(content).unwrap();
-        assert_eq!(parsed.checklist.len(), 3);
-        assert_eq!(parsed.checklist[0], ("Item 1".to_string(), false));
-        assert_eq!(parsed.checklist[1], ("Item 2".to_string(), true));
-        assert_eq!(parsed.checklist[2], ("Item 3".to_string(), false));
-    }
-
-    #[test]
     fn test_parse_empty_fields() {
         let content = r#"Title: Task title
 
@@ -611,7 +523,7 @@ Checklist:
             deadline: None,
             defer_until: None,
             depends_on: vec![],
-            checklist: vec![],
+            parent_task_id: None,
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
@@ -629,7 +541,6 @@ Checklist:
             when: "inbox".to_string(),
             deadline: None,
             defer_until: None,
-            checklist: vec![],
         };
 
         assert!(has_changes(&task, &parsed, &store));
@@ -650,7 +561,7 @@ Checklist:
             deadline: None,
             defer_until: None,
             depends_on: vec![],
-            checklist: vec![],
+            parent_task_id: None,
             completed_at: None,
             deleted_at: None,
             created_at: jiff::Timestamp::now(),
@@ -668,7 +579,6 @@ Checklist:
             when: "inbox".to_string(),
             deadline: None,
             defer_until: None,
-            checklist: vec![],
         };
 
         assert!(!has_changes(&task, &parsed, &store));
