@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod conflict;
+pub mod document;
 pub mod error;
 pub mod hash;
 pub mod merkle;
@@ -11,6 +12,7 @@ pub mod config;
 
 pub use error::SyncError;
 pub use sync_engine::{SyncConfig, SyncEngine, SyncOutcome, TrackedFile};
+pub use document::{DocumentStore, SyncResult};
 
 use backend::local_fs::LocalFsSyncBackend;
 use std::path::Path;

@@ -14,4 +14,5 @@ pub fn router() -> Router<AppState> {
         .route("/:tool/upload-url", post(handlers::upload_url))
         .route("/:tool/confirm-upload", post(handlers::confirm_upload))
         .route("/:tool/metadata", get(handlers::metadata))
+        .route("/:tool/list", get(handlers::list_documents))
 }

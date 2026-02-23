@@ -33,11 +33,18 @@ impl SyncBackend for ServerSyncBackend {
     fn is_reachable(&self) -> bool {
         false
     }
+
+    fn list_documents(&self, _tool: &str) -> Result<Vec<String>, SyncError> {
+        Err(SyncError::Backend {
+            message: "ServerSyncBackend requires the 'server' feature".to_string(),
+        })
+    }
 }
 
 #[cfg(feature = "server")]
 mod impl_server {
     use std::cell::RefCell;
+    use std::io::Read;
 
     use super::*;
     use crate::backend::server_types::*;
@@ -263,6 +270,28 @@ mod impl_server {
                 .timeout(std::time::Duration::from_secs(2))
                 .call()
                 .is_ok()
+        }
+
+        fn list_documents(&self, tool: &str) -> Result<Vec<String>, SyncError> {
+            self.with_auth_retry(|token| {
+                let url = format!("{}/api/v1/sync/{}/list", self.server_url, tool);
+
+                let resp = self
+                    .http_client
+                    .get(&url)
+                    .set("Authorization", &format!("Bearer {}", token))
+                    .call()
+                    .map_err(|e| SyncError::Backend {
+                        message: format!("List documents request failed: {e}"),
+                    })?;
+
+                let list_resp: ListDocumentsResponse =
+                    resp.into_json().map_err(|e| SyncError::Backend {
+                        message: format!("Failed to parse list response: {e}"),
+                    })?;
+
+                Ok(list_resp.documents)
+            })
         }
     }
 }

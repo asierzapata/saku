@@ -3,6 +3,7 @@ use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
 };
+use futures::stream::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -50,6 +51,11 @@ pub struct MetadataResponse {
     pub size_bytes: u64,
     pub last_modified_ms: Option<i64>,
     pub etag: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ListDocumentsResponse {
+    pub documents: Vec<String>,
 }
 
 // --- Handlers ---
@@ -151,4 +157,43 @@ pub async fn metadata(
         last_modified_ms: stat.last_modified().map(|t| t.timestamp_millis()),
         etag: stat.etag().map(|s| s.to_string()),
     }))
+}
+
+/// GET /api/v1/sync/:tool/list
+/// List all documents for a given tool.
+pub async fn list_documents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tool): Path<String>,
+) -> Result<Json<ListDocumentsResponse>, ServerError> {
+    let auth = middleware::extract_auth(&headers, &state)?;
+    let prefix = format!("{}/{}/", auth.user_id, tool);
+
+    let mut lister = state
+        .inner
+        .storage
+        .lister(&prefix)
+        .await
+        .map_err(|e| ServerError::Storage(format!("Failed to list objects: {e}")))?;
+
+    let mut documents = Vec::new();
+    while let Some(entry) = lister
+        .try_next()
+        .await
+        .map_err(|e| ServerError::Storage(format!("Failed to iterate objects: {e}")))?
+    {
+        let path = entry.path();
+        // Extract relative path (remove user_id/tool/ prefix)
+        if let Some(relative_path) = path.strip_prefix(&prefix) {
+            // Remove .enc suffix if present
+            let doc_id = if let Some(stripped) = relative_path.strip_suffix(".enc") {
+                stripped.to_string()
+            } else {
+                relative_path.to_string()
+            };
+            documents.push(doc_id);
+        }
+    }
+
+    Ok(Json(ListDocumentsResponse { documents }))
 }

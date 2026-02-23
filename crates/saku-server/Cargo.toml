@@ -33,3 +33,4 @@ hex.workspace = true
 clap.workspace = true
 rpassword.workspace = true
 jiff.workspace = true
+futures.workspace = true

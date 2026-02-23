@@ -65,6 +65,11 @@ pub struct MetadataResponse {
 }
 
 #[derive(Deserialize)]
+pub struct ListDocumentsResponse {
+    pub documents: Vec<String>,
+}
+
+#[derive(Deserialize)]
 pub struct ErrorResponse {
     pub error: String,
 }
