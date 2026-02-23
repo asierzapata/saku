@@ -142,18 +142,30 @@ impl<B: SyncBackend> DocumentStore<B> {
         let local_map: std::collections::HashMap<String, &Value> =
             local_docs.iter().map(|(id, val)| (id.clone(), val)).collect();
 
+        // Build a map to track remote versions for comparison
+        let mut remote_map: std::collections::HashMap<String, Value> =
+            std::collections::HashMap::new();
+
         // Pull remote documents and detect conflicts
         let mut merged_docs: std::collections::HashMap<String, Value> =
             std::collections::HashMap::new();
 
         for doc_id in &remote_ids {
             if let Some(remote_doc) = self.get_document(doc_id)? {
+                remote_map.insert(doc_id.clone(), remote_doc.clone());
+                
                 if let Some(local_doc) = local_map.get(doc_id) {
                     // Both exist - merge using modified_at timestamps
                     let merged = merge_documents(local_doc, &remote_doc);
-                    if &merged != *local_doc {
+                    
+                    // A conflict occurs when both versions differ AND neither is identical to merged
+                    // (meaning both local and remote were modified independently)
+                    let local_ts = extract_modified_at(local_doc);
+                    let remote_ts = extract_modified_at(&remote_doc);
+                    if local_ts != remote_ts && **local_doc != merged && remote_doc != merged {
                         result.conflicts.push(doc_id.clone());
                     }
+                    
                     merged_docs.insert(doc_id.clone(), merged);
                 } else {
                     // Remote only - accept remote
@@ -170,15 +182,18 @@ impl<B: SyncBackend> DocumentStore<B> {
             }
         }
 
-        // Push all documents that differ from remote
-        for (doc_id, doc) in &merged_docs {
-            if let Some(local_doc) = local_map.get(doc_id) {
-                if *local_doc != doc {
-                    self.put_document(doc_id, doc)?;
-                    result.pushed += 1;
-                }
-            } else if !remote_ids.contains(doc_id) {
-                self.put_document(doc_id, doc)?;
+        // Push documents that differ from remote
+        for (doc_id, merged_doc) in &merged_docs {
+            let should_push = if let Some(remote_doc) = remote_map.get(doc_id) {
+                // Document exists remotely - push if merged differs from remote
+                merged_doc != remote_doc
+            } else {
+                // Document doesn't exist remotely - always push
+                true
+            };
+
+            if should_push {
+                self.put_document(doc_id, merged_doc)?;
                 result.pushed += 1;
             }
         }
@@ -216,10 +231,19 @@ fn merge_documents(local: &Value, remote: &Value) -> Value {
     let local_ts = extract_modified_at(local);
     let remote_ts = extract_modified_at(remote);
 
-    if local_ts >= remote_ts {
-        local.clone()
-    } else {
-        remote.clone()
+    // Compare all three components: wall_ms (primary), lamport (secondary), device_id (tertiary)
+    match local_ts.cmp(&remote_ts) {
+        std::cmp::Ordering::Greater => local.clone(),
+        std::cmp::Ordering::Less => remote.clone(),
+        std::cmp::Ordering::Equal => {
+            // When timestamps are completely equal (rare), prefer lexicographically higher device_id
+            // This ensures deterministic conflict resolution
+            if local_ts.2 >= remote_ts.2 {
+                local.clone()
+            } else {
+                remote.clone()
+            }
+        }
     }
 }
 

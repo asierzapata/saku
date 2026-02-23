@@ -44,7 +44,6 @@ impl SyncBackend for ServerSyncBackend {
 #[cfg(feature = "server")]
 mod impl_server {
     use std::cell::RefCell;
-    use std::io::Read;
 
     use super::*;
     use crate::backend::server_types::*;
