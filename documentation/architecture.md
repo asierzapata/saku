@@ -2,246 +2,318 @@
 
 This document describes the architectural patterns and shared conventions across the Saku productivity suite.
 
+For the design intent behind the suite, see [PHILOSOPHY.md](PHILOSOPHY.md). For the build order, see [ROADMAP.md](ROADMAP.md).
+
+---
+
+## The Suite
+
+Tools are organized around the recurring loops of a developer's day. Each tool serves one loop and no more.
+
+```
+Daily Loop         → tdo, jrn, cal
+Knowledge Loop     → nte, dcs
+Work Loop          → ctx, tmr
+Communication Loop → msg, ppl
+Human Rhythms      → hbt
+Exploration        → exp
+Orchestrator       → saku
+```
+
+### Current Status
+
+| Tool | Loop | Description | Status |
+|---|---|---|---|
+| `tdo` | Daily | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
+| `hbt` | Rhythms | Habit tracker. Daily streaks and consistency. | Designed |
+| `jrn` | Daily | Daily journal. Chronological log of what happened. | Planned |
+| `cal` | Daily | Calendar. Time constraints and event triggers. | Planned |
+| `nte` | Knowledge | Notes. Evergreen reference and architecture docs. | Planned |
+| `dcs` | Knowledge | Decision log. What was decided and why. | Planned |
+| `ctx` | Work | Session context. Save and restore where you left off. | Planned |
+| `tmr` | Work | Time tracker. Pomodoro and time-on-task. | Planned |
+| `msg` | Communication | Async waiting. What you're blocked on externally. | Planned |
+| `ppl` | Communication | People context. Notes about people you work with. | Planned |
+| `exp` | Exploration | Experiments. Hypothesis → testing → result. | Planned |
+| `saku` | Orchestrator | Cross-tool context, search, and sync. | Planned |
+
+---
+
 ## Monorepo Structure
 
-Saku is organized as a Cargo workspace with multiple CLI tools:
+Saku is organized as a Cargo workspace:
 
 ```
 saku/
-├── Cargo.toml              # Workspace configuration
+├── Cargo.toml                    # Workspace configuration
 ├── crates/
-│   ├── tdo/                # Task management
-│   ├── cal/                # Calendar (planned)
-│   ├── hbt/                # Habits (planned)
-│   └── ...                 # Future tools
-└── documentation/          # Suite-wide documentation
+│   ├── tdo/                      # Daily loop: task queue
+│   ├── jrn/                      # Daily loop: journal (planned)
+│   ├── cal/                      # Daily loop: calendar (planned)
+│   ├── nte/                      # Knowledge loop: notes (planned)
+│   ├── dcs/                      # Knowledge loop: decisions (planned)
+│   ├── ctx/                      # Work loop: session context (planned)
+│   ├── tmr/                      # Work loop: time tracking (planned)
+│   ├── msg/                      # Communication loop: async waiting (planned)
+│   ├── ppl/                      # Communication loop: people (planned)
+│   ├── hbt/                      # Human rhythms: habits (designed)
+│   ├── exp/                      # Exploration: experiments (planned)
+│   ├── saku/                     # Orchestrator (planned)
+│   ├── saku-storage/             # Shared storage abstraction
+│   ├── saku-crypto/              # Encryption utilities
+│   └── saku-sync/                # Cross-device sync
+├── documentation/
+│   ├── PHILOSOPHY.md             # Design intent
+│   ├── ROADMAP.md                # Build order and priorities
+│   ├── architecture.md           # This file
+│   ├── tdo/                      # tdo-specific docs
+│   ├── hbt/                      # hbt-specific docs
+│   └── ...
+└── skills/
+    └── saku-integration/         # AI agent integration guide
 ```
 
 ### Why a Monorepo?
 
-- **Shared infrastructure**: UI utilities, storage patterns, and common types can be reused
-- **Consistent versioning**: All tools evolve together with aligned dependencies
-- **Unified development**: Single checkout, build, and test process
-- **Cross-tool integration**: Future opportunities for data sharing (e.g., link tasks to calendar events)
+- **Shared infrastructure** — Storage traits, UI patterns, and common types are reused across tools
+- **Consistent versioning** — All tools evolve together with aligned dependencies
+- **Unified development** — Single checkout, build, and test process
+- **Cross-tool integration** — `saku context` can read from any tool's store; `ctx` can reference active `tdo` tasks
+
+---
 
 ## Common Patterns
 
 ### Architecture Layers
 
-Each CLI tool follows a consistent layered architecture:
+Every CLI tool follows the same layered structure:
 
-1. **CLI Layer** (`main.rs`): Command parsing, validation, user interaction
-2. **Services Layer** (`services/`): Business logic and orchestration
-3. **Models Layer** (`models/`): Core domain types and data structures
-4. **Storage Layer** (`storage/`): Persistence abstraction (trait-based)
-5. **UI Layer** (`ui.rs` or `ui/`): Terminal rendering and formatting
+```
+1. CLI Layer     (main.rs)        — Command parsing, validation, user interaction
+2. Services      (services/)      — Business logic and orchestration
+3. Models        (models/)        — Domain types and data structures
+4. Storage       (storage/)       — Persistence abstraction (trait-based)
+5. UI            (ui.rs or ui/)   — Terminal rendering and formatting
+```
+
+This structure is enforced by convention, not by a shared crate. Each tool is independently buildable and testable.
 
 ### Storage Strategy
 
-**Current approach** (as seen in `tdo`):
+**Single JSON file per tool:**
 
-- **Single JSON file** per tool in `~/.local/share/<tool>/store.json`
-- **In-memory representation**: HashMap for fast lookups
-- **Persisted representation**: Vec for JSON serialization
-- **File locking**: Concurrent access safety via `fs2` crate
-- **Backups**: Automatic versioned backups on write
-- **Schema versioning**: Migration system for data format changes
+```
+~/.local/share/<tool>/store.json    # Primary data
+~/.local/share/<tool>/backups/      # Automatic versioned backups (5 kept)
+```
 
-**Future considerations**:
+- **In-memory**: HashMap for O(1) lookups during operation
+- **Persisted**: Vec for compact JSON serialization
+- **File locking**: `fs2` crate prevents concurrent write corruption
+- **Schema versioning**: Migration system handles format changes across versions
 
-- Shared storage utilities could be extracted to `saku-shared` crate
-- Cross-tool data storage (e.g., unified configuration)
-- Optional database backends for power users
+**Override storage path** via environment variable `<TOOL>_DATA_DIR` (e.g., `TDO_DATA_DIR`). Used in tests and for non-default installations.
+
+**When to consider alternatives**: Stay with JSON until a tool's store exceeds ~10,000 records and query performance becomes measurable. The rule: optimize for simplicity first, performance when proven necessary.
 
 ### UI Rendering
 
-**Terminal UI patterns**:
+- `colored` crate — consistent color palette across tools
+- `term_size` — responsive layouts that adapt to terminal width
+- **Visual language**: each tool has a design spec in `documentation/<tool>/design-spec.md` defining glyphs, colors, and layout rules
+- **Reference implementation**: `tdo/src/ui.rs` — all tools should follow its conventions for spacing, alignment, and output density
 
-- Use `colored` crate for consistent color schemes
-- `term_size` for responsive layouts
-- Clear visual hierarchy with borders, spacing, and alignment
-- Consistent formatting across tools (see `tdo/src/ui.rs` as reference)
+**Output modes** every tool must support:
+1. Human-readable (default) — formatted, colored, terminal-width-aware
+2. JSON (`--output json` or `--json`) — structured, uncolored, machine-parseable
+3. CSV where tabular data makes sense (`--output csv`)
 
-**Style guidelines**:
+### Exit Codes
 
-- Minimal, scannable output
-- Color coding for status (e.g., green for success, red for errors)
-- Table/list formatting for data presentation
+Consistent across all tools:
 
-### Dependencies
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Runtime error (item not found, conflict, etc.) |
+| `2` | Validation error (invalid date, conflicting flags, etc.) |
 
-**Workspace-level shared dependencies**:
+### Data Model Conventions
 
-- `clap` (v4): CLI argument parsing with derive macros
-- `serde` + `serde_json`: Serialization/deserialization
-- `uuid`: Unique identifiers for entities
-- `jiff`: Date and time handling (modern alternative to chrono)
-- `fs2`: File locking for safe concurrent access
-- `thiserror`: Ergonomic error handling
-- `dirs`: Platform-aware directory paths
-- `colored`: Terminal colors
-- `term_size`: Terminal dimensions
+**IDs**: Every entity has a UUID (internal) and a user-facing auto-incrementing number. Agents use UUIDs; humans use numbers. Fuzzy name matching is supported for human convenience.
 
-**Note on Rust Edition**: The workspace uses edition "2024" to support modern Rust features like let chains. Ensure you have a recent Rust toolchain (1.83+).
+**Timestamps**: Use `jiff::Timestamp` (not chrono). `HybridTimestamp` (from `saku-storage`) for entities that participate in sync conflict resolution.
 
-**Guidelines**:
+**Soft deletes**: Entities are never hard-deleted. `deleted_at: Option<Timestamp>` — deleted items go to a trash view and can be restored.
 
-- Keep dependencies minimal and focused
-- Prefer actively maintained crates with good ergonomics
-- Lock versions in workspace `Cargo.toml` for consistency
+**Migrations**: Every store has a `version: u32` field. When the schema changes, a migration function transforms old data to the new shape at load time.
+
+---
+
+## Cross-Tool Integration
+
+Tools are independently useful but designed to compose. The integration surface is the filesystem — tools read each other's stores directly, never via network.
+
+**Current integrations (planned):**
+
+- `ctx` reads active `tdo` tasks when saving session context
+- `tmr` links sessions to `tdo` task IDs for time attribution
+- `saku context` reads from all tool stores to produce the combined snapshot
+- `jrn` entries can reference `tdo` task IDs and `dcs` decision IDs
+- `tdo` tasks can carry a `nte` note reference for rich context
+
+**Cross-tool reference format:**
+
+When one tool references an entity in another, use the format `<tool>:<id>`:
+
+```
+nte:a3f2c1          # a note in nte
+tdo:42              # task #42 in tdo
+dcs:jwt-auth        # decision with slug "jwt-auth"
+```
+
+This is a convention, not enforced by the runtime today. As tools mature, `saku` will validate these references.
+
+---
 
 ## Adding a New Tool
 
-To add a new tool to the Saku suite:
-
-1. **Create the crate structure**:
-
+1. **Create the crate:**
    ```bash
-   mkdir -p crates/<tool-name>/src
+   mkdir -p crates/<tool>/src
    ```
 
-2. **Add to workspace members** in root `Cargo.toml`:
-
+2. **Add to workspace** in root `Cargo.toml`:
    ```toml
    [workspace]
-   members = [
-       "crates/tdo",
-       "crates/<tool-name>",
-   ]
+   members = ["crates/tdo", "crates/<tool>", ...]
    ```
 
-3. **Create the tool's `Cargo.toml`**:
-
+3. **Create `Cargo.toml`:**
    ```toml
    [package]
-   name = "<tool-name>"
+   name = "<tool>"
    version = "0.1.0"
    edition.workspace = true
    license.workspace = true
 
    [[bin]]
-   name = "<tool-name>"
+   name = "<tool>"
    path = "src/main.rs"
 
    [dependencies]
    clap.workspace = true
-   # ... other dependencies
+   serde.workspace = true
+   serde_json.workspace = true
+   uuid.workspace = true
+   jiff.workspace = true
+   colored.workspace = true
+   term_size.workspace = true
+   thiserror.workspace = true
    ```
 
-4. **Follow the layered architecture**:
-   - Start with `main.rs` for CLI parsing
-   - Create `models/` for domain types
-   - Create `services/` for business logic
-   - Implement storage trait for persistence
-   - Add UI rendering utilities
+4. **Follow the layered architecture** — `main.rs`, `models/`, `services/`, `storage/`, `ui/`
 
-5. **Create tool documentation**:
-   - Add `documentation/<tool-name>/` directory
-   - Include design specs, command references, etc.
+5. **Create documentation:**
+   ```
+   documentation/<tool>/
+   ├── design-spec.md        # visual language, glyphs, layout mockups
+   └── commands-cheat-sheet.md
+   ```
 
-6. **Build and test**:
+6. **Build and test:**
    ```bash
-   cargo build --release -p <tool-name>
-   cargo test -p <tool-name>
+   cargo build --release -p <tool>
+   cargo test -p <tool>
    ```
+
+---
 
 ## Development Workflow
 
 ### Building
 
 ```bash
-# Build all tools
-cargo build --release --workspace
-
-# Build specific tool
-cargo build --release -p tdo
-
-# Development build (faster, unoptimized)
-cargo build -p tdo
+cargo build --release --workspace   # all tools
+cargo build --release -p tdo        # specific tool
+cargo build -p tdo                  # dev build (faster)
 ```
 
 ### Running
 
 ```bash
-# Run from workspace root
-cargo run -p tdo -- today
-
-# Run from tool directory
-cd crates/tdo
-cargo run -- today
-
-# Run installed binary
-tdo today
+cargo run -p tdo -- view today
 ```
 
 ### Testing
 
 ```bash
-# Test all tools
 cargo test --workspace
-
-# Test specific tool
 cargo test -p tdo
-
-# Run with output
-cargo test -- --nocapture
+cargo test -- --nocapture           # show output
 ```
 
 ### Code Quality
 
 ```bash
-# Format all code
 cargo fmt --all
-
-# Lint all code
 cargo clippy --workspace -- -D warnings
-
-# Check without building
 cargo check --workspace
 ```
 
-## Future Enhancements
+---
 
-### Shared Core Library (`saku-shared`)
+## Shared Infrastructure Crates
 
-As more tools are added, extract common utilities:
+### `saku-storage`
 
-- **Storage traits**: Generic persistence layer
-- **UI components**: Reusable terminal rendering
-- **Error types**: Common error handling
-- **Configuration**: Unified settings management
+Storage abstraction used by all tools. Provides:
+- `HybridTimestamp` — logical clock for sync conflict resolution
+- Storage trait — generic persistence layer each tool implements
+- Migration utilities
 
-**When to create**: Wait until at least 2-3 tools have duplicated code. Follow the "rule of three" for abstraction.
+### `saku-crypto`
 
-### Cross-Tool Integration
+Encryption for data at rest and in transit. Used by `saku-sync` for encrypted sync payloads.
 
-Opportunities for tools to work together:
+### `saku-sync`
 
-- Link `tdo` tasks to `cal` calendar events
-- Connect `hbt` habits to `tdo` recurring tasks
-- Reference `nte` notes from tasks
-- Integrate `tmr` time tracking with tasks
+Cross-device sync. Implements a CRDT-based merge strategy using `HybridTimestamp`. Exposed to users via the `saku sync` orchestrator command (planned).
 
-### Configuration System
+### `saku-shared` (future)
+
+As the suite grows, common UI components and utilities will be extracted here. Rule of three: wait until the pattern appears in at least three tools before abstracting.
+
+---
+
+## Configuration System
 
 Unified configuration in `~/.config/saku/`:
 
 ```
 ~/.config/saku/
-├── config.toml       # Suite-wide settings
-├── tdo.toml          # Tool-specific overrides
-├── cal.toml
+├── config.toml       # Suite-wide settings (planned)
+├── tdo.toml          # Tool-specific overrides (planned)
+├── hbt.toml
 └── ...
 ```
 
+Tools read their config at startup. Format is TOML. Defaults are always valid — config files are optional.
+
+**Design constraint:** Configuration options are a last resort. Prefer opinionated defaults. Add a config key only when a reasonable person would have a different preference than the default.
+
+---
+
 ## Design Principles
 
-1. **Focused tools**: Each tool does one thing well
-2. **Fast and lightweight**: Rust performance, minimal dependencies
-3. **Human-readable storage**: JSON files that users can inspect/edit
-4. **Composable**: Tools can work together but remain independent
-5. **Terminal-first**: Optimized for keyboard-driven workflows
-6. **Progressive enhancement**: Start simple, add features incrementally
+1. **One loop per tool** — when a tool starts solving problems from a different loop, it has grown too large
+2. **Legible to both principals** — every output must be equally parseable by a human and a program
+3. **Fast by default** — sub-10ms startup, no daemon, no background work
+4. **Human-readable storage** — JSON files users can inspect, edit, and back up manually
+5. **Composable** — tools work together through the filesystem, not through a shared process
+6. **Progressive enhancement** — start with the simplest useful thing, add complexity only when proven necessary
+
+---
 
 ## License
 
