@@ -245,6 +245,10 @@ pub struct MoveTaskParameters {
     pub clear_deadline: bool,
     pub project: Option<String>,
     pub area: Option<String>,
+    /// Remove the project assignment entirely.
+    pub clear_project: bool,
+    /// Remove the area assignment entirely.
+    pub clear_area: bool,
     pub tags: Vec<String>,
     /// Set a new recurrence rule.
     pub recurrence: Option<Recurrence>,
@@ -265,7 +269,10 @@ pub fn move_task(
                 parameters.task_number.to_string(),
             ))?;
 
-    let project_id = if let Some(project_name) = parameters.project {
+    let existing_project_id = task.project_id;
+    let project_id = if parameters.clear_project {
+        None
+    } else if let Some(project_name) = parameters.project {
         let matching_projects: Vec<_> = store
             .get_active_projects()
             .filter(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()))
@@ -280,10 +287,13 @@ pub fn move_task(
             }
         }
     } else {
-        None
+        existing_project_id
     };
 
-    let area_id = if let Some(area_name) = parameters.area {
+    let existing_area_id = task.area_id;
+    let area_id = if parameters.clear_area {
+        None
+    } else if let Some(area_name) = parameters.area {
         let matching_areas: Vec<_> = store
             .get_active_areas()
             .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
@@ -298,7 +308,7 @@ pub fn move_task(
             }
         }
     } else {
-        None
+        existing_area_id
     };
 
     let deadline = if parameters.clear_deadline {
@@ -1401,6 +1411,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1431,6 +1443,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1461,6 +1475,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1491,6 +1507,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1521,6 +1539,8 @@ mod tests {
                 clear_deadline: false,
                 project: Some("New".to_string()),
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1551,6 +1571,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: Some("personal".to_string()),
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1580,6 +1602,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1609,6 +1633,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec!["new-tag".to_string()],
                 recurrence: None,
                 clear_recurrence: false,
@@ -1636,6 +1662,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1664,6 +1692,8 @@ mod tests {
                 clear_deadline: false,
                 project: Some("NonExistent".to_string()),
                 area: None,
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1692,6 +1722,8 @@ mod tests {
                 clear_deadline: false,
                 project: None,
                 area: Some("NonExistent".to_string()),
+                clear_project: false,
+                clear_area: false,
                 tags: vec![],
 
                 recurrence: None,
@@ -1700,6 +1732,174 @@ mod tests {
         );
 
         assert!(matches!(result, Err(MoveTaskError::AreaNotFound(_))));
+    }
+
+    #[test]
+    fn test_move_task_preserves_project_when_not_specified() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let project = create_test_project(&mut store, "My Project", None);
+        let task = {
+            let t = Task {
+                id: Uuid::new_v4(),
+                task_number: 0,
+                title: "Task with Project".to_string(),
+                project_id: Some(project.id),
+                created_at: jiff::Timestamp::now(),
+                ..Task::default()
+            };
+            store.add_task(t);
+            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+        };
+
+        let result = move_task(
+            &mut store,
+            &storage,
+            MoveTaskParameters {
+                task_number: task.task_number,
+                notes: None,
+                when: Some(When::Someday),
+                deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
+                project: None,
+                area: None,
+                clear_project: false,
+                clear_area: false,
+                tags: vec![],
+                recurrence: None,
+                clear_recurrence: false,
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().project_id, Some(project.id));
+    }
+
+    #[test]
+    fn test_move_task_clear_project() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let project = create_test_project(&mut store, "My Project", None);
+        let task = {
+            let t = Task {
+                id: Uuid::new_v4(),
+                task_number: 0,
+                title: "Task with Project".to_string(),
+                project_id: Some(project.id),
+                created_at: jiff::Timestamp::now(),
+                ..Task::default()
+            };
+            store.add_task(t);
+            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+        };
+
+        let result = move_task(
+            &mut store,
+            &storage,
+            MoveTaskParameters {
+                task_number: task.task_number,
+                notes: None,
+                when: None,
+                deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
+                project: None,
+                area: None,
+                clear_project: true,
+                clear_area: false,
+                tags: vec![],
+                recurrence: None,
+                clear_recurrence: false,
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().project_id, None);
+    }
+
+    #[test]
+    fn test_move_task_preserves_area_when_not_specified() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let area = create_test_area(&mut store, "Work");
+        let task = {
+            let t = Task {
+                id: Uuid::new_v4(),
+                task_number: 0,
+                title: "Task with Area".to_string(),
+                area_id: Some(area.id),
+                created_at: jiff::Timestamp::now(),
+                ..Task::default()
+            };
+            store.add_task(t);
+            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+        };
+
+        let result = move_task(
+            &mut store,
+            &storage,
+            MoveTaskParameters {
+                task_number: task.task_number,
+                notes: None,
+                when: Some(When::Someday),
+                deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
+                project: None,
+                area: None,
+                clear_project: false,
+                clear_area: false,
+                tags: vec![],
+                recurrence: None,
+                clear_recurrence: false,
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().area_id, Some(area.id));
+    }
+
+    #[test]
+    fn test_move_task_clear_area() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let area = create_test_area(&mut store, "Work");
+        let task = {
+            let t = Task {
+                id: Uuid::new_v4(),
+                task_number: 0,
+                title: "Task with Area".to_string(),
+                area_id: Some(area.id),
+                created_at: jiff::Timestamp::now(),
+                ..Task::default()
+            };
+            store.add_task(t);
+            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+        };
+
+        let result = move_task(
+            &mut store,
+            &storage,
+            MoveTaskParameters {
+                task_number: task.task_number,
+                notes: None,
+                when: None,
+                deadline: None,
+                clear_schedule: false,
+                clear_deadline: false,
+                project: None,
+                area: None,
+                clear_project: false,
+                clear_area: true,
+                tags: vec![],
+                recurrence: None,
+                clear_recurrence: false,
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().area_id, None);
     }
 
     // ============================================================================
