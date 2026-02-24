@@ -109,14 +109,14 @@ fn fix_duplicate_task_numbers(tasks: &mut [Value]) -> u64 {
 /// Entities are grouped by case-insensitive name; already-deleted entities are excluded.
 /// The oldest entity (by `created_at` string if present, else `modified_at.wall_ms`, then `id`)
 /// keeps its entry; duplicates are soft-deleted with `deleted_at` set to the current timestamp.
-fn fix_duplicate_names(entities: &mut Vec<Value>) {
+fn fix_duplicate_names(entities: &mut [Value]) {
     use std::collections::HashMap;
 
     let now = jiff::Timestamp::now().to_string();
 
     let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, entity) in entities.iter().enumerate() {
-        if entity.get("deleted_at").map_or(false, |v| !v.is_null()) {
+        if entity.get("deleted_at").is_some_and(|v| !v.is_null()) {
             continue;
         }
         if let Some(name) = entity.get("name").and_then(|v| v.as_str()) {
