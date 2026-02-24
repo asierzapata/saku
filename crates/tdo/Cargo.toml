@@ -1,6 +1,6 @@
 [package]
 name = "saku-tdo"
-version = "0.7.0"
+version = "0.7.1"
 description = "A minimal and clean task manager for your terminal"
 repository = "https://github.com/asierzapata/saku"
 homepage = "https://asierzapata.github.io/saku/"

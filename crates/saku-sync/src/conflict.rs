@@ -105,6 +105,53 @@ fn fix_duplicate_task_numbers(tasks: &mut [Value]) -> u64 {
     next
 }
 
+/// Detect duplicate entity names after UUID-based merge and soft-delete the newer duplicates.
+/// Entities are grouped by case-insensitive name; already-deleted entities are excluded.
+/// The oldest entity (by `created_at` string if present, else `modified_at.wall_ms`, then `id`)
+/// keeps its entry; duplicates are soft-deleted with `deleted_at` set to the current timestamp.
+fn fix_duplicate_names(entities: &mut Vec<Value>) {
+    use std::collections::HashMap;
+
+    let now = jiff::Timestamp::now().to_string();
+
+    let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, entity) in entities.iter().enumerate() {
+        if entity.get("deleted_at").map_or(false, |v| !v.is_null()) {
+            continue;
+        }
+        if let Some(name) = entity.get("name").and_then(|v| v.as_str()) {
+            by_name.entry(name.to_lowercase()).or_default().push(i);
+        }
+    }
+
+    for indices in by_name.values().filter(|v| v.len() > 1) {
+        let mut sorted = indices.clone();
+        sorted.sort_by(|&a, &b| {
+            let ca = entities[a].get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let cb = entities[b].get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let ma = entities[a]
+                .get("modified_at")
+                .and_then(|v| v.get("wall_ms"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let mb = entities[b]
+                .get("modified_at")
+                .and_then(|v| v.get("wall_ms"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let ia = entities[a].get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let ib = entities[b].get("id").and_then(|v| v.as_str()).unwrap_or("");
+            ca.cmp(cb).then(ma.cmp(&mb)).then(ia.cmp(ib))
+        });
+        // First (oldest) keeps its entry; soft-delete the rest
+        for &idx in &sorted[1..] {
+            if let Some(obj) = entities[idx].as_object_mut() {
+                obj.insert("deleted_at".to_string(), Value::String(now.clone()));
+            }
+        }
+    }
+}
+
 /// Merge two complete store JSON values using LWW for tasks, projects, areas.
 /// Takes the maximum of `next_task_number` and deduplicates any task numbers
 /// introduced by parallel offline creation on multiple devices.
@@ -132,6 +179,13 @@ pub fn lww_merge_store_json(local: &Value, remote: &Value) -> Value {
     let mut tasks_arr = result["tasks"].as_array().cloned().unwrap_or_default();
     let dedupe_next = fix_duplicate_task_numbers(&mut tasks_arr);
     result["tasks"] = Value::Array(tasks_arr);
+
+    // Fix duplicate names for projects and areas introduced by parallel offline creation
+    for key in &["projects", "areas"] {
+        let mut arr = result[key].as_array().cloned().unwrap_or_default();
+        fix_duplicate_names(&mut arr);
+        result[*key] = Value::Array(arr);
+    }
 
     // next_task_number = max of both sides AND any new numbers allocated during dedup
     let local_ntn = local
@@ -312,6 +366,160 @@ mod tests {
         assert_eq!(local_task["task_number"], 1, "Older task keeps number 1");
 
         assert!(merged["next_task_number"].as_u64().unwrap() >= 3);
+    }
+
+    #[test]
+    fn merge_deduplicates_project_names() {
+        let local = json!({
+            "version": 7,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [{
+                "id": "proj-aaa",
+                "name": "Website",
+                "area_id": null,
+                "notes": null,
+                "deadline": null,
+                "completed_at": null,
+                "deleted_at": null,
+                "created_at": "2026-01-01T00:00:00Z",
+                "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
+            }],
+            "areas": []
+        });
+
+        let remote = json!({
+            "version": 7,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [{
+                "id": "proj-bbb",
+                "name": "Website",
+                "area_id": null,
+                "notes": null,
+                "deadline": null,
+                "completed_at": null,
+                "deleted_at": null,
+                "created_at": "2026-01-02T00:00:00Z",
+                "modified_at": {"wall_ms": 2000, "lamport": 1, "device_id": "dev-b"}
+            }],
+            "areas": []
+        });
+
+        let merged = lww_merge_store_json(&local, &remote);
+        let projects = merged["projects"].as_array().unwrap();
+
+        assert_eq!(projects.len(), 2, "Both UUID entries must be present");
+
+        let active: Vec<&Value> = projects
+            .iter()
+            .filter(|p| p["deleted_at"].is_null())
+            .collect();
+        assert_eq!(active.len(), 1, "Only one project should be active after dedup");
+        assert_eq!(active[0]["id"], "proj-aaa", "Oldest project (by created_at) wins");
+    }
+
+    #[test]
+    fn merge_deduplicates_area_names() {
+        let local = json!({
+            "version": 7,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [],
+            "areas": [{
+                "id": "area-aaa",
+                "name": "Work",
+                "deleted_at": null,
+                "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
+            }]
+        });
+
+        let remote = json!({
+            "version": 7,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [],
+            "areas": [{
+                "id": "area-bbb",
+                "name": "Work",
+                "deleted_at": null,
+                "modified_at": {"wall_ms": 2000, "lamport": 1, "device_id": "dev-b"}
+            }]
+        });
+
+        let merged = lww_merge_store_json(&local, &remote);
+        let areas = merged["areas"].as_array().unwrap();
+
+        assert_eq!(areas.len(), 2, "Both UUID entries must be present");
+
+        let active: Vec<&Value> = areas
+            .iter()
+            .filter(|a| a["deleted_at"].is_null())
+            .collect();
+        assert_eq!(active.len(), 1, "Only one area should be active after dedup");
+        assert_eq!(
+            active[0]["id"], "area-aaa",
+            "Area with earlier modified_at.wall_ms wins"
+        );
+    }
+
+    #[test]
+    fn merge_deduplicates_project_names_case_insensitive() {
+        // "website" and "Website" are the same name; "Blog" is distinct and must survive
+        let local = json!({
+            "version": 7,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [
+                {
+                    "id": "proj-aaa",
+                    "name": "Website",
+                    "deleted_at": null,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
+                },
+                {
+                    "id": "proj-ccc",
+                    "name": "Blog",
+                    "deleted_at": null,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
+                }
+            ],
+            "areas": []
+        });
+
+        let remote = json!({
+            "version": 7,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [{
+                "id": "proj-bbb",
+                "name": "website",
+                "deleted_at": null,
+                "created_at": "2026-01-02T00:00:00Z",
+                "modified_at": {"wall_ms": 2000, "lamport": 1, "device_id": "dev-b"}
+            }],
+            "areas": []
+        });
+
+        let merged = lww_merge_store_json(&local, &remote);
+        let projects = merged["projects"].as_array().unwrap();
+
+        assert_eq!(projects.len(), 3, "All three UUID entries must be present");
+
+        let active: Vec<&Value> = projects
+            .iter()
+            .filter(|p| p["deleted_at"].is_null())
+            .collect();
+        assert_eq!(active.len(), 2, "Blog + one website variant should be active");
+
+        let active_ids: Vec<&str> = active
+            .iter()
+            .filter_map(|p| p["id"].as_str())
+            .collect();
+        assert!(active_ids.contains(&"proj-aaa"), "Oldest website wins");
+        assert!(active_ids.contains(&"proj-ccc"), "Blog is unaffected");
     }
 
     #[test]
