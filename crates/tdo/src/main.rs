@@ -188,6 +188,14 @@ enum Commands {
         #[arg(short, long)]
         area: Option<String>,
 
+        /// Remove project assignment
+        #[arg(long)]
+        clear_project: bool,
+
+        /// Remove area assignment
+        #[arg(long)]
+        clear_area: bool,
+
         /// Add tags (can be used multiple times)
         #[arg(short, long, action = clap::ArgAction::Append)]
         tag: Vec<String>,
@@ -2779,6 +2787,8 @@ fn main() {
             clear_deadline,
             project,
             area,
+            clear_project,
+            clear_area,
             tag,
             notes,
             every,
@@ -2856,6 +2866,8 @@ fn main() {
                     clear_deadline,
                     project: project.clone(),
                     area: area.clone(),
+                    clear_project,
+                    clear_area,
                     tags: tag.clone(),
                     recurrence: recurrence.clone(),
                     clear_recurrence,
