@@ -157,11 +157,7 @@ fn deduplicate_by_name(entities: Vec<Value>) -> Vec<Value> {
     }
 
     // Combine deduplicated named entities with unnamed entities
-    by_name
-        .into_values()
-        .chain(no_name.into_iter())
-        .cloned()
-        .collect()
+    by_name.into_values().chain(no_name).cloned().collect()
 }
 
 /// Build a mapping of old IDs to new IDs when entities are about to be deduplicated by name.
@@ -225,34 +221,30 @@ fn reassign_entity_references(
     if let Some(tasks) = store.get_mut("tasks").and_then(|v| v.as_array_mut()) {
         for task in tasks.iter_mut() {
             // Reassign project_id if it points to a merged project
-            if let Some(project_id) = task.get("project_id").and_then(|v| v.as_str()) {
-                if let Some(new_id) = project_mapping.get(project_id) {
+            if let Some(project_id) = task.get("project_id").and_then(|v| v.as_str())
+                && let Some(new_id) = project_mapping.get(project_id) {
                     task["project_id"] = Value::String(new_id.clone());
                 }
-            }
 
             // Reassign area_id if it points to a merged area
-            if let Some(area_id) = task.get("area_id").and_then(|v| v.as_str()) {
-                if let Some(new_id) = area_mapping.get(area_id) {
+            if let Some(area_id) = task.get("area_id").and_then(|v| v.as_str())
+                && let Some(new_id) = area_mapping.get(area_id) {
                     task["area_id"] = Value::String(new_id.clone());
                 }
-            }
         }
     }
 
     // Reassign projects that point to merged areas
-    if !area_mapping.is_empty() {
-        if let Some(projects) = store.get_mut("projects").and_then(|v| v.as_array_mut()) {
+    if !area_mapping.is_empty()
+        && let Some(projects) = store.get_mut("projects").and_then(|v| v.as_array_mut()) {
             for project in projects.iter_mut() {
                 // Reassign area_id if it points to a merged area
-                if let Some(area_id) = project.get("area_id").and_then(|v| v.as_str()) {
-                    if let Some(new_id) = area_mapping.get(area_id) {
+                if let Some(area_id) = project.get("area_id").and_then(|v| v.as_str())
+                    && let Some(new_id) = area_mapping.get(area_id) {
                         project["area_id"] = Value::String(new_id.clone());
                     }
-                }
             }
         }
-    }
 
     store
 }
