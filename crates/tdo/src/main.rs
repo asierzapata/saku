@@ -80,6 +80,10 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["json", "csv"])]
         watch: bool,
 
+        /// Include completed tasks (not applicable to Logbook or Trash views)
+        #[arg(long)]
+        all: bool,
+
         #[command(subcommand)]
         entity: ViewEntity,
     },
@@ -477,15 +481,15 @@ fn hostname() -> String {
 }
 
 /// Render any ViewEntity in pretty (terminal) format.
-/// Extracted so the watch loop can call it without duplicating rendering logic.
-fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Store) {
+/// New ViewEntity arms get watch support for free.
+fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Store, include_completed: bool) {
     match entity {
-        ViewEntity::Today => render_today_view(store),
+        ViewEntity::Today => render_today_view(store, include_completed),
         ViewEntity::Inbox => {
             let inbox_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Inbox))
-                .filter(|t| t.completed_at.is_none())
+                .filter(|t| include_completed || t.completed_at.is_none())
                 .collect();
             let inbox_tasks =
                 saku_tdo::models::task::order_tasks_with_store(inbox_tasks, store);
@@ -502,7 +506,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             let someday_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Someday))
-                .filter(|t| t.completed_at.is_none())
+                .filter(|t| include_completed || t.completed_at.is_none())
                 .collect();
             let someday_tasks =
                 saku_tdo::models::task::order_tasks_with_store(someday_tasks, store);
@@ -551,7 +555,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             let upcoming_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
-                    t.completed_at.is_none() && {
+                    (include_completed || t.completed_at.is_none()) && {
                         let scheduled_future = match t.when {
                             When::Scheduled { date, .. } => date > today,
                             _ => false,
@@ -595,7 +599,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             let today = jiff::Zoned::now().date();
             let mut deadline_tasks: Vec<_> = store
                 .get_active_tasks()
-                .filter(|t| t.completed_at.is_none() && t.deadline.is_some())
+                .filter(|t| (include_completed || t.completed_at.is_none()) && t.deadline.is_some())
                 .collect();
             if deadline_tasks.is_empty() {
                 println!("No tasks with deadlines");
@@ -770,7 +774,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             };
             let mut tasks: Vec<_> = store
                 .get_tasks_for_project(project.id)
-                .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                 .collect();
             tasks.sort_by_key(|t| t.task_number);
             let header = if let Some(area_id) = project.area_id {
@@ -820,7 +824,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             };
             let mut direct_tasks: Vec<_> = store
                 .get_tasks_for_area(area.id)
-                .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                 .collect();
             direct_tasks.sort_by_key(|t| t.task_number);
             let mut projects: Vec<_> = store
@@ -833,7 +837,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .map(|p| {
                     let mut tasks: Vec<_> = store
                         .get_tasks_for_project(p.id)
-                        .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                        .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     tasks.sort_by_key(|t| t.task_number);
                     (*p, tasks)
@@ -864,7 +868,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             let mut tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
-                    t.completed_at.is_none()
+                    (include_completed || t.completed_at.is_none())
                         && t.tags
                             .iter()
                             .any(|tag| tag.to_lowercase() == name.to_lowercase())
@@ -876,7 +880,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 use std::collections::HashSet;
                 let available_tags: HashSet<_> = store
                     .get_active_tasks()
-                    .filter(|t| t.completed_at.is_none())
+                    .filter(|t| include_completed || t.completed_at.is_none())
                     .flat_map(|t| &t.tags)
                     .collect();
                 if !available_tags.is_empty() {
@@ -977,7 +981,7 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
 }
 
 /// Render the today view (used by both `tdo today` and `tdo` with no args).
-fn render_today_view(store: &saku_tdo::models::store::Store) {
+fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: bool) {
     let today = jiff::Zoned::now().date();
 
     // Collect overdue tasks (scheduled or deadline < today), excluding subtasks.
@@ -987,7 +991,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
         .get_active_tasks()
         .filter(|t| t.parent_task_id.is_none())
         .filter(|t| {
-            t.completed_at.is_none() && t.recurrence.is_none() && {
+            (include_completed || t.completed_at.is_none()) && t.recurrence.is_none() && {
                 let scheduled_overdue = match t.when {
                     When::Scheduled { date, .. } => date < today,
                     _ => false,
@@ -1004,7 +1008,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store) {
         .get_active_tasks()
         .filter(|t| t.parent_task_id.is_none())
         .filter(|t| {
-            t.completed_at.is_none() && {
+            (include_completed || t.completed_at.is_none()) && {
                 let scheduled_today = match t.when {
                     When::Scheduled { date, .. } => date == today,
                     _ => false,
@@ -1173,7 +1177,7 @@ fn main() {
             );
             eprintln!("{}", "This command will be removed in v1.0.0.".yellow());
             eprintln!();
-            render_today_view(&store);
+            render_today_view(&store, false);
         }
         Some(Commands::Inbox) => {
             eprintln!(
@@ -1468,6 +1472,7 @@ fn main() {
             json,
             csv,
             watch,
+            all,
         }) => {
             if watch {
                 loop {
@@ -1485,7 +1490,7 @@ fn main() {
                             continue;
                         }
                     };
-                    render_view_pretty(&entity, &store);
+                    render_view_pretty(&entity, &store, all);
                     let now = jiff::Zoned::now();
                     let width = term_size::dimensions().map(|(w, _)| w).unwrap_or(40);
                     println!();
@@ -1503,18 +1508,18 @@ fn main() {
             }
             let fmt = output::OutputFormat::from_flags(json, csv);
             if matches!(fmt, output::OutputFormat::Pretty) {
-                render_view_pretty(&entity, &store);
+                render_view_pretty(&entity, &store, all);
             } else {
             match entity {
                 ViewEntity::Today => {
                     if matches!(fmt, output::OutputFormat::Pretty) {
-                        render_today_view(&store);
+                        render_today_view(&store, all);
                     } else {
                         let today = jiff::Zoned::now().date();
                         let tasks: Vec<_> = store
                             .get_active_tasks()
                             .filter(|t| {
-                                t.completed_at.is_none() && {
+                                (all || t.completed_at.is_none()) && {
                                     let scheduled_today_or_overdue = match t.when {
                                         When::Scheduled { date, .. } => date <= today,
                                         _ => false,
@@ -1541,7 +1546,7 @@ fn main() {
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| matches!(t.when, When::Inbox))
-                        .filter(|t| t.completed_at.is_none())
+                        .filter(|t| all || t.completed_at.is_none())
                         .collect();
                     if matches!(fmt, output::OutputFormat::Pretty) {
                         let inbox_tasks =
@@ -1572,7 +1577,7 @@ fn main() {
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| matches!(t.when, When::Someday))
-                        .filter(|t| t.completed_at.is_none())
+                        .filter(|t| all || t.completed_at.is_none())
                         .collect();
                     if matches!(fmt, output::OutputFormat::Pretty) {
                         let someday_tasks =
@@ -1657,7 +1662,7 @@ fn main() {
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| {
-                            t.completed_at.is_none() && {
+                            (all || t.completed_at.is_none()) && {
                                 let scheduled_future = match t.when {
                                     When::Scheduled { date, .. } => date > today,
                                     _ => false,
@@ -1719,7 +1724,7 @@ fn main() {
                     let mut deadline_tasks: Vec<_> = store
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
-                        .filter(|t| t.completed_at.is_none() && t.deadline.is_some())
+                        .filter(|t| (all || t.completed_at.is_none()) && t.deadline.is_some())
                         .collect();
 
                     if matches!(fmt, output::OutputFormat::Pretty) {
@@ -2005,7 +2010,7 @@ fn main() {
                     let mut tasks: Vec<_> = store
                         .get_tasks_for_project(project.id)
                         .filter(|t| t.parent_task_id.is_none())
-                        .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                        .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     tasks.sort_by_key(|t| t.task_number);
 
@@ -2078,7 +2083,7 @@ fn main() {
                     let mut direct_tasks: Vec<_> = store
                         .get_tasks_for_area(area.id)
                         .filter(|t| t.parent_task_id.is_none())
-                        .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                        .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     direct_tasks.sort_by_key(|t| t.task_number);
 
@@ -2094,7 +2099,7 @@ fn main() {
                             let mut tasks: Vec<_> = store
                                 .get_tasks_for_project(p.id)
                                 .filter(|t| t.parent_task_id.is_none())
-                                .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
+                                .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                                 .collect();
                             tasks.sort_by_key(|t| t.task_number);
                             (*p, tasks)
@@ -2154,7 +2159,7 @@ fn main() {
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| {
-                            t.completed_at.is_none()
+                            (all || t.completed_at.is_none())
                                 && t.tags
                                     .iter()
                                     .any(|tag| tag.to_lowercase() == name.to_lowercase())
@@ -2168,7 +2173,7 @@ fn main() {
                             use std::collections::HashSet;
                             let available_tags: HashSet<_> = store
                                 .get_active_tasks()
-                                .filter(|t| t.completed_at.is_none())
+                                .filter(|t| all || t.completed_at.is_none())
                                 .flat_map(|t| &t.tags)
                                 .collect();
                             if !available_tags.is_empty() {
@@ -3675,7 +3680,7 @@ fn main() {
         }
         None => {
             // Default: show today view (same as `tdo today`)
-            render_today_view(&store);
+            render_today_view(&store, false);
         }
     }
 
