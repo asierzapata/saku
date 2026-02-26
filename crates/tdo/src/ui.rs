@@ -4,8 +4,6 @@ use uuid::Uuid;
 
 use crate::models::{store::Store, task::Task};
 
-const MAX_CONTENT_WIDTH: usize = 100;
-
 /// Represents the urgency level of a task based on its deadline or scheduled date
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TaskUrgency {
@@ -252,18 +250,17 @@ fn render_task_line_with_options(
     _show_completion_date: bool,
     next_occurrence: Option<jiff::civil::Date>,
 ) {
-    let terminal_width = get_terminal_width();
-    let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
+    let effective_width = get_terminal_width();
 
     let id_str = format!("{:>3}", task.task_number);
     let urgency = calculate_task_urgency(task);
     let glyph = get_status_glyph(urgency);
     let (date_str, badge_urgency) = get_task_date_badge(task);
 
-    // Fixed overhead: " {id}  {glyph}  {badge}  " visible chars
-    // 1 (leading space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces)
+    // Fixed overhead: " {id}  {glyph}  {badge}  " visible chars + trailing space
+    // 1 (leading space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces) + 1 (trailing space)
     let badge_visible_len = date_str.chars().count();
-    let fixed_overhead = 11 + badge_visible_len;
+    let fixed_overhead = 12 + badge_visible_len;
     let available = effective_width.saturating_sub(fixed_overhead);
 
     let title_chars: Vec<char> = task.title.chars().collect();
@@ -388,7 +385,7 @@ fn render_task_line_with_options(
         let separator = format!(" {}{}", "·".repeat(dots_count), " ");
         if badge_str_len > 0 {
             println!(
-                "{}{}{} {}",
+                "{}{}{} {} ",
                 left_section,
                 separator.dimmed(),
                 ctx.as_str().dimmed(),
@@ -396,7 +393,7 @@ fn render_task_line_with_options(
             );
         } else {
             println!(
-                "{}{}{}",
+                "{}{}{} ",
                 left_section,
                 separator.dimmed(),
                 ctx.as_str().dimmed()
@@ -415,17 +412,16 @@ fn render_task_line_with_options(
             String::new()
         };
         if badge_str_len > 0 {
-            println!("{}{}{}", left_section, fill.dimmed(), badge_str.dimmed());
+            println!("{}{}{} ", left_section, fill.dimmed(), badge_str.dimmed());
         } else {
-            println!("{}{}", left_section, fill.dimmed());
+            println!("{}{} ", left_section, fill.dimmed());
         }
     }
 }
 
 /// Render a single subtask line, indented under its parent
 pub fn render_subtask_line(task: &Task, store: &Store) {
-    let terminal_width = get_terminal_width();
-    let effective_width = terminal_width.min(MAX_CONTENT_WIDTH);
+    let effective_width = get_terminal_width();
 
     // Indent prefix: 6 chars visible ("    └─"), shown dimmed
     let prefix = "    └─";
@@ -436,10 +432,10 @@ pub fn render_subtask_line(task: &Task, store: &Store) {
     let glyph = get_status_glyph(urgency);
     let (date_str, badge_urgency) = get_task_date_badge(task);
 
-    // Fixed overhead: prefix + " {id}  {glyph}  {badge}  "
-    // prefix_len + 1 (space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces)
+    // Fixed overhead: prefix + " {id}  {glyph}  {badge}  " + trailing space
+    // prefix_len + 1 (space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces) + 1 (trailing space)
     let badge_visible_len = date_str.chars().count();
-    let fixed_overhead = prefix_len + 11 + badge_visible_len;
+    let fixed_overhead = prefix_len + 12 + badge_visible_len;
     let available = effective_width.saturating_sub(fixed_overhead);
 
     let title_chars: Vec<char> = task.title.chars().collect();
@@ -496,14 +492,14 @@ pub fn render_subtask_line(task: &Task, store: &Store) {
 
     if badge_str_len > 0 {
         println!(
-            "{} {}{}{}",
+            "{} {}{}{} ",
             prefix.dimmed(),
             left_section,
             fill.dimmed(),
             badge_str.dimmed()
         );
     } else {
-        println!("{} {}{}", prefix.dimmed(), left_section, fill.dimmed());
+        println!("{} {}{} ", prefix.dimmed(), left_section, fill.dimmed());
     }
 }
 
@@ -639,7 +635,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 
 /// Render a section header with a dashed fill for the detail view.
 fn render_detail_section_header(label: &str) {
-    let width = get_terminal_width().min(MAX_CONTENT_WIDTH);
+    let width = get_terminal_width();
     let label_len = label.chars().count();
     // "  ▌ " (4) + label + " " (1) + dashes
     let dashes = width.saturating_sub(4 + 1 + label_len + 1);
@@ -765,7 +761,7 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
     // Notes section (only if present)
     if let Some(ref notes) = task.notes {
         render_detail_section_header("Notes");
-        let width = get_terminal_width().min(MAX_CONTENT_WIDTH);
+        let width = get_terminal_width();
         let wrap_width = width.saturating_sub(4);
         for wrapped_line in wrap_text(notes, wrap_width) {
             println!("    {}", wrapped_line);
