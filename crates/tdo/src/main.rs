@@ -856,7 +856,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                     if !direct_tasks.is_empty() || i > 0 {
                         saku_tdo::ui::render_section_header(&project.name);
                     } else {
-                        println!("  ─── {} ───\n", project.name.bold());
+                        saku_tdo::ui::render_section_header(&project.name);
                     }
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, store);
@@ -2146,7 +2146,7 @@ fn main() {
                                     if !direct_tasks.is_empty() || i > 0 {
                                         saku_tdo::ui::render_section_header(&project.name);
                                     } else {
-                                        println!("  ─── {} ───\n", project.name.bold());
+                                        saku_tdo::ui::render_section_header(&project.name);
                                     }
                                     for task in tasks {
                                         saku_tdo::ui::render_task_line(task, &store);
@@ -3426,7 +3426,7 @@ fn main() {
                             if !direct_tasks.is_empty() || i > 0 {
                                 saku_tdo::ui::render_section_header(&project.name);
                             } else {
-                                println!("  ─── {} ───\n", project.name.bold());
+                                saku_tdo::ui::render_section_header(&project.name);
                             }
                             for task in tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
