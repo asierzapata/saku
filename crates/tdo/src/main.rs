@@ -852,12 +852,8 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 for task in &direct_tasks {
                     saku_tdo::ui::render_task_line(task, store);
                 }
-                for (i, (project, tasks)) in project_tasks.iter().enumerate() {
-                    if !direct_tasks.is_empty() || i > 0 {
-                        saku_tdo::ui::render_section_header(&project.name);
-                    } else {
-                        saku_tdo::ui::render_section_header(&project.name);
-                    }
+                for (project, tasks) in project_tasks.iter() {
+                    saku_tdo::ui::render_section_header(&project.name);
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, store);
                     }
@@ -2142,12 +2138,8 @@ fn main() {
                                     saku_tdo::ui::render_task_line(task, &store);
                                     saku_tdo::ui::render_subtask_children(task.id, &store);
                                 }
-                                for (i, (project, tasks)) in project_tasks.iter().enumerate() {
-                                    if !direct_tasks.is_empty() || i > 0 {
-                                        saku_tdo::ui::render_section_header(&project.name);
-                                    } else {
-                                        saku_tdo::ui::render_section_header(&project.name);
-                                    }
+                                for (project, tasks) in project_tasks.iter() {
+                                    saku_tdo::ui::render_section_header(&project.name);
                                     for task in tasks {
                                         saku_tdo::ui::render_task_line(task, &store);
                                         saku_tdo::ui::render_subtask_children(task.id, &store);
@@ -3422,12 +3414,8 @@ fn main() {
                             saku_tdo::ui::render_task_line(task, &store);
                             saku_tdo::ui::render_subtask_children(task.id, &store);
                         }
-                        for (i, (project, tasks)) in project_tasks.iter().enumerate() {
-                            if !direct_tasks.is_empty() || i > 0 {
-                                saku_tdo::ui::render_section_header(&project.name);
-                            } else {
-                                saku_tdo::ui::render_section_header(&project.name);
-                            }
+                        for (project, tasks) in project_tasks.iter() {
+                            saku_tdo::ui::render_section_header(&project.name);
                             for task in tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
                                 saku_tdo::ui::render_subtask_children(task.id, &store);
