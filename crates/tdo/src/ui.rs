@@ -1,5 +1,6 @@
 use colored::*;
 use jiff::civil::Date;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 
 use crate::models::{store::Store, task::Task};
@@ -17,6 +18,47 @@ pub enum TaskUrgency {
 /// Get the terminal width, defaulting to 80 if unavailable
 fn get_terminal_width() -> usize {
     term_size::dimensions().map(|(w, _)| w).unwrap_or(80)
+}
+
+/// Truncate a string to fit within a maximum display width, adding ellipsis if needed
+fn truncate_to_width(s: &str, max_width: usize, ellipsis: &str) -> String {
+    use unicode_width::UnicodeWidthChar;
+    
+    let current_width = s.width();
+    if current_width <= max_width {
+        return s.to_string();
+    }
+
+    let ellipsis_width = ellipsis.width();
+    if max_width < ellipsis_width {
+        // Not enough space even for ellipsis, just truncate
+        let mut result = String::new();
+        let mut current = 0;
+        for ch in s.chars() {
+            let ch_width = ch.width().unwrap_or(0);
+            if current + ch_width > max_width {
+                break;
+            }
+            result.push(ch);
+            current += ch_width;
+        }
+        return result;
+    }
+
+    // Truncate to fit ellipsis
+    let target_width = max_width - ellipsis_width;
+    let mut result = String::new();
+    let mut current = 0;
+    for ch in s.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if current + ch_width > target_width {
+            break;
+        }
+        result.push(ch);
+        current += ch_width;
+    }
+    result.push_str(ellipsis);
+    result
 }
 
 /// Calculate urgency based on a date relative to today
@@ -259,12 +301,11 @@ fn render_task_line_with_options(
 
     // Fixed overhead: " {id}  {glyph}  {badge}  " visible chars + trailing space
     // 1 (leading space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces) + 1 (trailing space)
-    let badge_visible_len = date_str.chars().count();
+    let badge_visible_len = date_str.width();
     let fixed_overhead = 12 + badge_visible_len;
     let available = effective_width.saturating_sub(fixed_overhead);
 
-    let title_chars: Vec<char> = task.title.chars().collect();
-    let title_len = title_chars.len();
+    let title_len = task.title.width();
 
     // Recurrence badge suffix (e.g. "↻ Mon, Wed, Fri")
     let recurrence_badge: Option<String> = task.recurrence.as_ref().map(|r| {
@@ -299,7 +340,6 @@ fn render_task_line_with_options(
         });
 
     const ELLIPSIS: &str = "[…]";
-    const ELLIPSIS_LEN: usize = 3;
     const MIN_SEP: usize = 3; // minimum " · " separator
 
     // Decide what to display, in priority order:
@@ -308,9 +348,9 @@ fn render_task_line_with_options(
     //   3. Truncated title[…] + abbreviated context
     let (display_title, display_context): (String, Option<String>) =
         if let Some(ref ctx_full) = context_full {
-            let ctx_full_len = ctx_full.chars().count();
+            let ctx_full_len = ctx_full.width();
             let ctx_abbrev = context_abbrev.as_deref().unwrap_or("");
-            let ctx_abbrev_len = ctx_abbrev.chars().count();
+            let ctx_abbrev_len = ctx_abbrev.width();
 
             if title_len + MIN_SEP + ctx_full_len <= available {
                 // Full title + full context fits
@@ -321,26 +361,16 @@ fn render_task_line_with_options(
             } else {
                 // Truncate title to fit alongside abbreviated context
                 let title_space = available.saturating_sub(MIN_SEP + ctx_abbrev_len);
-                let truncated = if title_space >= ELLIPSIS_LEN {
-                    title_chars[..title_space - ELLIPSIS_LEN]
-                        .iter()
-                        .collect::<String>()
-                        + ELLIPSIS
-                } else {
-                    title_chars[..title_space.min(title_len)].iter().collect()
-                };
+                let truncated = truncate_to_width(&task.title, title_space, ELLIPSIS);
                 (truncated, Some(ctx_abbrev.to_string()))
             }
         } else {
             // No context: show full title or truncate if needed
             if title_len <= available {
                 (task.title.clone(), None)
-            } else if available >= ELLIPSIS_LEN {
-                let truncated =
-                    title_chars[..available - ELLIPSIS_LEN].iter().collect::<String>() + ELLIPSIS;
-                (truncated, None)
             } else {
-                (title_chars[..available.min(title_len)].iter().collect(), None)
+                let truncated = truncate_to_width(&task.title, available, ELLIPSIS);
+                (truncated, None)
             }
         };
 
@@ -363,10 +393,10 @@ fn render_task_line_with_options(
         styled_title
     );
 
-    let display_title_len = display_title.chars().count();
+    let display_title_len = display_title.width();
     let display_ctx_len = display_context
         .as_ref()
-        .map(|c| c.chars().count())
+        .map(|c| c.width())
         .unwrap_or(0);
 
     let badge_str = if is_blocked {
@@ -374,7 +404,7 @@ fn render_task_line_with_options(
     } else {
         String::new()
     };
-    let badge_str_len = badge_str.chars().count();
+    let badge_str_len = badge_str.width();
 
     if let Some(ref ctx) = display_context {
         // Fill remaining space with dots between title and context (+ blocker badge after context)
@@ -434,22 +464,18 @@ pub fn render_subtask_line(task: &Task, store: &Store) {
 
     // Fixed overhead: prefix + " {id}  {glyph}  {badge}  " + trailing space
     // prefix_len + 1 (space) + 3 (id) + 2 (spaces) + 1 (glyph) + 2 (spaces) + badge_len + 2 (spaces) + 1 (trailing space)
-    let badge_visible_len = date_str.chars().count();
+    let badge_visible_len = date_str.width();
     let fixed_overhead = prefix_len + 12 + badge_visible_len;
     let available = effective_width.saturating_sub(fixed_overhead);
 
-    let title_chars: Vec<char> = task.title.chars().collect();
-    let title_len = title_chars.len();
+    let title_len = task.title.width();
 
     const ELLIPSIS: &str = "[…]";
-    const ELLIPSIS_LEN: usize = 3;
 
     let display_title = if title_len <= available {
         task.title.clone()
-    } else if available >= ELLIPSIS_LEN {
-        title_chars[..available - ELLIPSIS_LEN].iter().collect::<String>() + ELLIPSIS
     } else {
-        title_chars[..available.min(title_len)].iter().collect()
+        truncate_to_width(&task.title, available, ELLIPSIS)
     };
 
     // Determine blocked state
@@ -463,13 +489,13 @@ pub fn render_subtask_line(task: &Task, store: &Store) {
     };
     let styled_badge = style_date_badge(&date_str, badge_urgency);
 
-    let display_title_len = display_title.chars().count();
+    let display_title_len = display_title.width();
     let badge_str = if is_blocked {
         blocker_badge(&blockers)
     } else {
         String::new()
     };
-    let badge_str_len = badge_str.chars().count();
+    let badge_str_len = badge_str.width();
 
     // Fill remaining space with dots
     let right_len = badge_str_len;
@@ -602,7 +628,7 @@ fn format_timestamp_short(ts: jiff::Timestamp) -> String {
     zoned.strftime("%b %-d, %Y").to_string()
 }
 
-/// Simple word-wrap: splits `text` into lines of at most `max_width` chars.
+/// Simple word-wrap: splits `text` into lines of at most `max_width` display width.
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {
         return vec![text.to_string()];
@@ -611,14 +637,14 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     for paragraph in text.split('\n') {
         let mut current = String::new();
         for word in paragraph.split_whitespace() {
-            let word_len = word.chars().count();
+            let word_width = word.width();
             if current.is_empty() {
-                if word_len > max_width {
+                if word_width > max_width {
                     lines.push(word.to_string());
                 } else {
                     current.push_str(word);
                 }
-            } else if current.chars().count() + 1 + word_len <= max_width {
+            } else if current.width() + 1 + word_width <= max_width {
                 current.push(' ');
                 current.push_str(word);
             } else {
@@ -636,7 +662,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 /// Render a section header with a dashed fill for the detail view.
 fn render_detail_section_header(label: &str) {
     let width = get_terminal_width();
-    let label_len = label.chars().count();
+    let label_len = label.width();
     // "  ▌ " (4) + label + " " (1) + dashes
     let dashes = width.saturating_sub(4 + 1 + label_len + 1);
     println!(
