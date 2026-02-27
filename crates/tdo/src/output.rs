@@ -36,6 +36,7 @@ pub struct TaskOutput {
     pub area: Option<String>,
     pub tags: String,
     pub notes: Option<String>,
+    pub defer_until: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
     /// Parent task number if this is a subtask, otherwise None
@@ -94,6 +95,7 @@ impl TaskOutput {
             area,
             tags: task.tags.join("|"),
             notes: task.notes.clone(),
+            defer_until: task.defer_until.map(|d| d.to_string()),
             created_at: task.created_at.to_string(),
             completed_at: task.completed_at.map(|t| t.to_string()),
             parent_id,

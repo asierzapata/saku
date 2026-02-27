@@ -49,6 +49,7 @@ pub struct AddTaskParameters {
     pub notes: Option<String>,
     pub when: When,
     pub deadline: Option<String>,
+    pub defer_until: Option<String>,
     pub project: Option<String>,
     pub area: Option<String>,
     pub tags: Vec<String>,
@@ -155,6 +156,16 @@ pub fn add_task(
         None
     };
 
+    // 3b. Parse defer_until if provided
+    let defer_until = if let Some(defer_str) = parameters.defer_until {
+        use crate::date_parser::parse_natural_date;
+        Some(parse_natural_date(&defer_str).map_err(|e| {
+            AddTaskError::InvalidDeadline(defer_str.clone(), e.to_string())
+        })?)
+    } else {
+        None
+    };
+
     // 4. Create the task (task_number will be assigned by store.add_task)
     let task = Task {
         id: Uuid::new_v4(),
@@ -166,7 +177,7 @@ pub fn add_task(
         tags: parameters.tags,
         when: parameters.when,
         deadline,
-        defer_until: None,
+        defer_until,
         depends_on: vec![],
         parent_task_id,
         completed_at: None,
@@ -250,6 +261,10 @@ pub struct MoveTaskParameters {
     /// Remove the area assignment entirely.
     pub clear_area: bool,
     pub tags: Vec<String>,
+    /// Set a new defer-until date.
+    pub defer_until: Option<String>,
+    /// Remove the defer-until date entirely.
+    pub clear_defer: bool,
     /// Set a new recurrence rule.
     pub recurrence: Option<Recurrence>,
     /// Remove the recurrence rule entirely.
@@ -336,6 +351,18 @@ pub fn move_task(
         task.when.clone()
     };
 
+    let defer_until = if parameters.clear_defer {
+        None
+    } else if let Some(defer_str) = parameters.defer_until {
+        use crate::date_parser::parse_natural_date;
+        Some(
+            parse_natural_date(&defer_str)
+                .map_err(|e| MoveTaskError::InvalidDeadline(defer_str.clone(), e.to_string()))?,
+        )
+    } else {
+        task.defer_until
+    };
+
     let recurrence = if parameters.clear_recurrence {
         None
     } else if let Some(r) = parameters.recurrence {
@@ -354,7 +381,7 @@ pub fn move_task(
         project_id,
         area_id,
         tags: parameters.tags,
-        defer_until: task.defer_until,
+        defer_until,
         depends_on: task.depends_on.clone(),
         parent_task_id: task.parent_task_id,
         completed_at: task.completed_at,
@@ -1067,6 +1094,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1098,6 +1126,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1126,6 +1155,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1152,6 +1182,7 @@ mod tests {
                 tags: vec!["urgent".to_string(), "bug".to_string()],
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1179,6 +1210,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1206,6 +1238,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1233,6 +1266,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1260,6 +1294,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1285,6 +1320,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1312,6 +1348,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1337,6 +1374,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         );
 
@@ -1362,6 +1400,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         )
         .unwrap();
@@ -1380,6 +1419,7 @@ mod tests {
 
                 recurrence: None,
                 parent_task_number: None,
+                defer_until: None,
             },
         )
         .unwrap();
@@ -1417,6 +1457,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1449,6 +1491,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1481,6 +1525,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1513,6 +1559,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1545,6 +1593,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1577,6 +1627,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1608,6 +1660,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1638,6 +1692,8 @@ mod tests {
                 tags: vec!["new-tag".to_string()],
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1668,6 +1724,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1698,6 +1756,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1728,6 +1788,8 @@ mod tests {
 
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1769,6 +1831,8 @@ mod tests {
                 tags: vec![],
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1811,6 +1875,8 @@ mod tests {
                 tags: vec![],
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1853,6 +1919,8 @@ mod tests {
                 tags: vec![],
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 
@@ -1895,6 +1963,8 @@ mod tests {
                 tags: vec![],
                 recurrence: None,
                 clear_recurrence: false,
+                defer_until: None,
+                clear_defer: false,
             },
         );
 

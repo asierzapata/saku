@@ -240,4 +240,18 @@ impl Store {
         self.get_active_tasks()
             .filter(|t| t.recurrence.is_some() && t.completed_at.is_none())
     }
+
+    /// Search active tasks by case-insensitive substring match on title (and optionally notes).
+    pub fn search_tasks(&self, query: &str, include_notes: bool) -> Vec<&Task> {
+        let query_lower = query.to_lowercase();
+        self.get_active_tasks()
+            .filter(|t| {
+                t.title.to_lowercase().contains(&query_lower)
+                    || (include_notes
+                        && t.notes
+                            .as_ref()
+                            .is_some_and(|n| n.to_lowercase().contains(&query_lower)))
+            })
+            .collect()
+    }
 }
