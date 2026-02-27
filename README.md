@@ -70,17 +70,14 @@ See [documentation/architecture.md](documentation/architecture.md) for conventio
 
 ## AI Agent Integration
 
-Saku is designed as a shared workspace for humans and AI agents. To help agents integrate effectively, install the skill:
+Saku is designed as a shared workspace for humans and AI agents. Integration uses two parts:
 
-```bash
-# Using npx (requires Vercel AI SDK skills CLI)
-npx skills add https://github.com/asierzapata/saku.git
+1. **A CLAUDE.md snippet** — tells the AI to proactively use `tdo` as a shared task ledger (~120 tokens, always loaded).
+2. **A skill** (`saku-integration`) — the full command reference, loaded on demand when the AI needs it.
 
-# Or manually
-cp -r skills/saku-integration .claude/skills/
-```
+Both are needed. The snippet steers behavior; the skill provides the knowledge.
 
-See [skills/saku-integration/SKILL.md](skills/saku-integration/SKILL.md) for the agent protocol.
+See [skills/README.md](skills/README.md) for full setup instructions (Claude Code, Cursor, per-project).
 
 ---
 

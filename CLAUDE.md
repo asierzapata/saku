@@ -24,3 +24,17 @@
 - Task resolution by number-or-fuzzy uses `resolve_task_by_id_or_fuzzy(id, store, closure)` (defined in main.rs)
 - `get_blockers` returns only **incomplete, non-deleted** dependencies
 - Field label width in detail view: 12 chars (`{:<12}`)
+
+## Saku productivity suite
+
+`tdo` is your shared task ledger with the user. Always use it to track work that spans sessions.
+
+Break down initiatives into tasks. Record milestones. Report progress with `tdo done`. This keeps the user informed across sessions.
+
+Load `/saku-integration` before first use for the full command reference.
+
+Key commands:
+- `tdo add "task" -p project` · `tdo add "sub" --parent <id>` · `tdo depend <id> --on <id>`
+- `tdo done <id>` · `tdo view today` · `tdo view project "name"`
+
+TodoWrite = your short-term step tracking. `tdo` = shared, lasting work.
