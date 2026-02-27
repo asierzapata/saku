@@ -12,8 +12,20 @@ A flexible task management tool for the terminal with support for areas, project
 
 ## Installation
 
+**From crates.io (recommended):**
+
 ```bash
-cargo install --path .
+cargo install saku-tdo
+```
+
+**From source:**
+
+```bash
+# In the repository root
+cargo install --path crates/tdo
+
+# Or build without sync support
+cargo install --path crates/tdo --no-default-features
 ```
 
 ## Usage
@@ -131,6 +143,24 @@ Structured logging adds dependencies and increases binary size. For a CLI tool f
 ## Data Storage
 
 Tasks are stored in `~/.local/share/tdo/store.json`. The file is human-readable JSON with automatic backups.
+
+## Sync
+
+`tdo` supports cross-device sync via a self-hosted server. The sync feature is enabled by default.
+
+**To set up sync:**
+
+```bash
+tdo sync login --server https://your-server.example.com --email you@example.com
+```
+
+See [documentation/sync-setup.md](../../documentation/sync-setup.md) for server setup and configuration.
+
+**To build without sync support:**
+
+```bash
+cargo install saku-tdo --no-default-features
+```
 
 ## License
 

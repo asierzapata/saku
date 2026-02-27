@@ -14,7 +14,7 @@ Tools are organized around the loops of a developer's day, not discrete categori
 
 | Tool | Description | Status |
 |---|---|---|
-| `tdo` | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
+| `tdo` | Task queue. Work orders for human and agent. | **Shipping** v0.9.0 |
 | `jrn` | Daily journal. Chronological log of what happened. | Planned |
 
 ### Knowledge Loop — Why did we decide this?

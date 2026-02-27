@@ -1,26 +1,43 @@
-# Saku Architecture
+# tdo Architecture
 
-This document describes the architecture and design patterns used across the Saku productivity suite, with a focus on the `tdo` task manager implementation.
+> **Note:** This document describes the `tdo` crate specifically. For suite-wide architecture patterns, see [/documentation/architecture.md](../../../documentation/architecture.md) in the repository root.
+
+This document describes the architecture and design patterns used in the `tdo` task manager implementation.
 
 ## Overview
 
-Saku tools are built as a collection of focused, fast terminal applications. Each tool is designed to be:
+`tdo` is built as a fast, focused terminal application for task management. It is designed to be:
 - **Fast**: Minimal startup time and quick operations
-- **Focused**: Single responsibility per tool
+- **Focused**: Task management only - one responsibility
 - **File-based**: Local storage using JSON files
-- **Composable**: Tools can work together via CLI
+- **Composable**: Works with other Saku tools via CLI
 
-## Project Structure
+## tdo-Specific Project Structure
+
+## tdo-Specific Project Structure
 
 ```
-saku/
-├── crates/
-│   ├── tdo/          # Task manager
-│   ├── nte/          # Note taking (planned)
-│   └── ...           # Other tools
-├── documentation/
-├── README.md
-└── Cargo.toml        # Workspace configuration
+crates/tdo/
+├── src/
+│   ├── main.rs           # CLI entry point
+│   ├── ui.rs             # Terminal rendering
+│   ├── output.rs         # JSON/CSV serialization
+│   ├── models/           # Domain models
+│   │   ├── task.rs
+│   │   ├── project.rs
+│   │   ├── area.rs
+│   │   └── store.rs
+│   ├── services/         # Business logic
+│   │   ├── tasks.rs
+│   │   ├── projects.rs
+│   │   ├── areas.rs
+│   │   └── task_editor.rs
+│   └── storage/          # Persistence
+│       ├── json.rs
+│       └── migrations.rs
+├── tests/                # Integration tests
+├── documentation/        # tdo-specific docs
+└── Cargo.toml
 ```
 
 ## tdo Architecture

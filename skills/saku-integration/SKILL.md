@@ -5,7 +5,7 @@ metadata:
   internal: false
 ---
 
-# tdo Quick Reference
+# tdo Quick Reference (v0.9.0)
 
 **Model**: Area → Project → Task | **Storage**: `~/.local/share/tdo/store.json`
 
@@ -20,9 +20,11 @@ tdo view task <id>        # full detail of one task
 tdo view ... --json       # machine-readable output
 tdo view ... --csv        # CSV output
 tdo view ... --watch      # live-reload
+tdo view ... --all        # include completed tasks
 ```
 
 > Old `tdo today`, `tdo inbox` etc. still work but are deprecated — use `tdo view <sub>`.
+> `tdo show` is an alias for `tdo view` (same commands, kept for compatibility).
 
 ## Add / Move
 
@@ -40,9 +42,10 @@ tdo move <id> [SCHEDULE] [OPTIONS]   # update any field; can take multiple IDs
 ## Complete / Delete / Restore
 
 ```bash
-tdo done <id> [<id>...]      # complete; add --stop to cancel a recurring task
-tdo delete <id>              # soft-delete (move to trash)
-tdo restore <id>             # restore from trash
+tdo done <id> [<id>...]      # complete task(s)
+tdo done <id> --stop          # complete and stop recurring task from repeating
+tdo delete <id>               # soft-delete (move to trash)
+tdo restore <id>              # restore from trash
 ```
 
 ## Dependencies & Subtasks
@@ -56,11 +59,11 @@ tdo add "Sub" --parent <parent-id>            # create subtask
 ## Areas & Projects
 
 ```bash
-tdo area new "Name"                     # create area
-tdo area delete "Name"                  # delete area (and all contents)
-tdo project new "Name" [--area AREA]    # create project
-tdo project done <slug>                 # complete project
-tdo project delete <slug>              # delete project
+tdo create area "Name"                  # create area
+tdo remove area "Name"                  # delete area (and all contents)
+tdo create project "Name" [--area AREA] # create project
+tdo done <slug>                         # complete project (via move command)
+tdo remove project <slug>               # delete project
 tdo list areas|projects|tags
 tdo edit area|project <name> --new-name "New"
 ```

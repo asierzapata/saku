@@ -21,7 +21,7 @@ Orchestrator   → saku
 
 | Tool | Loop | Description | Status |
 |---|---|---|---|
-| `tdo` | Daily | Task queue. Work orders for human and agent. | **Shipping** v0.5.11 |
+| `tdo` | Daily | Task queue. Work orders for human and agent. | **Shipping** v0.9.0 |
 | `jrn` | Daily | Daily journal. Chronological log of what happened. | Planned |
 | `dcs` | Knowledge | Decision log. What was decided and why. | Planned |
 | `ctx` | Work | Session context. Save and restore where you left off. | Planned |

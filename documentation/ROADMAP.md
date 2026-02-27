@@ -6,7 +6,17 @@ This roadmap flows directly from the [philosophy](PHILOSOPHY.md). Every priority
 
 ## Where We Are
 
-**tdo v0.5.11** — The daily loop's work queue is solid. Task management, projects, areas, tags, deadlines, batch operations, task dependencies (data model), JSON/CSV output. The human-side is good. The agent-side is implicit.
+**tdo v0.9.0** — The daily loop's work queue is solid. Task management, projects, areas, tags, deadlines, batch operations, task dependencies (CLI + data model), recurring tasks, sync support. JSON/CSV output. The human-side is good. The agent-side is implicit.
+
+**Milestone 1 Progress:**
+- ✅ Priority field implemented (high/medium/low)
+- ✅ Dependency CLI flags (`tdo depend`, `--parent` for subtasks)
+- ✅ Recurring tasks (`--every`, `--until`)
+- ✅ Enhanced date parser (natural language + ISO dates)
+- ✅ JSON/CSV output modes
+- ⏳ Search (not yet implemented)
+- ⏳ Filter flags on view commands (not yet implemented)
+- ⏳ Defer until (data model exists, CLI not fully exposed)
 
 **hbt** — Designed. Design spec exists in `documentation/hbt/`. The human rhythms loop is ready to build.
 
@@ -20,7 +30,9 @@ This roadmap flows directly from the [philosophy](PHILOSOPHY.md). Every priority
 
 These changes make the human-agent handoff real without building anything new. They test whether the philosophy holds in practice before over-building.
 
-### 0.1 Execution notes on completion
+**Status: Partially complete. Items 0.2, 0.3, and 0.4 still needed.**
+
+### 0.1 Execution notes on completion ⏳
 
 ```bash
 tdo done 42 --note "Refactored token refresh logic. 3 files changed. Tests pass."
@@ -28,7 +40,9 @@ tdo done 42 --note "Refactored token refresh logic. 3 files changed. Tests pass.
 
 When a task is completed by human or agent, an optional note records what was done. The logbook displays these. This is the audit trail that makes agent work reviewable. Without it, the logbook is just a list of completions — with it, it's a record of decisions.
 
-### 0.2 `--ready` filter — dependency-free tasks
+**Current status:** Task notes exist, but `--note` flag on `done` command not yet implemented.
+
+### 0.2 `--ready` filter — dependency-free tasks ⏳
 
 ```bash
 tdo view today --ready        # tasks the agent can start right now
@@ -37,7 +51,9 @@ tdo view inbox --ready        # agent-eligible items with no blockers
 
 `depends_on` is already in the data model. This is one filter clause. But it enables parallel agent execution — the agent asks "what can I work on right now?" and gets a precise answer.
 
-### 0.3 Agent conventions documented
+**Current status:** Dependencies implemented, but `--ready` filter not yet added to view commands.
+
+### 0.3 Agent conventions documented ⏳
 
 No code changes. Name the conventions in SKILL.md:
 
@@ -48,7 +64,9 @@ No code changes. Name the conventions in SKILL.md:
 
 Naming the protocol gives both principals a shared vocabulary.
 
-### 0.4 Note preview in list views
+**Current status:** Tags work, but agent conventions not formally documented in SKILL.md yet.
+
+### 0.4 Note preview in list views ⏳
 
 ```
   42  ○  Refactor auth token logic             Work / auth-service
@@ -57,13 +75,17 @@ Naming the protocol gives both principals a shared vocabulary.
 
 A task with notes shows the first line dimmed beneath it. This signals "this task is well-specified and ready to hand off." A task without notes signals "this needs more spec before anyone can execute it."
 
+**Current status:** Not yet implemented.
+
 ---
 
 ## Milestone 1 — Complete the Daily Loop in tdo (~4-6 weeks)
 
 Before adding new tools, the daily loop's work queue needs to be excellent on its own. These features complete tdo's core value.
 
-### 1.1 Search
+**Status: Mostly complete. Missing search, filter flags, and defer-until CLI.**
+
+### 1.1 Search ⏳
 
 ```bash
 tdo search "auth"
@@ -72,7 +94,9 @@ tdo search "auth" --notes
 
 A task list past 50 items is unusable without search. Table stakes.
 
-### 1.2 Filter flags on view commands
+**Current status:** Not yet implemented.
+
+### 1.2 Filter flags on view commands ⏳
 
 ```bash
 tdo view today --project auth-service
@@ -82,7 +106,9 @@ tdo view today --tag agent --ready       # the agent's primary command
 
 Filters are also what allow the agent to have a scoped, predictable view of its own work.
 
-### 1.3 Priority field
+**Current status:** Not yet implemented.
+
+### 1.3 Priority field ✅
 
 ```bash
 tdo add "Fix memory leak" --priority high
@@ -91,7 +117,9 @@ tdo move 42 --priority high
 
 Color-coded in views. Sorts after deadline, before project grouping. Gives the ordering formula a human signal beyond deadline proximity.
 
-### 1.4 Defer until
+**Current status:** ✅ Implemented.
+
+### 1.4 Defer until ⏳
 
 ```bash
 tdo add "Review Q2 plan" --defer-until 2026-03-01
@@ -100,7 +128,9 @@ tdo view deferred
 
 The field exists in the model. Expose it. Tasks hidden until their date — useful for seasonal work and for agent tasks that become relevant when an external dependency resolves.
 
-### 1.5 Dependency CLI flags
+**Current status:** Field exists in data model but not fully exposed in CLI.
+
+### 1.5 Dependency CLI flags ✅
 
 ```bash
 tdo add "Deploy" --depends-on 41
@@ -109,7 +139,9 @@ tdo add "Write tests" --blocks 55
 
 The data model is there. Surface it in mutation commands. The `--ready` filter (M0) already uses it — now let humans and agents create these relationships explicitly.
 
-### 1.6 Recurring tasks
+**Current status:** ✅ Implemented via `tdo depend` command and `--parent` flag.
+
+### 1.6 Recurring tasks ✅
 
 ```bash
 tdo add "Weekly review" --every monday
@@ -118,7 +150,9 @@ tdo add "Pay rent" --every "1st of month"
 
 The single highest-friction gap in tdo today. Manually recreating repeating tasks is the most common daily annoyance.
 
-### 1.7 Enhanced date parser
+**Current status:** ✅ Implemented via `--every` and `--until` flags.
+
+### 1.7 Enhanced date parser ✅
 
 ```bash
 tdo add "Q2 planning" --deadline eom
@@ -126,6 +160,8 @@ tdo add "Arch review" --when +2w
 ```
 
 Small surface area, high daily impact.
+
+**Current status:** ✅ Implemented. Supports natural language (today, tomorrow, monday, next-week) and ISO dates.
 
 ---
 
