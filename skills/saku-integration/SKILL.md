@@ -71,6 +71,15 @@ tdo edit area|project <name> --new-name "New"
 
 > Slugs are auto-generated: "My Project" → `my-project`
 
+## Context (orientation snapshot)
+
+```bash
+tdo context              # full situational snapshot (pretty)
+tdo context --json       # machine-readable snapshot
+```
+
+Shows: today summary, ready tasks, blocked tasks, overdue, recent completions, inbox count, active projects.
+
 ## Completions
 
 ```bash
@@ -123,7 +132,8 @@ tdo view today --tag blocked-human    # tasks blocked on human input
 
 **Agent starting a session:**
 ```bash
-tdo view today --tag agent --ready --json   # get actionable tasks
+tdo context --json                          # full orientation snapshot
+tdo view today --tag agent --ready --json   # agent-specific actionable tasks
 ```
 
 **Agent completing work:**

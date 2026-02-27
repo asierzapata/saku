@@ -359,6 +359,17 @@ enum Commands {
         csv: bool,
     },
 
+    /// Show a full situational snapshot (today, blockers, inbox, overdue, projects)
+    Context {
+        /// Output as JSON
+        #[arg(long, conflicts_with = "csv")]
+        json: bool,
+
+        /// Output as CSV (not supported, reserved for consistency)
+        #[arg(long, conflicts_with = "json")]
+        csv: bool,
+    },
+
     /// Generate shell completion script
     Completion {
         /// Shell to generate completions for
@@ -1252,6 +1263,114 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
     }
 }
 
+/// Render the pretty-print output for `tdo context`.
+fn render_context_pretty(
+    ctx: &output::ContextOutput,
+    store: &saku_tdo::models::store::Store,
+    today: jiff::civil::Date,
+) {
+    use colored::*;
+
+    let date_label = today.strftime("%b %d").to_string();
+
+    // --- Summary header (custom, no count suffix) ---
+    let header_title = format!("Context · {}", date_label);
+    println!(
+        "\n  {} {}\n",
+        "▌".cyan().bold(),
+        header_title.cyan().bold()
+    );
+
+    // Summary label-value pairs
+    let today_detail = if ctx.today.total > 0 {
+        format!(
+            "{} tasks ({} ready, {} blocked)",
+            ctx.today.total, ctx.today.ready, ctx.today.blocked
+        )
+    } else {
+        "No tasks".to_string()
+    };
+    println!("    {:<12}{}", "Today".bold(), today_detail);
+
+    if ctx.inbox_count > 0 {
+        let inbox_detail = if ctx.needs_review_count > 0 {
+            format!(
+                "{} items ({} need review)",
+                ctx.inbox_count, ctx.needs_review_count
+            )
+        } else {
+            format!("{} items", ctx.inbox_count)
+        };
+        println!("    {:<12}{}", "Inbox".bold(), inbox_detail);
+    }
+
+    if !ctx.overdue_tasks.is_empty() {
+        let task_word = if ctx.overdue_tasks.len() == 1 {
+            "task"
+        } else {
+            "tasks"
+        };
+        println!(
+            "    {:<12}{}",
+            "Overdue".bold(),
+            format!("{} {}", ctx.overdue_tasks.len(), task_word).red()
+        );
+    }
+
+    // --- Ready Now section ---
+    if !ctx.ready_tasks.is_empty() {
+        saku_tdo::ui::render_view_header("Ready Now", ctx.ready_tasks.len());
+        for task_out in &ctx.ready_tasks {
+            if let Some(task) = store.get_task_by_number(task_out.id) {
+                saku_tdo::ui::render_task_line(task, store);
+            }
+        }
+    }
+
+    // --- Blocked section ---
+    if !ctx.blocked_tasks.is_empty() {
+        saku_tdo::ui::render_view_header("Blocked", ctx.blocked_tasks.len());
+        for bt in &ctx.blocked_tasks {
+            if let Some(task) = store.get_task_by_number(bt.task_number) {
+                saku_tdo::ui::render_task_line(task, store);
+            }
+        }
+    }
+
+    // --- Overdue section ---
+    if !ctx.overdue_tasks.is_empty() {
+        saku_tdo::ui::render_view_header("Overdue", ctx.overdue_tasks.len());
+        for task_out in &ctx.overdue_tasks {
+            if let Some(task) = store.get_task_by_number(task_out.id) {
+                saku_tdo::ui::render_task_line(task, store);
+            }
+        }
+    }
+
+    // --- Recent Completions section ---
+    if !ctx.recent_completions.is_empty() {
+        saku_tdo::ui::render_view_header("Recent Completions (48h)", ctx.recent_completions.len());
+        for task_out in &ctx.recent_completions {
+            if let Some(task) = store.get_task_by_number(task_out.id) {
+                saku_tdo::ui::render_task_line_with_completion_date(task, store);
+            }
+        }
+    }
+
+    // --- Active Projects section ---
+    if !ctx.active_projects.is_empty() {
+        saku_tdo::ui::render_view_header("Active Projects", ctx.active_projects.len());
+        let project_list: Vec<String> = ctx
+            .active_projects
+            .iter()
+            .map(|p| format!("{} ({})", p.name, p.task_count))
+            .collect();
+        println!("    {}", project_list.join(", "));
+    }
+
+    println!();
+}
+
 /// Attempt to sync after a mutation.
 /// Tries server sync first (if configured), falls back to TDO_SYNC_DIR for local dev.
 /// Sync is best-effort: errors are printed as warnings but never abort.
@@ -1696,6 +1815,23 @@ fn main() {
                         .map(|t| output::TaskOutput::from_task(t, &store))
                         .collect();
                     output::print_csv(&out);
+                }
+            }
+        }
+        Some(Commands::Context { json, csv }) => {
+            let today = jiff::Zoned::now().date();
+            let ctx = output::build_context(&store, today);
+            let fmt = output::OutputFormat::from_flags(json, csv);
+            match fmt {
+                output::OutputFormat::Json => {
+                    output::print_json(&ctx);
+                }
+                output::OutputFormat::Csv => {
+                    eprintln!("CSV output is not supported for context. Use --json instead.");
+                    std::process::exit(1);
+                }
+                output::OutputFormat::Pretty => {
+                    render_context_pretty(&ctx, &store, today);
                 }
             }
         }

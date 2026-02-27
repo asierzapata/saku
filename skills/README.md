@@ -1,181 +1,91 @@
-# Saku Integration Skill
+# Saku AI Integration
 
-This skill helps AI agents (like Claude, Cursor, Windsurf, etc.) effectively use Saku's task management tool `tdo`.
+Saku uses a two-part system to steer AI agents toward productive task management:
 
-## Installation
+1. **CLAUDE.md snippet** — A directive added to your project instructions that tells the AI to proactively use `tdo` as a shared task ledger. This is what makes the AI _want_ to use it.
+2. **Skill** (`saku-integration`) — The full command reference, loaded on demand. This is what teaches the AI _how_ to use it.
 
-### Method 1: Using Vercel Skills CLI (Recommended)
+Both parts are needed. The snippet without the skill leaves the AI without enough detail. The skill without the snippet means the AI only uses `tdo` when explicitly asked.
 
-If you have the Vercel AI SDK skills CLI installed:
+## Setup
 
+### Step 1: Install the skill
+
+Choose one method:
+
+**Claude Code (recommended)**
 ```bash
-npx skills add https://github.com/asierzapata/saku.git
-```
-
-### Method 2: Manual Installation for Claude Desktop
-
-```bash
-# Copy skill to Claude's skills directory
 mkdir -p ~/.claude/skills/
 cp -r skills/saku-integration ~/.claude/skills/
 ```
 
-### Method 3: Manual Installation for Cursor
-
+**Cursor**
 ```bash
-# Copy skill to Cursor's skills directory
 mkdir -p .cursor/skills/
 cp -r skills/saku-integration .cursor/skills/
 ```
 
-### Method 4: Repository-Specific Installation
-
-For project-specific skill installation:
-
+**Per-project**
 ```bash
-# In your project root
-mkdir -p .claude/skills/
-cp -r /path/to/saku/skills/saku-integration .claude/skills/
+# Claude Code
+mkdir -p <project>/.claude/skills/
+cp -r skills/saku-integration <project>/.claude/skills/
 
-# Or for Cursor
-mkdir -p .cursor/skills/
-cp -r /path/to/saku/skills/saku-integration .cursor/skills/
+# Cursor
+mkdir -p <project>/.cursor/skills/
+cp -r skills/saku-integration <project>/.cursor/skills/
 ```
 
-## What This Skill Provides
+### Step 2: Add the CLAUDE.md snippet
 
-The skill teaches AI agents how to:
+Append this to your project's `CLAUDE.md` (or `rules.md`, `.cursorrules`, etc.):
 
-1. **Understand Saku's Architecture**
-   - Data model (Areas → Projects → Tasks)
-   - Storage format and locations
-   - Core philosophy and design principles
+```markdown
+## Saku productivity suite
 
-2. **Execute Commands Effectively**
-   - Complete command reference with examples
-   - Best practices for automation
-   - Error handling and exit codes
+`tdo` is your shared task ledger with the user. Always use it to track work that spans sessions.
 
-3. **Implement Common Workflows**
-   - Daily planning assistance
-   - Project management
-   - Task capture from natural language
-   - Weekly reviews
+Break down initiatives into tasks. Record milestones. Report progress with `tdo done`. This keeps the user informed across sessions.
 
-4. **Handle Edge Cases**
-   - Missing projects/areas
-   - Date parsing ambiguities
-   - Concurrent access patterns
-   - Error recovery
+Load `/saku-integration` before first use for the full command reference.
 
-5. **Build Integrations**
-   - Example code for task capture bots
-   - Daily digest generators
-   - Project dashboards
-   - Smart scheduling systems
+Key commands:
+- `tdo add "task" -p project` · `tdo add "sub" --parent <id>` · `tdo depend <id> --on <id>`
+- `tdo done <id>` · `tdo view today` · `tdo view project "name"`
 
-## Usage Examples
-
-Once installed, AI agents will be able to help you with commands like:
-
-**User:** "Add a task to review the PR tomorrow"
-**Agent:** 
-```bash
-tdo add "Review the PR" --tomorrow
+TodoWrite = your short-term step tracking. `tdo` = shared, lasting work.
 ```
 
-**User:** "Show me what I need to do today"
-**Agent:**
-```bash
-tdo today
-```
+Adapt the language for your agent platform if needed (e.g., Cursor uses different conventions for rules files).
 
-**User:** "Create a new project called 'Website Redesign' in my Work area"
-**Agent:**
-```bash
-tdo create area "Work"  # If needed
-tdo create project "Website Redesign" --area Work
-```
+## How it works
 
-**User:** "Move task 15 to next Friday"
-**Agent:**
-```bash
-tdo move 15 --on 2026-02-27  # Using ISO date for reliability
-```
+The snippet sits in the agent's always-loaded context (~120 tokens). It frames `tdo` as the medium/long-term shared ledger — distinct from built-in task tracking tools which handle short-term step-by-step execution.
 
-## Benefits
-
-- **Faster Interactions**: Agents understand Saku's command patterns instantly
-- **Fewer Errors**: Agents know about common pitfalls and how to avoid them
-- **Better Suggestions**: Agents can propose workflow improvements based on best practices
-- **Consistent Behavior**: All agents using this skill will interact with Saku the same way
-
-## Updating the Skill
-
-To update to the latest version:
-
-```bash
-# Pull latest Saku repository
-cd /path/to/saku
-git pull
-
-# Reinstall skill
-npx skills add https://github.com/asierzapata/saku.git --force
-
-# Or manually copy again
-cp -r skills/saku-integration ~/.claude/skills/
-```
+When the agent encounters work that spans sessions or matters to the user, the snippet pushes it to:
+1. Load the `/saku-integration` skill (on-demand, ~400 tokens)
+2. Use `tdo` commands to create, track, and complete tasks
+3. Keep the user informed of progress through the shared task store
 
 ## Verification
 
-To verify the skill is installed correctly, ask your AI agent:
+Ask your AI agent:
 
-> "Do you know how to use Saku's tdo command?"
+> "What do you know about tdo?"
 
-The agent should respond with knowledge about tdo's capabilities and command structure.
+It should reference the shared task ledger concept from the snippet. Then ask:
 
-## Troubleshooting
+> "Break down this feature into tasks and track them"
 
-### Skill Not Recognized
+It should load the saku-integration skill and start using `tdo add`, `tdo depend`, etc.
 
-If the agent doesn't seem to have the skill:
+## Updating
 
-1. **Check installation location**
-   ```bash
-   ls ~/.claude/skills/saku-integration/  # For Claude
-   ls .cursor/skills/saku-integration/    # For Cursor
-   ```
-
-2. **Verify SKILL.md exists**
-   ```bash
-   cat ~/.claude/skills/saku-integration/SKILL.md | head -20
-   ```
-
-3. **Restart your AI agent/editor**
-
-### Agent Not Using Best Practices
-
-If the agent isn't following the skill's guidance:
-
-1. Explicitly reference the skill:
-   > "Using the Saku integration skill, help me add a task"
-
-2. Provide feedback to improve future interactions
-
-## Contributing
-
-To improve this skill:
-
-1. Edit `skills/saku-integration/SKILL.md`
-2. Test with your AI agent
-3. Submit a PR to the Saku repository
-
-## Support
-
-- **Issues**: Report problems with the skill via GitHub Issues
-- **Questions**: Check the main Saku documentation or ask in discussions
-- **Documentation**: See [SKILL.md](saku-integration/SKILL.md) for the complete skill content
+```bash
+cd /path/to/saku && git pull
+cp -r skills/saku-integration ~/.claude/skills/  # or your target location
+```
 
 ## License
 
-Same as Saku: GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
+AGPL-3.0-or-later
