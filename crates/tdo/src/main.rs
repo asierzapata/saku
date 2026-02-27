@@ -69,23 +69,42 @@ enum Commands {
     /// View tasks and entities
     View {
         /// Output as JSON
-        #[arg(long, conflicts_with = "csv")]
+        #[arg(long, short = 'j', conflicts_with = "csv")]
         json: bool,
 
         /// Output as CSV
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long, short = 'c', conflicts_with = "json")]
         csv: bool,
 
         /// Watch for changes and re-render automatically (pretty output only)
-        #[arg(long, conflicts_with_all = ["json", "csv"])]
+        #[arg(long, short = 'w', conflicts_with_all = ["json", "csv"])]
         watch: bool,
 
         /// Include completed tasks (not applicable to Logbook or Trash views)
         #[arg(long)]
         all: bool,
 
-        #[command(subcommand)]
-        entity: ViewEntity,
+        /// Filter by project name
+        #[arg(long, short = 'p', value_name = "NAME")]
+        project: Option<String>,
+
+        /// Filter by tag (can be used multiple times, OR logic within tags)
+        #[arg(long, short = 't', value_name = "NAME", action = clap::ArgAction::Append)]
+        tag: Vec<String>,
+
+        /// Filter by area name
+        #[arg(long, short = 'a', value_name = "NAME")]
+        area: Option<String>,
+
+        /// Show only tasks that are not blocked
+        #[arg(long, short = 'r')]
+        ready: bool,
+
+        /// What to view (today, inbox, all, someday, upcoming, deadlines, logbook, trash, recurring, deferred, area, project, tag, task)
+        entity: String,
+
+        /// Name or ID (required for: area, project, tag, task)
+        name: Option<String>,
     },
 
     /// Add a new task
@@ -132,6 +151,10 @@ enum Commands {
         /// Add notes
         #[arg(short, long)]
         notes: Option<String>,
+
+        /// Defer until a specific date (task hidden from today/inbox until then)
+        #[arg(long, value_name = "DATE")]
+        defer_until: Option<String>,
 
         /// Recurrence pattern, e.g. "daily", "monday", "mon,wed,fri", "1st of month"
         #[arg(long, value_name = "PATTERN")]
@@ -207,6 +230,14 @@ enum Commands {
         /// Add notes
         #[arg(short, long)]
         notes: Option<String>,
+
+        /// Defer until a specific date (task hidden from today/inbox until then)
+        #[arg(long, value_name = "DATE")]
+        defer_until: Option<String>,
+
+        /// Remove defer-until date
+        #[arg(long)]
+        clear_defer: bool,
 
         /// Recurrence pattern, e.g. "daily", "monday", "mon,wed,fri", "1st of month"
         #[arg(long, value_name = "PATTERN")]
@@ -306,6 +337,24 @@ enum Commands {
         entity: ListEntity,
     },
 
+    /// Search tasks by title (and optionally notes)
+    Search {
+        /// Search query (substring match)
+        query: String,
+
+        /// Also search inside task notes
+        #[arg(long)]
+        notes: bool,
+
+        /// Output as JSON
+        #[arg(long, conflicts_with = "csv")]
+        json: bool,
+
+        /// Output as CSV
+        #[arg(long, conflicts_with = "json")]
+        csv: bool,
+    },
+
     /// Generate shell completion script
     Completion {
         /// Shell to generate completions for
@@ -378,46 +427,53 @@ enum ShowEntity {
     },
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug)]
 enum ViewEntity {
-    /// Show today's tasks (including overdue)
     Today,
-    /// List tasks in the inbox
     Inbox,
-    /// Show upcoming tasks (future-dated)
     Upcoming,
-    /// Show someday tasks
     Someday,
-    /// Show all tasks with deadlines, grouped by urgency
     Deadlines,
-    /// Show completed tasks (last 14 days)
     Logbook,
-    /// Show deleted items
     Trash,
-    /// Show all active tasks
     All,
-    /// Show all recurring tasks
     Recurring,
-    /// Show projects in an area
-    Area {
-        /// Name of the area
-        name: String,
-    },
-    /// Show tasks in a project
-    Project {
-        /// Name of the project
-        name: String,
-    },
-    /// Show tasks with a specific tag
-    Tag {
-        /// Name of the tag
-        name: String,
-    },
-    /// Show all details of a single task
-    Task {
-        /// Task number or fuzzy title match
-        id: String,
-    },
+    Deferred,
+    Area { name: String },
+    Project { name: String },
+    Tag { name: String },
+    Task { id: String },
+}
+
+fn parse_view_entity(entity: &str, name: Option<String>) -> Result<ViewEntity, String> {
+    match entity.to_lowercase().as_str() {
+        "today" => Ok(ViewEntity::Today),
+        "inbox" => Ok(ViewEntity::Inbox),
+        "upcoming" => Ok(ViewEntity::Upcoming),
+        "someday" => Ok(ViewEntity::Someday),
+        "deadlines" => Ok(ViewEntity::Deadlines),
+        "logbook" => Ok(ViewEntity::Logbook),
+        "trash" => Ok(ViewEntity::Trash),
+        "all" => Ok(ViewEntity::All),
+        "recurring" => Ok(ViewEntity::Recurring),
+        "deferred" => Ok(ViewEntity::Deferred),
+        "area" => name
+            .ok_or_else(|| "area requires a name argument".to_string())
+            .map(|n| ViewEntity::Area { name: n }),
+        "project" => name
+            .ok_or_else(|| "project requires a name argument".to_string())
+            .map(|n| ViewEntity::Project { name: n }),
+        "tag" => name
+            .ok_or_else(|| "tag requires a name argument".to_string())
+            .map(|n| ViewEntity::Tag { name: n }),
+        "task" => name
+            .ok_or_else(|| "task requires a number or name argument".to_string())
+            .map(|n| ViewEntity::Task { id: n }),
+        other => Err(format!(
+            "unknown view: '{}'. Options: today, inbox, all, someday, upcoming, deadlines, logbook, trash, recurring, deferred, area, project, tag, task",
+            other
+        )),
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -480,17 +536,121 @@ fn hostname() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+/// Filters to apply to task views.
+struct ViewFilters {
+    project: Option<String>,
+    tags: Vec<String>,
+    area: Option<String>,
+    ready: bool,
+}
+
+impl ViewFilters {
+    fn is_empty(&self) -> bool {
+        self.project.is_none() && self.tags.is_empty() && self.area.is_none() && !self.ready
+    }
+}
+
+/// Apply view filters to a list of tasks.
+fn filter_tasks<'a>(
+    tasks: Vec<&'a saku_tdo::models::task::Task>,
+    filters: &ViewFilters,
+    store: &saku_tdo::models::store::Store,
+) -> Vec<&'a saku_tdo::models::task::Task> {
+    if filters.is_empty() {
+        return tasks;
+    }
+
+    // Resolve project name to ID
+    let project_id = filters.project.as_ref().and_then(|name| {
+        store
+            .get_active_projects()
+            .find(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
+            .map(|p| p.id)
+    });
+
+    // Resolve area name to ID
+    let area_id = filters.area.as_ref().and_then(|name| {
+        store
+            .get_active_areas()
+            .find(|a| a.name.to_lowercase().contains(&name.to_lowercase()))
+            .map(|a| a.id)
+    });
+
+    // Collect project IDs belonging to the area (for transitive area filtering)
+    let area_project_ids: Vec<uuid::Uuid> = if let Some(aid) = area_id {
+        store
+            .get_projects_for_area(aid)
+            .filter(|p| p.deleted_at.is_none())
+            .map(|p| p.id)
+            .collect()
+    } else {
+        vec![]
+    };
+
+    tasks
+        .into_iter()
+        .filter(|t| {
+            // --project filter
+            if filters.project.is_some() {
+                if let Some(pid) = project_id {
+                    if t.project_id != Some(pid) {
+                        return false;
+                    }
+                } else {
+                    return false; // project name didn't resolve
+                }
+            }
+
+            // --tag filter (OR within tags)
+            if !filters.tags.is_empty()
+                && !filters.tags.iter().any(|filter_tag| {
+                    t.tags
+                        .iter()
+                        .any(|task_tag| task_tag.to_lowercase() == filter_tag.to_lowercase())
+                })
+            {
+                return false;
+            }
+
+            // --area filter (direct area or project belongs to area)
+            if filters.area.is_some() {
+                if let Some(aid) = area_id {
+                    let direct_match = t.area_id == Some(aid);
+                    let via_project = t
+                        .project_id
+                        .is_some_and(|pid| area_project_ids.contains(&pid));
+                    if !direct_match && !via_project {
+                        return false;
+                    }
+                } else {
+                    return false; // area name didn't resolve
+                }
+            }
+
+            // --ready filter
+            if filters.ready && store.is_task_blocked(t) {
+                return false;
+            }
+
+            true
+        })
+        .collect()
+}
+
 /// Render any ViewEntity in pretty (terminal) format.
 /// New ViewEntity arms get watch support for free.
-fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Store, include_completed: bool) {
+fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Store, include_completed: bool, filters: &ViewFilters) {
     match entity {
-        ViewEntity::Today => render_today_view(store, include_completed),
+        ViewEntity::Today => render_today_view(store, include_completed, filters),
         ViewEntity::Inbox => {
+            let today = jiff::Zoned::now().date();
             let inbox_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| matches!(t.when, When::Inbox))
                 .filter(|t| include_completed || t.completed_at.is_none())
+                .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
                 .collect();
+            let inbox_tasks = filter_tasks(inbox_tasks, filters, store);
             let inbox_tasks =
                 saku_tdo::models::task::order_tasks_with_store(inbox_tasks, store);
             if inbox_tasks.is_empty() {
@@ -508,6 +668,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .filter(|t| matches!(t.when, When::Someday))
                 .filter(|t| include_completed || t.completed_at.is_none())
                 .collect();
+            let someday_tasks = filter_tasks(someday_tasks, filters, store);
             let someday_tasks =
                 saku_tdo::models::task::order_tasks_with_store(someday_tasks, store);
             if someday_tasks.is_empty() {
@@ -522,6 +683,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
         ViewEntity::All => {
             use std::collections::HashMap;
             let all_tasks: Vec<_> = store.get_active_tasks().collect();
+            let all_tasks = filter_tasks(all_tasks, filters, store);
             let all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, store);
             if all_tasks.is_empty() {
                 println!("No active tasks");
@@ -565,6 +727,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                     }
                 })
                 .collect();
+            let upcoming_tasks = filter_tasks(upcoming_tasks, filters, store);
             if upcoming_tasks.is_empty() {
                 println!("No upcoming tasks");
             } else {
@@ -597,10 +760,11 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
         }
         ViewEntity::Deadlines => {
             let today = jiff::Zoned::now().date();
-            let mut deadline_tasks: Vec<_> = store
+            let deadline_tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| (include_completed || t.completed_at.is_none()) && t.deadline.is_some())
                 .collect();
+            let mut deadline_tasks = filter_tasks(deadline_tasks, filters, store);
             if deadline_tasks.is_empty() {
                 println!("No tasks with deadlines");
             } else {
@@ -865,7 +1029,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             }
         }
         ViewEntity::Tag { name } => {
-            let mut tasks: Vec<_> = store
+            let tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| {
                     (include_completed || t.completed_at.is_none())
@@ -874,6 +1038,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                             .any(|tag| tag.to_lowercase() == name.to_lowercase())
                 })
                 .collect();
+            let mut tasks = filter_tasks(tasks, filters, store);
             tasks.sort_by_key(|t| t.task_number);
             if tasks.is_empty() {
                 println!("No tasks with tag '{}'", name);
@@ -912,6 +1077,25 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                     } else {
                         saku_tdo::ui::render_task_line(task, store);
                     }
+                }
+            }
+        }
+        ViewEntity::Deferred => {
+            let today = jiff::Zoned::now().date();
+            let deferred_tasks: Vec<_> = store
+                .get_active_tasks()
+                .filter(|t| t.completed_at.is_none())
+                .filter(|t| t.defer_until.is_some_and(|d| d > today))
+                .collect();
+            let deferred_tasks = filter_tasks(deferred_tasks, filters, store);
+            let mut deferred_tasks = deferred_tasks;
+            deferred_tasks.sort_by_key(|t| t.defer_until);
+            if deferred_tasks.is_empty() {
+                println!("No deferred tasks");
+            } else {
+                saku_tdo::ui::render_view_header("Deferred", deferred_tasks.len());
+                for task in deferred_tasks {
+                    saku_tdo::ui::render_task_line(task, store);
                 }
             }
         }
@@ -981,15 +1165,17 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
 }
 
 /// Render the today view (used by both `tdo today` and `tdo` with no args).
-fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: bool) {
+fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: bool, filters: &ViewFilters) {
     let today = jiff::Zoned::now().date();
 
     // Collect overdue tasks (scheduled or deadline < today), excluding subtasks.
     // Recurring tasks are never "overdue" based on their scheduled date — their
     // pending-ness is derived entirely from the recurrence rule.
+    // Hide deferred tasks (defer_until > today).
     let overdue_tasks: Vec<_> = store
         .get_active_tasks()
         .filter(|t| t.parent_task_id.is_none())
+        .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
         .filter(|t| {
             (include_completed || t.completed_at.is_none()) && t.recurrence.is_none() && {
                 let scheduled_overdue = match t.when {
@@ -1001,12 +1187,15 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
             }
         })
         .collect();
+    let overdue_tasks = filter_tasks(overdue_tasks, filters, store);
     let overdue_tasks = saku_tdo::models::task::order_tasks_with_store(overdue_tasks, store);
 
     // Collect today tasks (scheduled or deadline == today, or a recurring occurrence today), excluding subtasks
+    // Hide deferred tasks (defer_until > today).
     let today_current: Vec<_> = store
         .get_active_tasks()
         .filter(|t| t.parent_task_id.is_none())
+        .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
         .filter(|t| {
             (include_completed || t.completed_at.is_none()) && {
                 let scheduled_today = match t.when {
@@ -1030,6 +1219,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
             }
         })
         .collect();
+    let today_current = filter_tasks(today_current, filters, store);
     let today_current = saku_tdo::models::task::order_tasks_with_store(today_current, store);
 
     let total = overdue_tasks.len() + today_current.len();
@@ -1177,7 +1367,8 @@ fn main() {
             );
             eprintln!("{}", "This command will be removed in v1.0.0.".yellow());
             eprintln!();
-            render_today_view(&store, false);
+            let no_filters = ViewFilters { project: None, tags: vec![], area: None, ready: false };
+            render_today_view(&store, false, &no_filters);
         }
         Some(Commands::Inbox) => {
             eprintln!(
@@ -1467,13 +1658,66 @@ fn main() {
                 }
             }
         }
+        Some(Commands::Search {
+            query,
+            notes,
+            json,
+            csv,
+        }) => {
+            let results = store.search_tasks(&query, notes);
+            let fmt = output::OutputFormat::from_flags(json, csv);
+            match fmt {
+                output::OutputFormat::Pretty => {
+                    if results.is_empty() {
+                        println!("No tasks matching \"{}\"", query);
+                    } else {
+                        saku_tdo::ui::render_view_header("Search results", results.len());
+                        for task in results {
+                            saku_tdo::ui::render_task_line(task, &store);
+                        }
+                    }
+                }
+                output::OutputFormat::Json => {
+                    let out: Vec<_> = results
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    output::print_json(&out);
+                }
+                output::OutputFormat::Csv => {
+                    let out: Vec<_> = results
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    output::print_csv(&out);
+                }
+            }
+        }
         Some(Commands::View {
-            entity,
+            entity: entity_str,
+            name: entity_name,
             json,
             csv,
             watch,
             all,
+            project: filter_project,
+            tag: filter_tags,
+            area: filter_area,
+            ready: filter_ready,
         }) => {
+            let entity = match parse_view_entity(&entity_str, entity_name) {
+                Ok(e) => e,
+                Err(msg) => {
+                    eprintln!("Error: {}", msg);
+                    std::process::exit(1);
+                }
+            };
+            let view_filters = ViewFilters {
+                project: filter_project,
+                tags: filter_tags,
+                area: filter_area,
+                ready: filter_ready,
+            };
             if watch {
                 loop {
                     // Clear screen and move cursor to top-left
@@ -1490,7 +1734,7 @@ fn main() {
                             continue;
                         }
                     };
-                    render_view_pretty(&entity, &store, all);
+                    render_view_pretty(&entity, &store, all, &view_filters);
                     let now = jiff::Zoned::now();
                     let width = term_size::dimensions().map(|(w, _)| w).unwrap_or(40);
                     println!();
@@ -1508,13 +1752,10 @@ fn main() {
             }
             let fmt = output::OutputFormat::from_flags(json, csv);
             if matches!(fmt, output::OutputFormat::Pretty) {
-                render_view_pretty(&entity, &store, all);
+                render_view_pretty(&entity, &store, all, &view_filters);
             } else {
             match entity {
                 ViewEntity::Today => {
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        render_today_view(&store, all);
-                    } else {
                         let today = jiff::Zoned::now().date();
                         let tasks: Vec<_> = store
                             .get_active_tasks()
@@ -1530,6 +1771,7 @@ fn main() {
                                 }
                             })
                             .collect();
+                        let tasks = filter_tasks(tasks, &view_filters, &store);
                         let out: Vec<_> = tasks
                             .iter()
                             .map(|t| output::TaskOutput::from_task(t, &store))
@@ -1539,7 +1781,6 @@ fn main() {
                             output::OutputFormat::Csv => output::print_csv(&out),
                             output::OutputFormat::Pretty => unreachable!(),
                         }
-                    }
                 }
                 ViewEntity::Inbox => {
                     let inbox_tasks: Vec<_> = store
@@ -1548,19 +1789,7 @@ fn main() {
                         .filter(|t| matches!(t.when, When::Inbox))
                         .filter(|t| all || t.completed_at.is_none())
                         .collect();
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        let inbox_tasks =
-                            saku_tdo::models::task::order_tasks_with_store(inbox_tasks, &store);
-                        if inbox_tasks.is_empty() {
-                            println!("Inbox is empty");
-                        } else {
-                            saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
-                            for task in inbox_tasks {
-                                saku_tdo::ui::render_task_line(task, &store);
-                                saku_tdo::ui::render_subtask_children(task.id, &store);
-                            }
-                        }
-                    } else {
+                    let inbox_tasks = filter_tasks(inbox_tasks, &view_filters, &store);
                         let out: Vec<_> = inbox_tasks
                             .iter()
                             .map(|t| output::TaskOutput::from_task(t, &store))
@@ -1570,7 +1799,6 @@ fn main() {
                             output::OutputFormat::Csv => output::print_csv(&out),
                             output::OutputFormat::Pretty => unreachable!(),
                         }
-                    }
                 }
                 ViewEntity::Someday => {
                     let someday_tasks: Vec<_> = store
@@ -1579,85 +1807,35 @@ fn main() {
                         .filter(|t| matches!(t.when, When::Someday))
                         .filter(|t| all || t.completed_at.is_none())
                         .collect();
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        let someday_tasks =
-                            saku_tdo::models::task::order_tasks_with_store(someday_tasks, &store);
-                        if someday_tasks.is_empty() {
-                            println!("No someday tasks");
-                        } else {
-                            saku_tdo::ui::render_view_header("Someday", someday_tasks.len());
-                            for task in someday_tasks {
-                                saku_tdo::ui::render_task_line(task, &store);
-                                saku_tdo::ui::render_subtask_children(task.id, &store);
-                            }
-                        }
-                    } else {
-                        let out: Vec<_> = someday_tasks
-                            .iter()
-                            .map(|t| output::TaskOutput::from_task(t, &store))
-                            .collect();
-                        match fmt {
-                            output::OutputFormat::Json => output::print_json(&out),
-                            output::OutputFormat::Csv => output::print_csv(&out),
-                            output::OutputFormat::Pretty => unreachable!(),
-                        }
+                    let someday_tasks = filter_tasks(someday_tasks, &view_filters, &store);
+                    let out: Vec<_> = someday_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::All => {
-                    use std::collections::HashMap;
-
                     let all_tasks: Vec<_> = store
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .collect();
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        let all_tasks =
-                            saku_tdo::models::task::order_tasks_with_store(all_tasks, &store);
-                        if all_tasks.is_empty() {
-                            println!("No active tasks");
-                        } else {
-                            let mut grouped: HashMap<
-                                String,
-                                Vec<&saku_tdo::models::task::Task>,
-                            > = HashMap::new();
-                            for task in &all_tasks {
-                                let group = match &task.when {
-                                    When::Inbox => "Inbox",
-                                    When::Someday => "Someday",
-                                    When::Scheduled { date: _, .. } => "Scheduled",
-                                    When::LegacyToday { .. } | When::LegacyAnytime => "Legacy",
-                                };
-                                grouped.entry(group.to_string()).or_default().push(task);
-                            }
-                            let order = vec!["Inbox", "Scheduled", "Someday"];
-                            for group_name in order {
-                                if let Some(tasks) = grouped.get(group_name) {
-                                    saku_tdo::ui::render_view_header(group_name, tasks.len());
-                                    for task in tasks {
-                                        saku_tdo::ui::render_task_line(task, &store);
-                                        saku_tdo::ui::render_subtask_children(task.id, &store);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        let out: Vec<_> = all_tasks
-                            .iter()
-                            .map(|t| output::TaskOutput::from_task(t, &store))
-                            .collect();
-                        match fmt {
-                            output::OutputFormat::Json => output::print_json(&out),
-                            output::OutputFormat::Csv => output::print_csv(&out),
-                            output::OutputFormat::Pretty => unreachable!(),
-                        }
+                    let all_tasks = filter_tasks(all_tasks, &view_filters, &store);
+                    let out: Vec<_> = all_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Upcoming => {
-                    use jiff::civil::Date;
-                    use std::collections::BTreeMap;
-
                     let today = jiff::Zoned::now().date();
-
                     let upcoming_tasks: Vec<_> = store
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
@@ -1672,157 +1850,35 @@ fn main() {
                             }
                         })
                         .collect();
-
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        if upcoming_tasks.is_empty() {
-                            println!("No upcoming tasks");
-                        } else {
-                            let mut grouped: BTreeMap<Date, Vec<&saku_tdo::models::task::Task>> =
-                                BTreeMap::new();
-                            for task in &upcoming_tasks {
-                                let date = match task.when {
-                                    When::Scheduled { date, .. } => Some(date),
-                                    _ => None,
-                                };
-                                let deadline = task.deadline;
-                                let key_date = match (date, deadline) {
-                                    (Some(d1), Some(d2)) => Some(d1.min(d2)),
-                                    (Some(d), None) | (None, Some(d)) => Some(d),
-                                    (None, None) => None,
-                                };
-                                if let Some(key) = key_date {
-                                    grouped.entry(key).or_default().push(task);
-                                }
-                            }
-                            saku_tdo::ui::render_view_header("Upcoming", upcoming_tasks.len());
-                            for (date, mut tasks) in grouped {
-                                tasks.sort_by_key(|t| t.task_number);
-                                saku_tdo::ui::render_section_header(
-                                    &saku_tdo::ui::format_date_header(date),
-                                );
-                                for task in tasks {
-                                    saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                            }
-                        }
-                    } else {
-                        let out: Vec<_> = upcoming_tasks
-                            .iter()
-                            .map(|t| output::TaskOutput::from_task(t, &store))
-                            .collect();
-                        match fmt {
-                            output::OutputFormat::Json => output::print_json(&out),
-                            output::OutputFormat::Csv => output::print_csv(&out),
-                            output::OutputFormat::Pretty => unreachable!(),
-                        }
+                    let upcoming_tasks = filter_tasks(upcoming_tasks, &view_filters, &store);
+                    let out: Vec<_> = upcoming_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Deadlines => {
-                    let today = jiff::Zoned::now().date();
-
-                    let mut deadline_tasks: Vec<_> = store
+                    let deadline_tasks: Vec<_> = store
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| (all || t.completed_at.is_none()) && t.deadline.is_some())
                         .collect();
-
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        if deadline_tasks.is_empty() {
-                            println!("No tasks with deadlines");
-                        } else {
-                            deadline_tasks.sort_by(|a, b| {
-                                a.deadline
-                                    .cmp(&b.deadline)
-                                    .then(a.task_number.cmp(&b.task_number))
-                            });
-                            saku_tdo::ui::render_view_header("Deadlines", deadline_tasks.len());
-                            let end_of_week = {
-                                let days_to_sunday = match today.weekday() {
-                                    jiff::civil::Weekday::Sunday => 0,
-                                    jiff::civil::Weekday::Monday => 6,
-                                    jiff::civil::Weekday::Tuesday => 5,
-                                    jiff::civil::Weekday::Wednesday => 4,
-                                    jiff::civil::Weekday::Thursday => 3,
-                                    jiff::civil::Weekday::Friday => 2,
-                                    jiff::civil::Weekday::Saturday => 1,
-                                };
-                                today
-                                    .checked_add(jiff::Span::new().days(days_to_sunday))
-                                    .expect("valid date")
-                            };
-                            let mut overdue: Vec<&saku_tdo::models::task::Task> = Vec::new();
-                            let mut due_today: Vec<&saku_tdo::models::task::Task> = Vec::new();
-                            let mut this_week: Vec<&saku_tdo::models::task::Task> = Vec::new();
-                            let mut later: Vec<&saku_tdo::models::task::Task> = Vec::new();
-                            for task in &deadline_tasks {
-                                let d = task.deadline.unwrap();
-                                if d < today {
-                                    overdue.push(task);
-                                } else if d == today {
-                                    due_today.push(task);
-                                } else if d <= end_of_week {
-                                    this_week.push(task);
-                                } else {
-                                    later.push(task);
-                                }
-                            }
-                            if !overdue.is_empty() {
-                                saku_tdo::ui::render_section_header(&format!(
-                                    "Overdue ({})",
-                                    overdue.len()
-                                ));
-                                for task in overdue {
-                                    saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                            }
-                            if !due_today.is_empty() {
-                                saku_tdo::ui::render_section_header(&format!(
-                                    "Today ({})",
-                                    due_today.len()
-                                ));
-                                for task in due_today {
-                                    saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                            }
-                            if !this_week.is_empty() {
-                                saku_tdo::ui::render_section_header(&format!(
-                                    "This Week ({})",
-                                    this_week.len()
-                                ));
-                                for task in this_week {
-                                    saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                            }
-                            if !later.is_empty() {
-                                saku_tdo::ui::render_section_header(&format!(
-                                    "Later ({})",
-                                    later.len()
-                                ));
-                                for task in later {
-                                    saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                            }
-                        }
-                    } else {
-                        let out: Vec<_> = deadline_tasks
-                            .iter()
-                            .map(|t| output::TaskOutput::from_task(t, &store))
-                            .collect();
-                        match fmt {
-                            output::OutputFormat::Json => output::print_json(&out),
-                            output::OutputFormat::Csv => output::print_csv(&out),
-                            output::OutputFormat::Pretty => unreachable!(),
-                        }
+                    let deadline_tasks = filter_tasks(deadline_tasks, &view_filters, &store);
+                    let out: Vec<_> = deadline_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Logbook => {
-                    use std::collections::BTreeMap;
-
                     let completed_tasks: Vec<_> = store
                         .tasks
                         .values()
@@ -1835,49 +1891,14 @@ fn main() {
                             }
                         })
                         .collect();
-
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        if completed_tasks.is_empty() {
-                            println!("No completed tasks in the last 14 days");
-                        } else {
-                            let mut grouped: BTreeMap<
-                                (i16, i8),
-                                Vec<&saku_tdo::models::task::Task>,
-                            > = BTreeMap::new();
-                            for task in &completed_tasks {
-                                if let Some(completed_at) = task.completed_at {
-                                    let year_month = saku_tdo::ui::get_year_month(completed_at);
-                                    grouped.entry(year_month).or_default().push(task);
-                                }
-                            }
-                            saku_tdo::ui::render_view_header("Logbook", completed_tasks.len());
-                            for (_year_month, tasks) in grouped.iter().rev() {
-                                let mut sorted_tasks = tasks.clone();
-                                sorted_tasks.sort_by(|a, b| {
-                                    b.completed_at.unwrap().cmp(&a.completed_at.unwrap())
-                                });
-                                let month_header = saku_tdo::ui::format_month_header(
-                                    sorted_tasks[0].completed_at.unwrap(),
-                                );
-                                saku_tdo::ui::render_section_header(&month_header);
-                                for task in sorted_tasks {
-                                    saku_tdo::ui::render_task_line_with_completion_date(
-                                        task, &store,
-                                    );
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                            }
-                        }
-                    } else {
-                        let out: Vec<_> = completed_tasks
-                            .iter()
-                            .map(|t| output::TaskOutput::from_task(t, &store))
-                            .collect();
-                        match fmt {
-                            output::OutputFormat::Json => output::print_json(&out),
-                            output::OutputFormat::Csv => output::print_csv(&out),
-                            output::OutputFormat::Pretty => unreachable!(),
-                        }
+                    let out: Vec<_> = completed_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Trash => {
@@ -1957,25 +1978,16 @@ fn main() {
                     }
                 }
                 ViewEntity::Recurring => {
-                    let today = jiff::Zoned::now().date();
-                    let mut tasks: Vec<_> = store.get_recurring_tasks().collect();
-                    tasks.sort_by_key(|t| t.task_number);
-
-                    if tasks.is_empty() {
-                        println!("No recurring tasks.");
-                    } else {
-                        saku_tdo::ui::render_view_header("Recurring", tasks.len());
-                        for task in tasks {
-                            // Find the next pending occurrence on or after today
-                            let next = next_pending_occurrence(task, today);
-                            if let Some(next_date) = next {
-                                saku_tdo::ui::render_task_line_with_next_occurrence(
-                                    task, &store, next_date,
-                                );
-                            } else {
-                                saku_tdo::ui::render_task_line(task, &store);
-                            }
-                        }
+                    let tasks: Vec<_> = store.get_recurring_tasks().collect();
+                    let tasks_filtered = filter_tasks(tasks, &view_filters, &store);
+                    let out: Vec<_> = tasks_filtered
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Project { name } => {
@@ -2007,11 +2019,12 @@ fn main() {
                         }
                     };
 
-                    let mut tasks: Vec<_> = store
+                    let tasks: Vec<_> = store
                         .get_tasks_for_project(project.id)
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
+                    let mut tasks = filter_tasks(tasks, &view_filters, &store);
                     tasks.sort_by_key(|t| t.task_number);
 
                     match fmt {
@@ -2107,55 +2120,28 @@ fn main() {
                         .filter(|(_, tasks)| !tasks.is_empty())
                         .collect();
 
-                    let total_tasks = direct_tasks.len()
-                        + project_tasks
-                            .iter()
-                            .map(|(_, tasks)| tasks.len())
-                            .sum::<usize>();
-
+                    let all_area_tasks: Vec<&saku_tdo::models::task::Task> = direct_tasks
+                        .iter()
+                        .chain(
+                            project_tasks
+                                .iter()
+                                .flat_map(|(_, tasks)| tasks.iter()),
+                        )
+                        .copied()
+                        .collect();
+                    let all_area_tasks = filter_tasks(all_area_tasks, &view_filters, &store);
+                    let out: Vec<_> = all_area_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
                     match fmt {
-                        output::OutputFormat::Json | output::OutputFormat::Csv => {
-                            let all_tasks: Vec<&saku_tdo::models::task::Task> = direct_tasks
-                                .iter()
-                                .chain(
-                                    project_tasks
-                                        .iter()
-                                        .flat_map(|(_, tasks)| tasks.iter()),
-                                )
-                                .copied()
-                                .collect();
-                            let out: Vec<_> = all_tasks
-                                .iter()
-                                .map(|t| output::TaskOutput::from_task(t, &store))
-                                .collect();
-                            match fmt {
-                                output::OutputFormat::Json => output::print_json(&out),
-                                output::OutputFormat::Csv => output::print_csv(&out),
-                                output::OutputFormat::Pretty => unreachable!(),
-                            }
-                        }
-                        output::OutputFormat::Pretty => {
-                            if total_tasks == 0 {
-                                println!("No tasks in area '{}'", area.name);
-                            } else {
-                                saku_tdo::ui::render_view_header(&area.name, total_tasks);
-                                for task in &direct_tasks {
-                                    saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
-                                }
-                                for (project, tasks) in project_tasks.iter() {
-                                    saku_tdo::ui::render_section_header(&project.name);
-                                    for task in tasks {
-                                        saku_tdo::ui::render_task_line(task, &store);
-                                        saku_tdo::ui::render_subtask_children(task.id, &store);
-                                    }
-                                }
-                            }
-                        }
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Tag { name } => {
-                    let mut tasks: Vec<_> = store
+                    let tasks: Vec<_> = store
                         .get_active_tasks()
                         .filter(|t| t.parent_task_id.is_none())
                         .filter(|t| {
@@ -2165,40 +2151,34 @@ fn main() {
                                     .any(|tag| tag.to_lowercase() == name.to_lowercase())
                         })
                         .collect();
+                    let mut tasks = filter_tasks(tasks, &view_filters, &store);
                     tasks.sort_by_key(|t| t.task_number);
-
-                    if matches!(fmt, output::OutputFormat::Pretty) {
-                        if tasks.is_empty() {
-                            println!("No tasks with tag '{}'", name);
-                            use std::collections::HashSet;
-                            let available_tags: HashSet<_> = store
-                                .get_active_tasks()
-                                .filter(|t| all || t.completed_at.is_none())
-                                .flat_map(|t| &t.tags)
-                                .collect();
-                            if !available_tags.is_empty() {
-                                println!("\nAvailable tags:");
-                                for tag in available_tags {
-                                    println!("  - {}", tag);
-                                }
-                            }
-                        } else {
-                            saku_tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
-                            for task in tasks {
-                                saku_tdo::ui::render_task_line(task, &store);
-                                saku_tdo::ui::render_subtask_children(task.id, &store);
-                            }
-                        }
-                    } else {
-                        let out: Vec<_> = tasks
-                            .iter()
-                            .map(|t| output::TaskOutput::from_task(t, &store))
-                            .collect();
-                        match fmt {
-                            output::OutputFormat::Json => output::print_json(&out),
-                            output::OutputFormat::Csv => output::print_csv(&out),
-                            output::OutputFormat::Pretty => unreachable!(),
-                        }
+                    let out: Vec<_> = tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
+                    }
+                }
+                ViewEntity::Deferred => {
+                    let today = jiff::Zoned::now().date();
+                    let deferred_tasks: Vec<_> = store
+                        .get_active_tasks()
+                        .filter(|t| t.completed_at.is_none())
+                        .filter(|t| t.defer_until.is_some_and(|d| d > today))
+                        .collect();
+                    let deferred_tasks = filter_tasks(deferred_tasks, &view_filters, &store);
+                    let out: Vec<_> = deferred_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
                 ViewEntity::Task { id } => {
@@ -2226,6 +2206,7 @@ fn main() {
             area,
             tag,
             notes,
+            defer_until,
             every,
             until,
             parent,
@@ -2284,6 +2265,7 @@ fn main() {
                 notes,
                 when,
                 deadline: due,
+                defer_until,
                 project,
                 area,
                 tags: tag,
@@ -2788,6 +2770,8 @@ fn main() {
             clear_area,
             tag,
             notes,
+            defer_until,
+            clear_defer,
             every,
             until,
             clear_recurrence,
@@ -2866,6 +2850,8 @@ fn main() {
                     clear_project,
                     clear_area,
                     tags: tag.clone(),
+                    defer_until: defer_until.clone(),
+                    clear_defer,
                     recurrence: recurrence.clone(),
                     clear_recurrence,
                 };
@@ -3680,7 +3666,13 @@ fn main() {
         }
         None => {
             // Default: show today view (same as `tdo today`)
-            render_today_view(&store, false);
+            let no_filters = ViewFilters {
+                project: None,
+                tags: vec![],
+                area: None,
+                ready: false,
+            };
+            render_today_view(&store, false, &no_filters);
         }
     }
 
