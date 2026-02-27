@@ -1262,10 +1262,12 @@ fn try_sync(storage_path: &std::path::Path) {
     {
         if let Ok(Some(config)) = saku_sync::config::load_sync_config() {
             // Read passphrase from keychain
-            match saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
-                .and_then(|ks| ks.get_passphrase())
+            match saku_crypto::keychain::SyncCredentialStore::new()
+                .and_then(|s| s.load_or_migrate())
+                .ok()
+                .and_then(|c| c.passphrase)
             {
-                Ok(passphrase) => {
+                Some(passphrase) => {
                     match saku_sync::try_flush_if_online_server(
                         storage_path,
                         passphrase.as_bytes(),
@@ -1279,7 +1281,7 @@ fn try_sync(storage_path: &std::path::Path) {
                     }
                     return;
                 }
-                Err(_) => {
+                None => {
                     // No passphrase in keychain, fall through to local sync
                 }
             }
@@ -3581,24 +3583,17 @@ fn main() {
                     let access_token = body["access_token"].as_str().unwrap_or("");
                     let refresh_token = body["refresh_token"].as_str().unwrap_or("");
 
-                    // Store tokens in keychain
+                    // Store all credentials in a single keychain entry
                     if let Err(e) =
-                        saku_crypto::keychain::KeychainStore::new("saku-sync-access-token")
-                            .and_then(|ks| ks.store_passphrase(access_token))
+                        saku_crypto::keychain::SyncCredentialStore::new().and_then(|s| {
+                            s.store(&saku_crypto::keychain::SyncCredentials {
+                                access_token: Some(access_token.to_string()),
+                                refresh_token: Some(refresh_token.to_string()),
+                                passphrase: Some(passphrase.clone()),
+                            })
+                        })
                     {
-                        eprintln!("Warning: Failed to store access token in keychain: {}", e);
-                    }
-                    if let Err(e) =
-                        saku_crypto::keychain::KeychainStore::new("saku-sync-refresh-token")
-                            .and_then(|ks| ks.store_passphrase(refresh_token))
-                    {
-                        eprintln!("Warning: Failed to store refresh token in keychain: {}", e);
-                    }
-                    if let Err(e) =
-                        saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
-                            .and_then(|ks| ks.store_passphrase(&passphrase))
-                    {
-                        eprintln!("Warning: Failed to store passphrase in keychain: {}", e);
+                        eprintln!("Warning: Failed to store credentials in keychain: {}", e);
                     }
 
                     // Save config
@@ -3614,7 +3609,11 @@ fn main() {
                     println!("Logged in to {} as {}", server, email);
                 }
                 SyncAction::Logout => {
-                    // Clear keychain entries
+                    // Clear consolidated keychain entry
+                    if let Ok(s) = saku_crypto::keychain::SyncCredentialStore::new() {
+                        let _ = s.delete();
+                    }
+                    // Also clean up legacy entries for users who haven't migrated
                     for account in &[
                         "saku-sync-access-token",
                         "saku-sync-refresh-token",
@@ -3639,9 +3638,10 @@ fn main() {
 
                             // Check if passphrase is stored
                             let has_passphrase =
-                                saku_crypto::keychain::KeychainStore::new("saku-sync-passphrase")
-                                    .and_then(|ks| ks.get_passphrase())
-                                    .is_ok();
+                                saku_crypto::keychain::SyncCredentialStore::new()
+                                    .and_then(|s| s.load_or_migrate())
+                                    .map(|c| c.passphrase.is_some())
+                                    .unwrap_or(false);
                             println!(
                                 "  Passphrase: {}",
                                 if has_passphrase { "stored" } else { "not set" }

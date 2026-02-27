@@ -42,4 +42,10 @@ pub enum KeychainError {
 
     #[error("No passphrase found in keychain")]
     NotFound,
+
+    #[error("Failed to serialize credentials: {0}")]
+    SerializeFailed(serde_json::Error),
+
+    #[error("Failed to deserialize credentials: {0}")]
+    DeserializeFailed(serde_json::Error),
 }

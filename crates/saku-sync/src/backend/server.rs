@@ -57,16 +57,12 @@ mod impl_server {
     impl ServerSyncBackend {
         /// Create a new ServerSyncBackend, reading tokens from the OS keychain.
         pub fn new(server_url: &str, device_id: &str) -> Result<Self, SyncError> {
-            let access_token = saku_crypto::keychain::KeychainStore::new("saku-sync-access-token")
-                .and_then(|ks| ks.get_passphrase())
-                .map(|s| s.to_string())
+            let creds = saku_crypto::keychain::SyncCredentialStore::new()
+                .and_then(|s| s.load_or_migrate())
                 .unwrap_or_default();
 
-            let refresh_token =
-                saku_crypto::keychain::KeychainStore::new("saku-sync-refresh-token")
-                    .and_then(|ks| ks.get_passphrase())
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
+            let access_token = creds.access_token.unwrap_or_default();
+            let refresh_token = creds.refresh_token.unwrap_or_default();
 
             let http_client = ureq::AgentBuilder::new()
                 .timeout_connect(std::time::Duration::from_secs(5))
@@ -132,12 +128,12 @@ mod impl_server {
             *self.access_token.borrow_mut() = body.access_token.clone();
             *self.refresh_token.borrow_mut() = body.refresh_token.clone();
 
-            // Persist to keychain
-            if let Ok(ks) = saku_crypto::keychain::KeychainStore::new("saku-sync-access-token") {
-                let _ = ks.store_passphrase(&body.access_token);
-            }
-            if let Ok(ks) = saku_crypto::keychain::KeychainStore::new("saku-sync-refresh-token") {
-                let _ = ks.store_passphrase(&body.refresh_token);
+            // Persist to keychain (read-modify-write)
+            if let Ok(store) = saku_crypto::keychain::SyncCredentialStore::new() {
+                let mut creds = store.load().unwrap_or_default();
+                creds.access_token = Some(body.access_token.clone());
+                creds.refresh_token = Some(body.refresh_token.clone());
+                let _ = store.store(&creds);
             }
 
             Ok(())
