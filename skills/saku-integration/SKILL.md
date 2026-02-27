@@ -42,10 +42,11 @@ tdo move <id> [SCHEDULE] [OPTIONS]   # update any field; can take multiple IDs
 ## Complete / Delete / Restore
 
 ```bash
-tdo done <id> [<id>...]      # complete task(s)
-tdo done <id> --stop          # complete and stop recurring task from repeating
-tdo delete <id>               # soft-delete (move to trash)
-tdo restore <id>              # restore from trash
+tdo done <id> [<id>...]           # complete task(s)
+tdo done <id> --note "message"    # complete with a note
+tdo done <id> --stop              # complete and stop recurring task from repeating
+tdo delete <id>                   # soft-delete (move to trash)
+tdo restore <id>                  # restore from trash
 ```
 
 ## Dependencies & Subtasks
@@ -93,3 +94,51 @@ ISO (preferred): `2026-03-15`
 - Prefer numeric IDs over fuzzy names (`tdo done 42` not `tdo done "review"`)
 - Prefer ISO dates over natural language for scripting
 - Check project/area exists before assigning (`tdo list projects`)
+
+## Agent Conventions
+
+### Tags
+
+| Tag | Meaning |
+|-----|---------|
+| `agent` | Task assigned to an AI agent |
+| `needs-review` | Agent completed work, human review needed |
+| `blocked-human` | Agent cannot proceed, human input required |
+
+### Agent Queue
+
+```bash
+tdo view today --tag agent --ready    # agent's actionable tasks (excludes blocked)
+tdo view inbox --tag agent --ready    # agent inbox tasks
+```
+
+### Human Review Queue
+
+```bash
+tdo view inbox --tag needs-review     # tasks awaiting human review
+tdo view today --tag blocked-human    # tasks blocked on human input
+```
+
+### Workflows
+
+**Agent starting a session:**
+```bash
+tdo view today --tag agent --ready --json   # get actionable tasks
+```
+
+**Agent completing work:**
+```bash
+tdo done 42 --note "Implemented feature X, added tests"
+tdo move 42 -t needs-review          # flag for human review (before completing)
+```
+
+**Human reviewing agent work:**
+```bash
+tdo view inbox --tag needs-review
+tdo done 42 --note "Reviewed and approved"
+```
+
+**Agent blocked on human input:**
+```bash
+tdo move 42 -t blocked-human --note "Need clarification on API design"
+```

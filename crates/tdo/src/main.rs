@@ -261,6 +261,10 @@ enum Commands {
         /// Permanently cancel a recurring task (stops it from repeating)
         #[arg(long)]
         stop: bool,
+
+        /// Append a note to the task when completing it
+        #[arg(long, short = 'n')]
+        note: Option<String>,
     },
 
     /// Add or remove a dependency between tasks
@@ -2360,12 +2364,14 @@ fn main() {
         Some(Commands::Done {
             task_numbers_or_fuzzy_names,
             stop,
+            note,
         }) => {
             for task_number_or_fuzzy_name in task_numbers_or_fuzzy_names {
                 // Build parameters
                 let params = CompleteTaskParameters {
                     task_number_or_fuzzy_name,
                     stop,
+                    note: note.clone(),
                 };
 
                 // Call service

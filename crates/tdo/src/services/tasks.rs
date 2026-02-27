@@ -422,6 +422,8 @@ pub struct CompleteTaskParameters {
     /// If true and the task is recurring, cancel it permanently (sets completed_at).
     /// For non-recurring tasks this flag is ignored and completed_at is always set.
     pub stop: bool,
+    /// Optional note to append to the task when completing it.
+    pub note: Option<String>,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
@@ -492,6 +494,14 @@ pub fn complete_task(
     // Mark task as completed — behaviour differs for recurring tasks.
     let mut updated_task = task.clone();
     updated_task.modified_at = crate::sync_clock::next_modified_at();
+
+    // Append note if provided
+    if let Some(note_text) = &parameters.note {
+        updated_task.notes = Some(match &updated_task.notes {
+            Some(existing) => format!("{}\n{}", existing, note_text),
+            None => note_text.clone(),
+        });
+    }
 
     if task.recurrence.is_some() && !parameters.stop {
         // Recurring task: record today as the completed occurrence, do not set completed_at.
@@ -1988,6 +1998,7 @@ mod tests {
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: task.task_number.to_string(),
                 stop: false,
+                note: None,
             },
         );
 
@@ -2008,6 +2019,7 @@ mod tests {
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: "unique".to_string(),
                 stop: false,
+                note: None,
             },
         );
 
@@ -2028,6 +2040,7 @@ mod tests {
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: task.task_number.to_string(),
                 stop: false,
+                note: None,
             },
         );
 
@@ -2048,6 +2061,7 @@ mod tests {
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: "999".to_string(),
                 stop: false,
+                note: None,
             },
         );
 
@@ -2067,6 +2081,7 @@ mod tests {
             CompleteTaskParameters {
                 task_number_or_fuzzy_name: "Task".to_string(),
                 stop: false,
+                note: None,
             },
         );
 
@@ -2074,6 +2089,53 @@ mod tests {
             result,
             Err(CompleteTaskError::AmbiguousTaskName(_))
         ));
+    }
+
+    #[test]
+    fn test_complete_task_with_note_sets_note() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let task = create_test_task(&mut store, "Test Task");
+
+        let result = complete_task(
+            &mut store,
+            &storage,
+            CompleteTaskParameters {
+                task_number_or_fuzzy_name: task.task_number.to_string(),
+                stop: false,
+                note: Some("Completion note".to_string()),
+            },
+        );
+
+        assert!(result.is_ok());
+        let completed = result.unwrap().task;
+        assert_eq!(completed.notes, Some("Completion note".to_string()));
+    }
+
+    #[test]
+    fn test_complete_task_with_note_appends_to_existing() {
+        let storage = MockStorage::new();
+        let mut store = Store::default();
+        let mut task = create_test_task(&mut store, "Test Task");
+        task.notes = Some("Existing note".to_string());
+        store.tasks.insert(task.id, task.clone());
+
+        let result = complete_task(
+            &mut store,
+            &storage,
+            CompleteTaskParameters {
+                task_number_or_fuzzy_name: task.task_number.to_string(),
+                stop: false,
+                note: Some("Completion note".to_string()),
+            },
+        );
+
+        assert!(result.is_ok());
+        let completed = result.unwrap().task;
+        assert_eq!(
+            completed.notes,
+            Some("Existing note\nCompletion note".to_string())
+        );
     }
 
     // ============================================================================
