@@ -106,7 +106,7 @@ pub fn reconcile_renames(store: &mut KvStore) {
     }
 
     // For concurrent renames (same source, different targets), pick winner
-    for (_source, renames) in &renames_by_source {
+    for renames in renames_by_source.values() {
         if renames.len() <= 1 {
             continue;
         }
@@ -172,14 +172,12 @@ pub fn reconcile_renames(store: &mut KvStore) {
         // If the chain resolved and the final target differs from the
         // immediate renamed_to, update the tombstone to point directly
         // to the final target (shortcut the chain).
-        if let Some(final_key) = final_target {
-            if let Some(entry) = store.entries.get_mut(&key) {
-                if let Some(renamed_to) = entry.get("renamed_to").and_then(|v| v.as_str()) {
-                    if renamed_to != final_key {
-                        entry["renamed_to"] = Value::String(final_key);
-                    }
-                }
-            }
+        if let Some(final_key) = final_target
+            && let Some(entry) = store.entries.get_mut(&key)
+            && let Some(renamed_to) = entry.get("renamed_to").and_then(|v| v.as_str())
+            && renamed_to != final_key
+        {
+            entry["renamed_to"] = Value::String(final_key);
         }
     }
 }
@@ -195,10 +193,10 @@ pub fn repair_references(store: &mut KvStore, schemas: &[EntitySchema]) {
     // Build a map of old_key → final_target for all rename tombstones
     let mut rename_map: HashMap<String, String> = HashMap::new();
     for (key, value) in &store.entries {
-        if value.get("deleted_at").is_some() {
-            if let Some(target) = value.get("renamed_to").and_then(|v| v.as_str()) {
-                rename_map.insert(key.clone(), target.to_string());
-            }
+        if value.get("deleted_at").is_some()
+            && let Some(target) = value.get("renamed_to").and_then(|v| v.as_str())
+        {
+            rename_map.insert(key.clone(), target.to_string());
         }
     }
 
@@ -252,11 +250,11 @@ pub fn repair_references(store: &mut KvStore, schemas: &[EntitySchema]) {
                     let mut new_arr = arr.clone();
                     let mut arr_changed = false;
                     for item in &mut new_arr {
-                        if let Some(ref_str) = item.as_str() {
-                            if let Some(new_target) = rename_map.get(ref_str) {
-                                *item = Value::String(new_target.clone());
-                                arr_changed = true;
-                            }
+                        if let Some(ref_str) = item.as_str()
+                            && let Some(new_target) = rename_map.get(ref_str)
+                        {
+                            *item = Value::String(new_target.clone());
+                            arr_changed = true;
                         }
                     }
                     if arr_changed {
@@ -286,10 +284,10 @@ pub fn gc_tombstones(store: &mut KvStore, max_age_days: u32, now_ms: i64) {
             return true;
         }
         // Keep tombstones that are recent enough
-        if let Some(modified_at) = value.get("modified_at") {
-            if let Some(wall_ms) = modified_at.get("wall_ms").and_then(|v| v.as_i64()) {
-                return wall_ms >= cutoff_ms;
-            }
+        if let Some(modified_at) = value.get("modified_at")
+            && let Some(wall_ms) = modified_at.get("wall_ms").and_then(|v| v.as_i64())
+        {
+            return wall_ms >= cutoff_ms;
         }
         // No modified_at → keep (can't determine age)
         true

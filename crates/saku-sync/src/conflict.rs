@@ -70,11 +70,11 @@ fn fix_duplicate_task_numbers_kv(entries: &mut HashMap<String, Value>) {
 
         // First keeps its number, rest get new numbers
         for key in &sorted[1..] {
-            if let Some(entry) = entries.get_mut(key) {
-                if let Some(obj) = entry.as_object_mut() {
-                    obj.insert("task_number".to_string(), Value::from(next));
-                    next += 1;
-                }
+            if let Some(entry) = entries.get_mut(key)
+                && let Some(obj) = entry.as_object_mut()
+            {
+                obj.insert("task_number".to_string(), Value::from(next));
+                next += 1;
             }
         }
     }

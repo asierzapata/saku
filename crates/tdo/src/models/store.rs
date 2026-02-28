@@ -69,10 +69,10 @@ impl Store {
                 if let Ok(project) = serde_json::from_value::<Project>(value) {
                     projects.insert(key, project);
                 }
-            } else if key.starts_with("area/") {
-                if let Ok(area) = serde_json::from_value::<Area>(value) {
-                    areas.insert(key, area);
-                }
+            } else if key.starts_with("area/")
+                && let Ok(area) = serde_json::from_value::<Area>(value)
+            {
+                areas.insert(key, area);
             }
         }
 

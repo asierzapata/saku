@@ -224,7 +224,7 @@ pub fn edit_area(
     // Use store.rename_area to handle tombstone + create + reference updates
     store
         .rename_area(&old_name, &parameters.new_name)
-        .ok_or_else(|| EditAreaError::AreaNotFound(parameters.name))?;
+        .ok_or(EditAreaError::AreaNotFound(parameters.name))?;
 
     // Persist to storage
     storage.save(store)?;
