@@ -4,9 +4,9 @@ use std::cmp::Ordering;
 
 use jiff::Timestamp;
 use jiff::civil::Date;
+use saku_storage::entity::Entity;
 use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // ============================================================================
 // Recurrence types
@@ -150,18 +150,18 @@ fn ordinal_suffix(n: u8) -> &'static str {
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Task {
-    /// UUID to identify the task
-    pub id: Uuid,
+    /// Short hash suffix used as the storage key (e.g., "k7m2a3x9")
+    pub storage_key_suffix: String,
     /// User-facing auto-incremental task number
     pub task_number: u64,
     /// Title of the task
     pub title: String,
     /// Notes of the task
     pub notes: Option<String>,
-    /// The project of this task if it belongs to any
-    pub project_id: Option<Uuid>,
-    /// The area of this task if it belongs to any (and no project)
-    pub area_id: Option<Uuid>,
+    /// Project storage key (e.g., "project/website")
+    pub project_key: Option<String>,
+    /// Area storage key (e.g., "area/work") — used when no project
+    pub area_key: Option<String>,
     /// Tags of the task
     pub tags: Vec<String>,
     /// When the user wants do to this task
@@ -170,10 +170,10 @@ pub struct Task {
     pub deadline: Option<Date>,
     /// Defered date when to surface again the task
     pub defer_until: Option<Date>,
-    /// IDs of tasks that must be completed before this task can start
-    pub depends_on: Vec<Uuid>,
-    /// Parent task ID if this is a subtask (one level deep only)
-    pub parent_task_id: Option<Uuid>,
+    /// Storage keys of tasks that must be completed before this task can start
+    pub depends_on: Vec<String>,
+    /// Parent task storage key if this is a subtask (one level deep only)
+    pub parent_task_key: Option<String>,
     /// When the task was completed
     pub completed_at: Option<Timestamp>,
     /// When the task was deleted
@@ -188,6 +188,16 @@ pub struct Task {
     /// Dates of occurrences that have already been completed.
     #[serde(default)]
     pub completed_occurrences: Vec<Date>,
+}
+
+impl Entity for Task {
+    fn entity_type() -> &'static str {
+        "task"
+    }
+
+    fn natural_key(&self) -> String {
+        self.storage_key_suffix.clone()
+    }
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
@@ -590,21 +600,21 @@ fn order_tasks_impl<'a>(
             return deadline_ord;
         }
         // 2. Project grouping: same project adjacent, no project last
-        let project_ord = match (a.project_id, b.project_id) {
+        let project_ord = match (&a.project_key, &b.project_key) {
             (None, None) => Ordering::Equal,
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
-            (Some(pa), Some(pb)) => pa.cmp(&pb),
+            (Some(pa), Some(pb)) => pa.cmp(pb),
         };
         if project_ord != Ordering::Equal {
             return project_ord;
         }
         // 3. Area grouping: same area adjacent, no area last
-        let area_ord = match (a.area_id, b.area_id) {
+        let area_ord = match (&a.area_key, &b.area_key) {
             (None, None) => Ordering::Equal,
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
-            (Some(aa), Some(ab)) => aa.cmp(&ab),
+            (Some(aa), Some(ab)) => aa.cmp(ab),
         };
         if area_ord != Ordering::Equal {
             return area_ord;
@@ -623,14 +633,14 @@ mod tests {
     fn make_task(
         task_number: u64,
         deadline: Option<Date>,
-        project_id: Option<Uuid>,
-        area_id: Option<Uuid>,
+        project_key: Option<String>,
+        area_key: Option<String>,
     ) -> Task {
         Task {
             task_number,
             deadline,
-            project_id,
-            area_id,
+            project_key,
+            area_key,
             ..Task::default()
         }
     }
@@ -671,8 +681,7 @@ mod tests {
     #[test]
     fn same_deadline_groups_by_project() {
         let deadline = Some(date(2025, 6, 1));
-        let project_a = Uuid::new_v4();
-        let with_project = make_task(2, deadline, Some(project_a), None);
+        let with_project = make_task(2, deadline, Some("project/alpha".into()), None);
         let no_project = make_task(1, deadline, None, None);
 
         let tasks = vec![&no_project, &with_project];
@@ -690,10 +699,9 @@ mod tests {
 
     #[test]
     fn same_project_groups_by_area() {
-        let project_id = Some(Uuid::new_v4());
-        let area_a = Uuid::new_v4();
-        let with_area = make_task(2, None, project_id, Some(area_a));
-        let no_area = make_task(1, None, project_id, None);
+        let project_key = Some("project/alpha".into());
+        let with_area = make_task(2, None, project_key.clone(), Some("area/work".into()));
+        let no_area = make_task(1, None, project_key, None);
 
         let tasks = vec![&no_area, &with_area];
         let ordered = order_tasks(tasks);
@@ -707,10 +715,10 @@ mod tests {
 
     #[test]
     fn same_group_orders_by_task_number() {
-        let project_id = Some(Uuid::new_v4());
-        let t1 = make_task(1, None, project_id, None);
-        let t3 = make_task(3, None, project_id, None);
-        let t2 = make_task(2, None, project_id, None);
+        let project_key = Some("project/alpha".into());
+        let t1 = make_task(1, None, project_key.clone(), None);
+        let t3 = make_task(3, None, project_key.clone(), None);
+        let t2 = make_task(2, None, project_key, None);
 
         let tasks = vec![&t3, &t1, &t2];
         let ordered = order_tasks(tasks);

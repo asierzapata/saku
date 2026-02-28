@@ -1,6 +1,7 @@
 use jiff::civil::Date;
+use saku_storage::entity::Entity;
+use saku_storage::key_gen::generate_task_key;
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::{
     models::{
@@ -58,7 +59,7 @@ pub struct AddTaskParameters {
     pub parent_task_number: Option<u64>,
 }
 
-#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number, task.uuid)))]
+#[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number, task.key)))]
 pub fn add_task(
     store: &mut Store,
     storage: &impl Storage,
@@ -67,8 +68,14 @@ pub fn add_task(
     #[cfg(feature = "logging")]
     info!(title = %parameters.title, when = ?parameters.when, "Adding new task");
 
+    // Generate a unique key suffix for this task
+    let now_ms = jiff::Timestamp::now().as_millisecond();
+    let device_id =
+        saku_storage::device::get_or_create_device_id().unwrap_or_else(|_| "unknown".to_string());
+    let key_suffix = generate_task_key(&device_id, now_ms);
+
     // 1. If parent_task_number is provided, resolve parent and inherit context
-    let (project_id, area_id, parent_task_id) =
+    let (project_key, area_key, parent_task_key) =
         if let Some(parent_number) = parameters.parent_task_number {
             // Validate no project/area specified alongside --parent
             if parameters.project.is_some() || parameters.area.is_some() {
@@ -80,17 +87,17 @@ pub fn add_task(
                 .ok_or(AddTaskError::ParentTaskNotFound(parent_number))?;
 
             // Enforce one-level nesting
-            if parent.parent_task_id.is_some() {
+            if parent.parent_task_key.is_some() {
                 return Err(AddTaskError::ParentIsSubtask);
             }
 
-            let inherited_project_id = parent.project_id;
-            let inherited_area_id = parent.area_id;
-            let parent_id = parent.id;
-            (inherited_project_id, inherited_area_id, Some(parent_id))
+            let inherited_project_key = parent.project_key.clone();
+            let inherited_area_key = parent.area_key.clone();
+            let parent_key = parent.storage_key();
+            (inherited_project_key, inherited_area_key, Some(parent_key))
         } else {
-            // 1a. Validate and resolve project name to project ID
-            let project_id = if let Some(project_name) = parameters.project {
+            // 1a. Validate and resolve project name to project key
+            let project_key = if let Some(project_name) = parameters.project {
                 let matching_projects: Vec<_> = store
                     .get_active_projects()
                     .filter(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()))
@@ -102,7 +109,7 @@ pub fn add_task(
                         error!(project = %project_name, "Project not found");
                         return Err(AddTaskError::ProjectNotFound(project_name));
                     }
-                    1 => Some(matching_projects[0].id),
+                    1 => Some(matching_projects[0].storage_key()),
                     _ => {
                         let names: Vec<String> =
                             matching_projects.iter().map(|p| p.name.clone()).collect();
@@ -115,8 +122,8 @@ pub fn add_task(
                 None
             };
 
-            // 1b. Validate and resolve area name to area ID
-            let area_id = if let Some(area_name) = parameters.area {
+            // 1b. Validate and resolve area name to area key
+            let area_key = if let Some(area_name) = parameters.area {
                 let matching_areas: Vec<_> = store
                     .get_active_areas()
                     .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
@@ -128,7 +135,7 @@ pub fn add_task(
                         error!(area = %area_name, "Area not found");
                         return Err(AddTaskError::AreaNotFound(area_name));
                     }
-                    1 => Some(matching_areas[0].id),
+                    1 => Some(matching_areas[0].storage_key()),
                     _ => {
                         let names: Vec<String> =
                             matching_areas.iter().map(|a| a.name.clone()).collect();
@@ -141,7 +148,7 @@ pub fn add_task(
                 None
             };
 
-            (project_id, area_id, None)
+            (project_key, area_key, None)
         };
 
     // 3. Parse deadline if provided
@@ -168,18 +175,18 @@ pub fn add_task(
 
     // 4. Create the task (task_number will be assigned by store.add_task)
     let task = Task {
-        id: Uuid::new_v4(),
+        storage_key_suffix: key_suffix.clone(),
         task_number: 0,
         title: parameters.title,
         notes: parameters.notes,
-        project_id,
-        area_id,
+        project_key,
+        area_key,
         tags: parameters.tags,
         when: parameters.when,
         deadline,
         defer_until,
         depends_on: vec![],
-        parent_task_id,
+        parent_task_key,
         completed_at: None,
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
@@ -188,7 +195,7 @@ pub fn add_task(
         completed_occurrences: vec![],
     };
 
-    let task_id = task.id;
+    let task_storage_key = task.storage_key();
 
     // 5. Add to store (assigns task_number)
     store.add_task(task);
@@ -197,13 +204,13 @@ pub fn add_task(
     storage.save(store)?;
 
     // 7. Return the created task (with the assigned task_number)
-    let created_task = store.get_task(task_id).unwrap().clone();
+    let created_task = store.get_task(&task_storage_key).unwrap().clone();
 
     #[cfg(feature = "logging")]
     {
         let span = tracing::Span::current();
         span.record("task.number", created_task.task_number);
-        span.record("task.uuid", created_task.id.to_string());
+        span.record("task.key", &task_storage_key);
         info!(
             task_number = created_task.task_number,
             "Task added successfully"
@@ -284,8 +291,8 @@ pub fn move_task(
                 parameters.task_number.to_string(),
             ))?;
 
-    let existing_project_id = task.project_id;
-    let project_id = if parameters.clear_project {
+    let existing_project_key = task.project_key.clone();
+    let project_key = if parameters.clear_project {
         None
     } else if let Some(project_name) = parameters.project {
         let matching_projects: Vec<_> = store
@@ -295,18 +302,18 @@ pub fn move_task(
 
         match matching_projects.len() {
             0 => return Err(MoveTaskError::ProjectNotFound(project_name)),
-            1 => Some(matching_projects[0].id),
+            1 => Some(matching_projects[0].storage_key()),
             _ => {
                 let names: Vec<String> = matching_projects.iter().map(|p| p.name.clone()).collect();
                 return Err(MoveTaskError::AmbiguousProjectName(names));
             }
         }
     } else {
-        existing_project_id
+        existing_project_key
     };
 
-    let existing_area_id = task.area_id;
-    let area_id = if parameters.clear_area {
+    let existing_area_key = task.area_key.clone();
+    let area_key = if parameters.clear_area {
         None
     } else if let Some(area_name) = parameters.area {
         let matching_areas: Vec<_> = store
@@ -316,14 +323,14 @@ pub fn move_task(
 
         match matching_areas.len() {
             0 => return Err(MoveTaskError::AreaNotFound(area_name)),
-            1 => Some(matching_areas[0].id),
+            1 => Some(matching_areas[0].storage_key()),
             _ => {
                 let names: Vec<String> = matching_areas.iter().map(|a| a.name.clone()).collect();
                 return Err(MoveTaskError::AmbiguousAreaName(names));
             }
         }
     } else {
-        existing_area_id
+        existing_area_key
     };
 
     let deadline = if parameters.clear_deadline {
@@ -372,18 +379,18 @@ pub fn move_task(
     };
 
     let new_task = Task {
-        id: task.id,
+        storage_key_suffix: task.storage_key_suffix.clone(),
         task_number: task.task_number,
         title: task.title.clone(),
         notes: parameters.notes,
         when,
         deadline,
-        project_id,
-        area_id,
+        project_key,
+        area_key,
         tags: parameters.tags,
         defer_until,
         depends_on: task.depends_on.clone(),
-        parent_task_id: task.parent_task_id,
+        parent_task_key: task.parent_task_key.clone(),
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
@@ -392,13 +399,13 @@ pub fn move_task(
         completed_occurrences: task.completed_occurrences.clone(),
     };
 
-    let task_id = task.id;
+    let task_storage_key = new_task.storage_key();
 
     store.update_task(new_task);
 
     storage.save(store)?;
 
-    Ok(store.get_task(task_id).unwrap().clone())
+    Ok(store.get_task(&task_storage_key).unwrap().clone())
 }
 
 #[derive(Debug, Error)]
@@ -476,16 +483,16 @@ pub fn complete_task(
     #[cfg(feature = "logging")]
     tracing::Span::current().record("task.number", task.task_number);
 
-    let task_id = task.id;
+    let task_storage_key = task.storage_key();
 
     // Prevent completing a task that has incomplete subtasks
-    if store.has_incomplete_subtasks(task_id) {
+    if store.has_incomplete_subtasks(&task_storage_key) {
         return Err(CompleteTaskError::HasIncompleteSubtasks);
     }
 
     // Collect tasks that were blocked by this task before completing it
     let previously_blocking: Vec<Task> = store
-        .get_blocking(task_id)
+        .get_blocking(&task_storage_key)
         .into_iter()
         .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
         .cloned()
@@ -515,7 +522,9 @@ pub fn complete_task(
     }
 
     // Update in store
-    store.tasks.insert(updated_task.id, updated_task.clone());
+    store
+        .tasks
+        .insert(task_storage_key.clone(), updated_task.clone());
 
     // Persist to storage
     storage.save(store)?;
@@ -530,7 +539,7 @@ pub fn complete_task(
     let newly_unblocked: Vec<Task> = previously_blocking
         .into_iter()
         .filter(|t| !store.is_task_blocked(t))
-        .map(|t| store.get_task(t.id).unwrap().clone())
+        .map(|t| store.get_task(&t.storage_key()).unwrap().clone())
         .collect();
 
     Ok(CompleteTaskResult {
@@ -607,22 +616,24 @@ pub fn delete_task(
     }
 
     // Mark as deleted
-    let task_id = task.id;
+    let task_storage_key = task.storage_key();
     let mut updated_task = task.clone();
     updated_task.deleted_at = Some(jiff::Timestamp::now());
     updated_task.modified_at = crate::sync_clock::next_modified_at();
 
     // Update in store
-    store.tasks.insert(task_id, updated_task.clone());
+    store
+        .tasks
+        .insert(task_storage_key.clone(), updated_task.clone());
 
     // Cascade soft-delete all non-deleted subtasks
-    let subtask_ids: Vec<uuid::Uuid> = store
-        .get_subtasks(task_id)
-        .map(|t| t.id)
+    let subtask_keys: Vec<String> = store
+        .get_subtasks(&task_storage_key)
+        .map(|t| t.storage_key())
         .collect();
     let now = jiff::Timestamp::now();
-    for subtask_id in subtask_ids {
-        if let Some(subtask) = store.get_task_mut(subtask_id) {
+    for subtask_key in subtask_keys {
+        if let Some(subtask) = store.get_task_mut(&subtask_key) {
             subtask.deleted_at = Some(now);
             subtask.modified_at = crate::sync_clock::next_modified_at();
         }
@@ -667,13 +678,15 @@ pub fn restore_task(
     }
 
     // Restore task
-    let task_id = task.id;
+    let task_storage_key = task.storage_key();
     let mut restored_task = task.clone();
     restored_task.deleted_at = None;
     restored_task.modified_at = crate::sync_clock::next_modified_at();
 
     // Update in store
-    store.tasks.insert(task_id, restored_task.clone());
+    store
+        .tasks
+        .insert(task_storage_key, restored_task.clone());
 
     // Persist to storage
     storage.save(store)?;
@@ -781,8 +794,8 @@ pub fn edit_task(
         return Err(EditTaskError::NoChanges);
     }
 
-    // 6. Validate and resolve project name to ID
-    let project_id = if let Some(project_name) = parsed.project {
+    // 6. Validate and resolve project name to key
+    let project_key = if let Some(project_name) = parsed.project {
         let matching_projects: Vec<_> = store
             .get_active_projects()
             .filter(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()))
@@ -790,7 +803,7 @@ pub fn edit_task(
 
         match matching_projects.len() {
             0 => return Err(EditTaskError::ProjectNotFound(project_name)),
-            1 => Some(matching_projects[0].id),
+            1 => Some(matching_projects[0].storage_key()),
             _ => {
                 let names: Vec<String> = matching_projects.iter().map(|p| p.name.clone()).collect();
                 return Err(EditTaskError::AmbiguousProjectName(names));
@@ -800,8 +813,8 @@ pub fn edit_task(
         None
     };
 
-    // 7. Validate and resolve area name to ID
-    let area_id = if let Some(area_name) = parsed.area {
+    // 7. Validate and resolve area name to key
+    let area_key = if let Some(area_name) = parsed.area {
         let matching_areas: Vec<_> = store
             .get_active_areas()
             .filter(|a| a.name.to_lowercase().contains(&area_name.to_lowercase()))
@@ -809,7 +822,7 @@ pub fn edit_task(
 
         match matching_areas.len() {
             0 => return Err(EditTaskError::AreaNotFound(area_name)),
-            1 => Some(matching_areas[0].id),
+            1 => Some(matching_areas[0].storage_key()),
             _ => {
                 let names: Vec<String> = matching_areas.iter().map(|a| a.name.clone()).collect();
                 return Err(EditTaskError::AmbiguousAreaName(names));
@@ -846,18 +859,18 @@ pub fn edit_task(
 
     // 11. Build updated task
     let updated_task = Task {
-        id: task.id,
+        storage_key_suffix: task.storage_key_suffix.clone(),
         task_number: task.task_number,
         title: parsed.title,
         notes: parsed.notes,
-        project_id,
-        area_id,
+        project_key,
+        area_key,
         tags: parsed.tags,
         when,
         deadline,
         defer_until,
         depends_on: task.depends_on.clone(),
-        parent_task_id: task.parent_task_id,
+        parent_task_key: task.parent_task_key.clone(),
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
@@ -866,7 +879,7 @@ pub fn edit_task(
         completed_occurrences: task.completed_occurrences.clone(),
     };
 
-    let task_id = task.id;
+    let task_storage_key = updated_task.storage_key();
 
     // 13. Update store
     store.update_task(updated_task);
@@ -875,7 +888,7 @@ pub fn edit_task(
     storage.save(store)?;
 
     // 15. Return updated task
-    Ok(store.get_task(task_id).unwrap().clone())
+    Ok(store.get_task(&task_storage_key).unwrap().clone())
 }
 
 /// Parse when string to When enum
@@ -931,24 +944,24 @@ pub struct DependTaskParameters {
     pub remove_dependency: Option<u64>,
 }
 
-/// Check for circular dependencies transitively: would adding `new_dep_id` as a
-/// dependency of `task_id` create a cycle?
-fn would_create_cycle(store: &Store, task_id: Uuid, new_dep_id: Uuid) -> bool {
-    // BFS/DFS: starting from new_dep_id, see if we can reach task_id through depends_on chains
+/// Check for circular dependencies transitively: would adding `new_dep_key` as a
+/// dependency of `task_key` create a cycle?
+fn would_create_cycle(store: &Store, task_key: &str, new_dep_key: &str) -> bool {
+    // BFS/DFS: starting from new_dep_key, see if we can reach task_key through depends_on chains
     let mut visited = std::collections::HashSet::new();
     let mut queue = std::collections::VecDeque::new();
-    queue.push_back(new_dep_id);
+    queue.push_back(new_dep_key.to_string());
 
     while let Some(current) = queue.pop_front() {
-        if current == task_id {
+        if current == task_key {
             return true;
         }
-        if !visited.insert(current) {
+        if !visited.insert(current.clone()) {
             continue;
         }
         if let Some(t) = store.tasks.get(&current) {
             for dep in &t.depends_on {
-                queue.push_back(*dep);
+                queue.push_back(dep.clone());
             }
         }
     }
@@ -973,19 +986,22 @@ pub fn depend_task(
             .ok_or_else(|| DependTaskError::TaskNotFound(dep_number.to_string()))?
             .clone();
 
-        if dep.id == task.id {
+        let dep_key = dep.storage_key();
+        let task_key = task.storage_key();
+
+        if dep_key == task_key {
             return Err(DependTaskError::SelfDependency);
         }
 
-        if updated.depends_on.contains(&dep.id) {
+        if updated.depends_on.contains(&dep_key) {
             return Err(DependTaskError::AlreadyExists);
         }
 
-        if would_create_cycle(store, task.id, dep.id) {
+        if would_create_cycle(store, &task_key, &dep_key) {
             return Err(DependTaskError::CircularDependency);
         }
 
-        updated.depends_on.push(dep.id);
+        updated.depends_on.push(dep_key);
     }
 
     if let Some(rem_number) = parameters.remove_dependency {
@@ -994,15 +1010,16 @@ pub fn depend_task(
             .ok_or_else(|| DependTaskError::TaskNotFound(rem_number.to_string()))?
             .clone();
 
-        updated.depends_on.retain(|id| *id != dep.id);
+        let dep_key = dep.storage_key();
+        updated.depends_on.retain(|key| *key != dep_key);
     }
 
     updated.modified_at = crate::sync_clock::next_modified_at();
-    let task_id = updated.id;
+    let task_storage_key = updated.storage_key();
     store.update_task(updated);
     storage.save(store)?;
 
-    Ok(store.get_task(task_id).unwrap().clone())
+    Ok(store.get_task(&task_storage_key).unwrap().clone())
 }
 
 #[cfg(test)]
@@ -1045,20 +1062,20 @@ mod tests {
     // Helper functions for test fixtures
     fn create_test_area(store: &mut Store, name: &str) -> Area {
         let area = Area {
-            id: Uuid::new_v4(),
             name: name.to_string(),
             deleted_at: None,
             modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            renamed_to: None,
+            previous_key: None,
         };
         store.add_area(area.clone());
         area
     }
 
-    fn create_test_project(store: &mut Store, name: &str, area_id: Option<Uuid>) -> Project {
+    fn create_test_project(store: &mut Store, name: &str, area_key: Option<String>) -> Project {
         let project = Project {
-            id: Uuid::new_v4(),
             name: name.to_string(),
-            area_id,
+            area_key,
             created_at: jiff::Timestamp::now(),
             ..Project::default()
         };
@@ -1067,16 +1084,18 @@ mod tests {
     }
 
     fn create_test_task(store: &mut Store, title: &str) -> Task {
+        // Use title as seed so rapid calls don't collide on the same millisecond.
+        let key_suffix = generate_task_key(title, store.next_task_number() as i64);
         let task = Task {
-            id: Uuid::new_v4(),
+            storage_key_suffix: key_suffix,
             task_number: 0,
             title: title.to_string(),
             created_at: jiff::Timestamp::now(),
             ..Task::default()
         };
-        store.add_task(task.clone());
+        store.add_task(task);
         store
-            .get_task_by_number(store.next_task_number - 1)
+            .get_task_by_number(store.next_task_number() - 1)
             .unwrap()
             .clone()
     }
@@ -1142,7 +1161,7 @@ mod tests {
 
         assert!(result.is_ok());
         let task = result.unwrap();
-        assert_eq!(task.project_id, Some(project.id));
+        assert_eq!(task.project_key, Some(project.storage_key()));
     }
 
     #[test]
@@ -1171,7 +1190,7 @@ mod tests {
 
         assert!(result.is_ok());
         let task = result.unwrap();
-        assert_eq!(task.area_id, Some(area.id));
+        assert_eq!(task.area_key, Some(area.storage_key()));
     }
 
     #[test]
@@ -1609,7 +1628,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().project_id, Some(project.id));
+        assert_eq!(result.unwrap().project_key, Some(project.storage_key()));
     }
 
     #[test]
@@ -1643,7 +1662,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().area_id, Some(area.id));
+        assert_eq!(result.unwrap().area_key, Some(area.storage_key()));
     }
 
     #[test]
@@ -1812,16 +1831,21 @@ mod tests {
         let mut store = Store::default();
         let project = create_test_project(&mut store, "My Project", None);
         let task = {
+            let now_ms = jiff::Timestamp::now().as_millisecond();
+            let key_suffix = generate_task_key("test-device", now_ms);
             let t = Task {
-                id: Uuid::new_v4(),
+                storage_key_suffix: key_suffix,
                 task_number: 0,
                 title: "Task with Project".to_string(),
-                project_id: Some(project.id),
+                project_key: Some(project.storage_key()),
                 created_at: jiff::Timestamp::now(),
                 ..Task::default()
             };
             store.add_task(t);
-            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+            store
+                .get_task_by_number(store.next_task_number() - 1)
+                .unwrap()
+                .clone()
         };
 
         let result = move_task(
@@ -1847,7 +1871,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().project_id, Some(project.id));
+        assert_eq!(result.unwrap().project_key, Some(project.storage_key()));
     }
 
     #[test]
@@ -1856,16 +1880,21 @@ mod tests {
         let mut store = Store::default();
         let project = create_test_project(&mut store, "My Project", None);
         let task = {
+            let now_ms = jiff::Timestamp::now().as_millisecond();
+            let key_suffix = generate_task_key("test-device", now_ms);
             let t = Task {
-                id: Uuid::new_v4(),
+                storage_key_suffix: key_suffix,
                 task_number: 0,
                 title: "Task with Project".to_string(),
-                project_id: Some(project.id),
+                project_key: Some(project.storage_key()),
                 created_at: jiff::Timestamp::now(),
                 ..Task::default()
             };
             store.add_task(t);
-            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+            store
+                .get_task_by_number(store.next_task_number() - 1)
+                .unwrap()
+                .clone()
         };
 
         let result = move_task(
@@ -1891,7 +1920,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().project_id, None);
+        assert_eq!(result.unwrap().project_key, None);
     }
 
     #[test]
@@ -1900,16 +1929,21 @@ mod tests {
         let mut store = Store::default();
         let area = create_test_area(&mut store, "Work");
         let task = {
+            let now_ms = jiff::Timestamp::now().as_millisecond();
+            let key_suffix = generate_task_key("test-device", now_ms);
             let t = Task {
-                id: Uuid::new_v4(),
+                storage_key_suffix: key_suffix,
                 task_number: 0,
                 title: "Task with Area".to_string(),
-                area_id: Some(area.id),
+                area_key: Some(area.storage_key()),
                 created_at: jiff::Timestamp::now(),
                 ..Task::default()
             };
             store.add_task(t);
-            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+            store
+                .get_task_by_number(store.next_task_number() - 1)
+                .unwrap()
+                .clone()
         };
 
         let result = move_task(
@@ -1935,7 +1969,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().area_id, Some(area.id));
+        assert_eq!(result.unwrap().area_key, Some(area.storage_key()));
     }
 
     #[test]
@@ -1944,16 +1978,21 @@ mod tests {
         let mut store = Store::default();
         let area = create_test_area(&mut store, "Work");
         let task = {
+            let now_ms = jiff::Timestamp::now().as_millisecond();
+            let key_suffix = generate_task_key("test-device", now_ms);
             let t = Task {
-                id: Uuid::new_v4(),
+                storage_key_suffix: key_suffix,
                 task_number: 0,
                 title: "Task with Area".to_string(),
-                area_id: Some(area.id),
+                area_key: Some(area.storage_key()),
                 created_at: jiff::Timestamp::now(),
                 ..Task::default()
             };
             store.add_task(t);
-            store.get_task_by_number(store.next_task_number - 1).unwrap().clone()
+            store
+                .get_task_by_number(store.next_task_number() - 1)
+                .unwrap()
+                .clone()
         };
 
         let result = move_task(
@@ -1979,7 +2018,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().area_id, None);
+        assert_eq!(result.unwrap().area_key, None);
     }
 
     // ============================================================================
@@ -2118,7 +2157,7 @@ mod tests {
         let mut store = Store::default();
         let mut task = create_test_task(&mut store, "Test Task");
         task.notes = Some("Existing note".to_string());
-        store.tasks.insert(task.id, task.clone());
+        store.tasks.insert(task.storage_key(), task.clone());
 
         let result = complete_task(
             &mut store,

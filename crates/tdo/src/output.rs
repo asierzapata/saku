@@ -1,4 +1,5 @@
 use jiff::civil::Date;
+use saku_storage::entity::Entity;
 use saku_tdo::models::{
     store::Store,
     task::{Task, When, is_pending_on},
@@ -24,7 +25,7 @@ impl OutputFormat {
     }
 }
 
-/// Flattened task for machine-readable output (UUIDs resolved to names)
+/// Flattened task for machine-readable output (keys resolved to names)
 #[derive(Serialize)]
 pub struct TaskOutput {
     pub id: u64,
@@ -63,26 +64,30 @@ impl TaskOutput {
         };
 
         let project = task
-            .project_id
-            .and_then(|id| store.get_project(id))
+            .project_key
+            .as_deref()
+            .and_then(|key| store.get_project(key))
             .map(|p| p.name.clone());
 
         let area = task
-            .area_id
-            .and_then(|id| store.get_area(id))
+            .area_key
+            .as_deref()
+            .and_then(|key| store.get_area(key))
             .map(|a| a.name.clone())
             .or_else(|| {
                 // Resolve area through project if task has no direct area
-                task.project_id
-                    .and_then(|pid| store.get_project(pid))
-                    .and_then(|p| p.area_id)
+                task.project_key
+                    .as_deref()
+                    .and_then(|key| store.get_project(key))
+                    .and_then(|p| p.area_key.as_deref())
                     .and_then(|aid| store.get_area(aid))
                     .map(|a| a.name.clone())
             });
 
         let parent_id = task
-            .parent_task_id
-            .and_then(|id| store.get_task(id))
+            .parent_task_key
+            .as_deref()
+            .and_then(|key| store.get_task(key))
             .map(|t| t.task_number);
 
         Self {
@@ -208,12 +213,14 @@ pub fn build_context(store: &Store, today: Date) -> ContextOutput {
     let mut active_projects: Vec<ProjectSummary> = store
         .get_active_projects()
         .map(|p| {
+            let project_key = p.storage_key();
             let task_count = store
-                .get_tasks_for_project(p.id)
+                .get_tasks_for_project(&project_key)
                 .filter(|t| t.deleted_at.is_none() && t.completed_at.is_none())
                 .count() as u64;
             let area = p
-                .area_id
+                .area_key
+                .as_deref()
                 .and_then(|aid| store.get_area(aid))
                 .map(|a| a.name.clone());
             ProjectSummary {
@@ -229,7 +236,7 @@ pub fn build_context(store: &Store, today: Date) -> ContextOutput {
     // --- Collect today's tasks (scheduled today or recurring today), excluding subtasks ---
     let today_tasks: Vec<&Task> = store
         .get_active_tasks()
-        .filter(|t| t.completed_at.is_none() && t.parent_task_id.is_none())
+        .filter(|t| t.completed_at.is_none() && t.parent_task_key.is_none())
         .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
         .filter(|t| {
             let scheduled_today = match t.when {
@@ -264,7 +271,7 @@ pub fn build_context(store: &Store, today: Date) -> ContextOutput {
         .get_active_tasks()
         .filter(|t| {
             t.completed_at.is_none()
-                && t.parent_task_id.is_none()
+                && t.parent_task_key.is_none()
                 && t.recurrence.is_none()
                 && (t.defer_until.is_none() || t.defer_until.unwrap() <= today)
         })
@@ -287,9 +294,9 @@ pub fn build_context(store: &Store, today: Date) -> ContextOutput {
         )
         .copied()
         .collect();
-    // Deduplicate by task id
+    // Deduplicate by task number
     ready_tasks.sort_by_key(|t| t.task_number);
-    ready_tasks.dedup_by_key(|t| t.id);
+    ready_tasks.dedup_by_key(|t| t.storage_key_suffix.clone());
     ready_tasks.truncate(10);
 
     let ready_task_outputs: Vec<TaskOutput> = ready_tasks
@@ -344,7 +351,7 @@ pub fn build_context(store: &Store, today: Date) -> ContextOutput {
         .values()
         .filter(|t| {
             t.deleted_at.is_none()
-                && t.parent_task_id.is_none()
+                && t.parent_task_key.is_none()
                 && t.completed_at.is_some_and(|c| c >= threshold_48h)
         })
         .collect();
@@ -379,7 +386,6 @@ mod tests {
     use super::*;
     use jiff::civil::date;
     use saku_tdo::models::project::Project;
-    use uuid::Uuid;
 
     fn make_store() -> Store {
         Store::default()
@@ -387,7 +393,12 @@ mod tests {
 
     fn make_task(title: &str, when: When) -> Task {
         Task {
-            id: Uuid::new_v4(),
+            storage_key_suffix: uuid::Uuid::new_v4()
+                .to_string()
+                .replace('-', "")
+                .chars()
+                .take(8)
+                .collect(),
             title: title.to_string(),
             when,
             ..Task::default()
@@ -419,22 +430,26 @@ mod tests {
 
         // A project
         let proj = Project {
-            id: Uuid::new_v4(),
             name: "auth-service".to_string(),
             ..Project::default()
         };
-        store.add_project(proj.clone());
+        let proj_key = store.add_project(proj.clone());
 
         // Today task (ready)
         let mut t1 = make_task("Refactor auth", When::Scheduled { date: today });
-        t1.project_id = Some(proj.id);
+        t1.project_key = Some(proj_key.clone());
         store.add_task(t1);
 
         // Today task (blocked) — depends on t1
-        let t1_id = store.tasks.values().find(|t| t.title == "Refactor auth").unwrap().id;
+        let t1_key = store
+            .tasks
+            .iter()
+            .find(|(_, t)| t.title == "Refactor auth")
+            .map(|(k, _)| k.clone())
+            .unwrap();
         let mut t2 = make_task("Deploy auth", When::Scheduled { date: today });
-        t2.project_id = Some(proj.id);
-        t2.depends_on = vec![t1_id];
+        t2.project_key = Some(proj_key.clone());
+        t2.depends_on = vec![t1_key];
         store.add_task(t2);
 
         // Inbox task
@@ -490,14 +505,24 @@ mod tests {
 
         let blocker1 = make_task("Write tests", When::Scheduled { date: today });
         store.add_task(blocker1.clone());
-        let blocker1_id = store.tasks.values().find(|t| t.title == "Write tests").unwrap().id;
+        let blocker1_key = store
+            .tasks
+            .iter()
+            .find(|(_, t)| t.title == "Write tests")
+            .map(|(k, _)| k.clone())
+            .unwrap();
 
         let blocker2 = make_task("Code review", When::Scheduled { date: today });
         store.add_task(blocker2.clone());
-        let blocker2_id = store.tasks.values().find(|t| t.title == "Code review").unwrap().id;
+        let blocker2_key = store
+            .tasks
+            .iter()
+            .find(|(_, t)| t.title == "Code review")
+            .map(|(k, _)| k.clone())
+            .unwrap();
 
         let mut blocked = make_task("Deploy", When::Scheduled { date: today });
-        blocked.depends_on = vec![blocker1_id, blocker2_id];
+        blocked.depends_on = vec![blocker1_key, blocker2_key];
         store.add_task(blocked);
 
         let ctx = build_context(&store, today);

@@ -47,8 +47,8 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
 
     // Project
     output.push_str("Project: ");
-    if let Some(project_id) = task.project_id
-        && let Some(project) = store.get_project(project_id)
+    if let Some(project_key) = &task.project_key
+        && let Some(project) = store.get_project(project_key)
     {
         output.push_str(&project.name);
     }
@@ -56,8 +56,8 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
 
     // Area
     output.push_str("Area: ");
-    if let Some(area_id) = task.area_id
-        && let Some(area) = store.get_area(area_id)
+    if let Some(area_key) = &task.area_key
+        && let Some(area) = store.get_area(area_key)
     {
         output.push_str(&area.name);
     }
@@ -272,16 +272,18 @@ pub fn has_changes(original_task: &Task, parsed: &ParsedTaskEdit, store: &Store)
     }
 
     let original_project = original_task
-        .project_id
-        .and_then(|id| store.get_project(id))
+        .project_key
+        .as_deref()
+        .and_then(|key| store.get_project(key))
         .map(|p| p.name.clone());
     if original_project.as_deref() != parsed.project.as_deref() {
         return true;
     }
 
     let original_area = original_task
-        .area_id
-        .and_then(|id| store.get_area(id))
+        .area_key
+        .as_deref()
+        .and_then(|key| store.get_area(key))
         .map(|a| a.name.clone());
     if original_area.as_deref() != parsed.area.as_deref() {
         return true;
@@ -317,7 +319,6 @@ mod tests {
         task::Task,
     };
     use jiff::civil::Date;
-    use uuid::Uuid;
 
     fn create_test_store() -> Store {
         Store::default()
@@ -327,24 +328,10 @@ mod tests {
     fn test_serialize_minimal_task() {
         let store = create_test_store();
         let task = Task {
-            id: Uuid::new_v4(),
+            storage_key_suffix: "abc123".to_string(),
             task_number: 42,
             title: "Test task".to_string(),
-            notes: None,
-            project_id: None,
-            area_id: None,
-            tags: vec![],
-            when: When::Inbox,
-            deadline: None,
-            defer_until: None,
-            depends_on: vec![],
-            parent_task_id: None,
-            completed_at: None,
-            deleted_at: None,
-            created_at: jiff::Timestamp::now(),
-            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
-            recurrence: None,
-            completed_occurrences: vec![],
+            ..Task::default()
         };
 
         let serialized = serialize_task_for_edit(&task, &store);
@@ -360,47 +347,32 @@ mod tests {
 
         // Create area and project
         let area = Area {
-            id: Uuid::new_v4(),
             name: "Work".to_string(),
-            deleted_at: None,
-            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            ..Area::default()
         };
-        store.add_area(area.clone());
+        let area_key = store.add_area(area);
 
         let project = Project {
-            id: Uuid::new_v4(),
             name: "Backend API".to_string(),
-            area_id: Some(area.id),
-            notes: None,
-            deadline: None,
+            area_key: Some(area_key.clone()),
             created_at: jiff::Timestamp::now(),
-            completed_at: None,
-            deleted_at: None,
-            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            ..Project::default()
         };
-        store.add_project(project.clone());
+        let project_key = store.add_project(project);
 
         let task = Task {
-            id: Uuid::new_v4(),
+            storage_key_suffix: "abc123".to_string(),
             task_number: 1,
             title: "Fix bug".to_string(),
             notes: Some("This is important\nMulti-line notes".to_string()),
-            project_id: Some(project.id),
-            area_id: Some(area.id),
+            project_key: Some(project_key),
+            area_key: Some(area_key),
             tags: vec!["urgent".to_string(), "bug".to_string()],
             when: When::Scheduled {
                 date: jiff::Zoned::now().date(),
             },
             deadline: Some("2026-03-15".parse::<Date>().unwrap()),
-            defer_until: None,
-            depends_on: vec![],
-            parent_task_id: None,
-            completed_at: None,
-            deleted_at: None,
-            created_at: jiff::Timestamp::now(),
-            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
-            recurrence: None,
-            completed_occurrences: vec![],
+            ..Task::default()
         };
 
         let serialized = serialize_task_for_edit(&task, &store);
@@ -512,24 +484,10 @@ Checklist:
     fn test_has_changes_detects_change() {
         let store = create_test_store();
         let task = Task {
-            id: Uuid::new_v4(),
+            storage_key_suffix: "abc".to_string(),
             task_number: 1,
             title: "Original title".to_string(),
-            notes: None,
-            project_id: None,
-            area_id: None,
-            tags: vec![],
-            when: When::Inbox,
-            deadline: None,
-            defer_until: None,
-            depends_on: vec![],
-            parent_task_id: None,
-            completed_at: None,
-            deleted_at: None,
-            created_at: jiff::Timestamp::now(),
-            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
-            recurrence: None,
-            completed_occurrences: vec![],
+            ..Task::default()
         };
 
         let parsed = ParsedTaskEdit {
@@ -550,24 +508,10 @@ Checklist:
     fn test_has_changes_no_change() {
         let store = create_test_store();
         let task = Task {
-            id: Uuid::new_v4(),
+            storage_key_suffix: "abc".to_string(),
             task_number: 1,
             title: "Same title".to_string(),
-            notes: None,
-            project_id: None,
-            area_id: None,
-            tags: vec![],
-            when: When::Inbox,
-            deadline: None,
-            defer_until: None,
-            depends_on: vec![],
-            parent_task_id: None,
-            completed_at: None,
-            deleted_at: None,
-            created_at: jiff::Timestamp::now(),
-            modified_at: saku_storage::timestamp::HybridTimestamp::default(),
-            recurrence: None,
-            completed_occurrences: vec![],
+            ..Task::default()
         };
 
         let parsed = ParsedTaskEdit {

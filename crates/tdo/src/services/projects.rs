@@ -2,8 +2,8 @@ use crate::{
     models::{project::Project, store::Store},
     storage::{Storage, StorageError},
 };
+use saku_storage::entity::Entity;
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum CreateProjectError {
@@ -30,15 +30,15 @@ pub fn create_project(
     storage: &impl Storage,
     parameters: CreateProjectParameters,
 ) -> Result<Project, CreateProjectError> {
-    let already_exists = store
-        .get_active_projects()
-        .any(|p| p.name.to_lowercase() == parameters.name.to_lowercase());
+    let candidate_key = format!("project/{}", parameters.name.to_lowercase());
+
+    let already_exists = store.get_project(&candidate_key).is_some_and(|p| p.deleted_at.is_none());
 
     if already_exists {
         return Err(CreateProjectError::ProjectAlreadyExists(parameters.name));
     }
 
-    let area_id = match parameters.area {
+    let area_key = match parameters.area {
         Some(area_name) => {
             let matching: Vec<_> = store
                 .get_active_areas()
@@ -46,7 +46,7 @@ pub fn create_project(
                 .collect();
             Some(match matching.len() {
                 0 => return Err(CreateProjectError::AreaNotFound(area_name)),
-                1 => matching[0].id,
+                1 => matching[0].storage_key(),
                 _ => {
                     let names = matching.iter().map(|a| a.name.clone()).collect();
                     return Err(CreateProjectError::AmbiguousAreaName(names));
@@ -57,21 +57,18 @@ pub fn create_project(
     };
 
     let project = Project {
-        id: Uuid::new_v4(),
         name: parameters.name,
         created_at: jiff::Timestamp::now(),
-        area_id,
+        area_key,
         modified_at: crate::sync_clock::next_modified_at(),
         ..Project::default()
     };
 
-    let project_id = project.id;
-
-    store.add_project(project);
+    let project_key = store.add_project(project);
 
     storage.save(store)?;
 
-    Ok(store.get_project(project_id).unwrap().clone())
+    Ok(store.get_project(&project_key).unwrap().clone())
 }
 
 #[derive(Debug, Error)]
@@ -122,27 +119,27 @@ pub fn delete_project(
         }
     };
 
-    let project_id = project.id;
+    let project_key = project.storage_key();
     let now = jiff::Timestamp::now();
 
     // Cascade delete: Find all tasks in this project and mark them deleted
-    let task_ids_to_delete: Vec<Uuid> = store
-        .get_tasks_for_project(project_id)
+    let task_keys_to_delete: Vec<String> = store
+        .get_tasks_for_project(&project_key)
         .filter(|t| t.deleted_at.is_none())
-        .map(|t| t.id)
+        .map(|t| t.storage_key())
         .collect();
 
-    let cascade_count = task_ids_to_delete.len();
+    let cascade_count = task_keys_to_delete.len();
 
-    for task_id in task_ids_to_delete {
-        if let Some(task) = store.get_task_mut(task_id) {
+    for task_key in task_keys_to_delete {
+        if let Some(task) = store.get_task_mut(&task_key) {
             task.deleted_at = Some(now);
             task.modified_at = crate::sync_clock::next_modified_at();
         }
     }
 
     // Mark project as deleted
-    if let Some(project) = store.get_project_mut(project_id) {
+    if let Some(project) = store.get_project_mut(&project_key) {
         project.deleted_at = Some(now);
         project.modified_at = crate::sync_clock::next_modified_at();
     }
@@ -151,7 +148,7 @@ pub fn delete_project(
     storage.save(store)?;
 
     Ok(DeleteProjectResult {
-        project: store.get_project(project_id).unwrap().clone(),
+        project: store.get_project(&project_key).unwrap().clone(),
         cascaded_tasks_count: cascade_count,
     })
 }
@@ -210,24 +207,26 @@ pub fn edit_project(
         }
     };
 
-    let project_id = project.id;
+    let current_key = project.storage_key();
 
     // If new_name provided, check it doesn't already exist (case-insensitive, excluding current project)
     if let Some(ref new_name) = parameters.new_name {
-        let name_conflict = store
-            .get_active_projects()
-            .any(|p| p.id != project_id && p.name.to_lowercase() == new_name.to_lowercase());
+        let new_key = format!("project/{}", new_name.to_lowercase());
+        let name_conflict = new_key != current_key
+            && store
+                .get_project(&new_key)
+                .is_some_and(|p| p.deleted_at.is_none());
 
         if name_conflict {
             return Err(EditProjectError::ProjectAlreadyExists(new_name.clone()));
         }
     }
 
-    // If area provided, resolve area name to area_id
-    let new_area_id = if let Some(area_name) = parameters.area {
+    // If area provided, resolve area name to area key
+    let new_area_key: Option<Option<String>> = if let Some(area_name) = parameters.area {
         if area_name.is_empty() {
             // Empty string means remove area assignment
-            None
+            Some(None)
         } else {
             let matching_areas: Vec<_> = store
                 .get_active_areas()
@@ -236,7 +235,7 @@ pub fn edit_project(
 
             match matching_areas.len() {
                 0 => return Err(EditProjectError::AreaNotFound(area_name)),
-                1 => Some(Some(matching_areas[0].id)),
+                1 => Some(Some(matching_areas[0].storage_key())),
                 _ => {
                     let names: Vec<String> =
                         matching_areas.iter().map(|a| a.name.clone()).collect();
@@ -246,16 +245,23 @@ pub fn edit_project(
         }
     } else {
         // None means don't change area assignment
-        Some(project.area_id)
+        None
     };
 
-    // Update project
-    if let Some(project) = store.get_project_mut(project_id) {
-        if let Some(new_name) = parameters.new_name {
-            project.name = new_name;
-        }
-        if let Some(area_id) = new_area_id {
-            project.area_id = area_id;
+    // Handle rename via store (tombstone + new entry + reference updates)
+    let final_key = if let Some(new_name) = parameters.new_name {
+        let old_name = project.name.clone();
+        store
+            .rename_project(&old_name, &new_name)
+            .unwrap_or(current_key.clone())
+    } else {
+        current_key.clone()
+    };
+
+    // Apply area key change and touch modified_at
+    if let Some(project) = store.get_project_mut(&final_key) {
+        if let Some(area_key) = new_area_key {
+            project.area_key = area_key;
         }
         project.modified_at = crate::sync_clock::next_modified_at();
     }
@@ -263,7 +269,7 @@ pub fn edit_project(
     // Persist to storage
     storage.save(store)?;
 
-    Ok(store.get_project(project_id).unwrap().clone())
+    Ok(store.get_project(&final_key).unwrap().clone())
 }
 
 #[derive(Debug, Error)]
@@ -303,10 +309,10 @@ pub fn restore_project(
         _ => return Err(RestoreProjectError::ProjectNotFound(parameters.name)),
     };
 
-    let project_id = project.id;
+    let project_key = project.storage_key();
 
     // Restore project (does NOT auto-restore tasks - user must restore them separately)
-    if let Some(project) = store.get_project_mut(project_id) {
+    if let Some(project) = store.get_project_mut(&project_key) {
         project.deleted_at = None;
         project.modified_at = crate::sync_clock::next_modified_at();
     }
@@ -314,7 +320,7 @@ pub fn restore_project(
     // Persist to storage
     storage.save(store)?;
 
-    Ok(store.get_project(project_id).unwrap().clone())
+    Ok(store.get_project(&project_key).unwrap().clone())
 }
 
 #[cfg(test)]
@@ -357,27 +363,26 @@ mod tests {
     // Helper functions for test fixtures
     fn create_test_area(store: &mut Store, name: &str) -> Area {
         let area = Area {
-            id: Uuid::new_v4(),
             name: name.to_string(),
             deleted_at: None,
             modified_at: saku_storage::timestamp::HybridTimestamp::default(),
+            ..Area::default()
         };
         store.add_area(area.clone());
         area
     }
 
-    fn create_test_task(store: &mut Store, title: &str, project_id: Option<Uuid>) -> Task {
+    fn create_test_task(store: &mut Store, title: &str, project_key: Option<String>) -> Task {
         let task = Task {
-            id: Uuid::new_v4(),
-            task_number: 0,
+            storage_key_suffix: format!("test{}", store.next_task_number()),
             title: title.to_string(),
-            project_id,
+            project_key,
             created_at: jiff::Timestamp::now(),
             ..Task::default()
         };
-        store.add_task(task.clone());
+        store.add_task(task);
         store
-            .get_task_by_number(store.next_task_number - 1)
+            .get_task_by_number(store.next_task_number() - 1)
             .unwrap()
             .clone()
     }
@@ -403,7 +408,7 @@ mod tests {
         assert!(result.is_ok());
         let project = result.unwrap();
         assert_eq!(project.name, "Test Project");
-        assert_eq!(project.area_id, None);
+        assert_eq!(project.area_key, None);
         assert_eq!(storage.save_count(), 1);
     }
 
@@ -424,7 +429,7 @@ mod tests {
 
         assert!(result.is_ok());
         let project = result.unwrap();
-        assert_eq!(project.area_id, Some(area.id));
+        assert_eq!(project.area_key, Some(area.storage_key()));
     }
 
     #[test]
@@ -490,10 +495,12 @@ mod tests {
         )
         .unwrap();
 
+        let project_key = project.storage_key();
+
         // Create tasks in this project
-        create_test_task(&mut store, "Task 1", Some(project.id));
-        create_test_task(&mut store, "Task 2", Some(project.id));
-        create_test_task(&mut store, "Task 3", Some(project.id));
+        create_test_task(&mut store, "Task 1", Some(project_key.clone()));
+        create_test_task(&mut store, "Task 2", Some(project_key.clone()));
+        create_test_task(&mut store, "Task 3", Some(project_key.clone()));
 
         let result = delete_project(
             &mut store,
@@ -526,8 +533,10 @@ mod tests {
         )
         .unwrap();
 
-        create_test_task(&mut store, "Task 1", Some(project.id));
-        create_test_task(&mut store, "Task 2", Some(project.id));
+        let project_key = project.storage_key();
+
+        create_test_task(&mut store, "Task 1", Some(project_key.clone()));
+        create_test_task(&mut store, "Task 2", Some(project_key.clone()));
 
         let result = delete_project(
             &mut store,

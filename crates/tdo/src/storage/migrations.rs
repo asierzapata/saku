@@ -15,6 +15,7 @@ fn get_migrations() -> Vec<MigrationFn> {
         migrate_v5_to_v6,
         migrate_v6_to_v7,
         migrate_v7_to_v8,
+        migrate_v8_to_v9,
     ]
 }
 
@@ -270,6 +271,198 @@ fn migrate_v7_to_v8(mut value: Value) -> Result<Value, StorageError> {
         }
     }
     Ok(value)
+}
+
+/// Migrate v8 (array-based) to v9 (flat KV entries map).
+///
+/// v8 schema: `{ version, next_task_number, tasks: [...], projects: [...], areas: [...] }`
+///   - tasks have `id` (UUID string), `project_id` (UUID or null), `area_id` (UUID or null),
+///     `parent_task_id` (UUID or null), `depends_on: [UUID, ...]`
+///   - projects have `id`, `area_id` (UUID or null)
+///   - areas have `id`
+///
+/// v9 schema: `{ version, entries: { "task/KEY": {...}, "project/name": {...}, "area/name": {...} } }`
+///   - tasks use `storage_key_suffix` (taken from old `id`) and `project_key`/`area_key`/`parent_task_key`
+///   - projects use `area_key` (natural key) instead of `area_id` (UUID)
+///   - areas: no change beyond key schema
+fn migrate_v8_to_v9(value: Value) -> Result<Value, StorageError> {
+    use std::collections::HashMap;
+
+    let obj = match value {
+        Value::Object(m) => m,
+        other => return Ok(other),
+    };
+
+    // Extract the three arrays from v8 format (default to empty arrays if missing)
+    let tasks_arr = obj
+        .get("tasks")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let projects_arr = obj
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let areas_arr = obj
+        .get("areas")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // Build UUID → natural key lookup tables so we can rewrite cross-references.
+    // Area: id → "area/{name.to_lowercase()}"
+    let mut area_id_to_key: HashMap<String, String> = HashMap::new();
+    for area in &areas_arr {
+        if let (Some(id), Some(name)) = (
+            area.get("id").and_then(|v| v.as_str()),
+            area.get("name").and_then(|v| v.as_str()),
+        ) {
+            area_id_to_key.insert(id.to_string(), format!("area/{}", name.to_lowercase()));
+        }
+    }
+
+    // Project: id → "project/{name.to_lowercase()}"
+    let mut project_id_to_key: HashMap<String, String> = HashMap::new();
+    for project in &projects_arr {
+        if let (Some(id), Some(name)) = (
+            project.get("id").and_then(|v| v.as_str()),
+            project.get("name").and_then(|v| v.as_str()),
+        ) {
+            project_id_to_key.insert(
+                id.to_string(),
+                format!("project/{}", name.to_lowercase()),
+            );
+        }
+    }
+
+    // Task: id → "task/{id}" (use the old UUID string directly as storage_key_suffix)
+    let mut task_id_to_key: HashMap<String, String> = HashMap::new();
+    for task in &tasks_arr {
+        if let Some(id) = task.get("id").and_then(|v| v.as_str()) {
+            task_id_to_key.insert(id.to_string(), format!("task/{id}"));
+        }
+    }
+
+    let mut entries = serde_json::Map::new();
+
+    // Convert areas
+    for area in areas_arr {
+        let area_obj = match area {
+            Value::Object(m) => m,
+            _ => continue,
+        };
+        let name = match area_obj.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let entry_key = format!("area/{}", name.to_lowercase());
+
+        // Build the v9 area object (drop id field; keep everything else)
+        let mut new_area = serde_json::Map::new();
+        for (k, v) in &area_obj {
+            if k != "id" {
+                new_area.insert(k.clone(), v.clone());
+            }
+        }
+        entries.insert(entry_key, Value::Object(new_area));
+    }
+
+    // Convert projects
+    for project in projects_arr {
+        let mut project_obj = match project {
+            Value::Object(m) => m,
+            _ => continue,
+        };
+        let name = match project_obj.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let entry_key = format!("project/{}", name.to_lowercase());
+
+        // Rewrite area_id → area_key
+        let area_key_val = project_obj
+            .get("area_id")
+            .and_then(|v| v.as_str())
+            .and_then(|id| area_id_to_key.get(id))
+            .map(|k| Value::String(k.clone()))
+            .unwrap_or(Value::Null);
+        project_obj.remove("area_id");
+        project_obj.insert("area_key".to_string(), area_key_val);
+        project_obj.remove("id");
+
+        entries.insert(entry_key, Value::Object(project_obj));
+    }
+
+    // Convert tasks
+    for task in tasks_arr {
+        let mut task_obj = match task {
+            Value::Object(m) => m,
+            _ => continue,
+        };
+        let id = match task_obj.get("id").and_then(|v| v.as_str()) {
+            Some(i) => i.to_string(),
+            None => continue,
+        };
+        let entry_key = format!("task/{id}");
+
+        // Add storage_key_suffix = id (use old UUID as stable suffix for migrated tasks)
+        task_obj.insert("storage_key_suffix".to_string(), Value::String(id.clone()));
+        task_obj.remove("id");
+
+        // Rewrite project_id → project_key
+        let project_key_val = task_obj
+            .get("project_id")
+            .and_then(|v| v.as_str())
+            .and_then(|pid| project_id_to_key.get(pid))
+            .map(|k| Value::String(k.clone()))
+            .unwrap_or(Value::Null);
+        task_obj.remove("project_id");
+        task_obj.insert("project_key".to_string(), project_key_val);
+
+        // Rewrite area_id → area_key
+        let area_key_val = task_obj
+            .get("area_id")
+            .and_then(|v| v.as_str())
+            .and_then(|aid| area_id_to_key.get(aid))
+            .map(|k| Value::String(k.clone()))
+            .unwrap_or(Value::Null);
+        task_obj.remove("area_id");
+        task_obj.insert("area_key".to_string(), area_key_val);
+
+        // Rewrite parent_task_id → parent_task_key
+        let parent_key_val = task_obj
+            .get("parent_task_id")
+            .and_then(|v| v.as_str())
+            .and_then(|pid| task_id_to_key.get(pid))
+            .map(|k| Value::String(k.clone()))
+            .unwrap_or(Value::Null);
+        task_obj.remove("parent_task_id");
+        task_obj.insert("parent_task_key".to_string(), parent_key_val);
+
+        // Rewrite depends_on: [UUID, ...] → ["task/{UUID}", ...]
+        if let Some(Value::Array(deps)) = task_obj.get("depends_on").cloned() {
+            let new_deps: Vec<Value> = deps
+                .iter()
+                .filter_map(|d| d.as_str())
+                .map(|dep_id| {
+                    task_id_to_key
+                        .get(dep_id)
+                        .map(|k| Value::String(k.clone()))
+                        .unwrap_or_else(|| Value::String(format!("task/{dep_id}")))
+                })
+                .collect();
+            task_obj.insert("depends_on".to_string(), Value::Array(new_deps));
+        }
+
+        entries.insert(entry_key, Value::Object(task_obj));
+    }
+
+    let mut result = serde_json::Map::new();
+    result.insert("version".to_string(), Value::from(9u32));
+    result.insert("entries".to_string(), Value::Object(entries));
+
+    Ok(Value::Object(result))
 }
 
 /// Returns 1 if version field is missing (assumes v1, our first versioned schema)

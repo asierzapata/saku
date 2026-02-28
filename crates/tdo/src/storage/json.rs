@@ -213,25 +213,26 @@ mod tests {
 
     #[test]
     fn test_save_and_load() {
+        use saku_storage::entity::Entity;
+
         let area = Area {
             name: String::from("Some Area"),
             ..Area::default()
         };
-        let area_id = area.id;
+        let area_key = area.storage_key();
 
         let project = Project {
-            area_id: Some(area_id),
+            area_key: Some(area_key.clone()),
             name: String::from("Some Project"),
             ..Project::default()
         };
-        let project_id = project.id;
+        let project_key = project.storage_key();
 
         let task = Task {
             title: String::from("Some Task"),
-            project_id: Some(project_id),
+            project_key: Some(project_key.clone()),
             ..Task::default()
         };
-        let task_id = task.id;
 
         let mut store = Store::default();
         store.add_area(area);
@@ -246,11 +247,10 @@ mod tests {
         }
         match json_file_storage.load() {
             Ok(loaded_store) => {
-                assert_eq!(loaded_store.get_area(area_id).unwrap().id, area_id);
-                assert_eq!(loaded_store.get_project(project_id).unwrap().id, project_id);
-                assert_eq!(loaded_store.get_task(task_id).unwrap().id, task_id);
-                assert_eq!(loaded_store.get_task(task_id).unwrap().task_number, 1);
-                assert_eq!(loaded_store.next_task_number, 2);
+                assert!(loaded_store.get_area(&area_key).is_some());
+                assert!(loaded_store.get_project(&project_key).is_some());
+                assert_eq!(loaded_store.get_task_by_number(1).unwrap().task_number, 1);
+                assert_eq!(loaded_store.next_task_number(), 2);
             }
             Err(_) => panic!("Should correctly load the saved store"),
         }
@@ -288,7 +288,7 @@ mod tests {
         match result {
             Ok(store) => {
                 assert_eq!(store.version, crate::models::store::CURRENT_VERSION);
-                assert_eq!(store.next_task_number, 1);
+                assert_eq!(store.next_task_number(), 1);
             }
             Err(e) => panic!("Expected successful load, got error: {:?}", e),
         }
@@ -431,8 +431,8 @@ mod tests {
         let storage = JsonFileStorage::new(path);
         let store = storage.load().expect("Migration should succeed");
 
-        assert_eq!(store.version, 8);
-        assert_eq!(store.next_task_number, 3);
+        assert_eq!(store.version, crate::models::store::CURRENT_VERSION);
+        assert_eq!(store.next_task_number(), 3);
 
         // "First task" (earlier created_at) gets task_number 1
         let first = store.get_task_by_number(1).expect("Task #1 should exist");
@@ -446,20 +446,20 @@ mod tests {
     #[test]
     fn test_task_number_auto_increments() {
         let mut store = Store::default();
-        assert_eq!(store.next_task_number, 1);
+        assert_eq!(store.next_task_number(), 1);
 
         store.add_task(Task {
             title: "First".into(),
             ..Task::default()
         });
-        assert_eq!(store.next_task_number, 2);
+        assert_eq!(store.next_task_number(), 2);
         assert_eq!(store.get_task_by_number(1).unwrap().title, "First");
 
         store.add_task(Task {
             title: "Second".into(),
             ..Task::default()
         });
-        assert_eq!(store.next_task_number, 3);
+        assert_eq!(store.next_task_number(), 3);
         assert_eq!(store.get_task_by_number(2).unwrap().title, "Second");
     }
 

@@ -4,6 +4,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 use colored::*;
 
+use saku_storage::entity::Entity;
+
 use saku_tdo::{
     models::task::{When, WhenInstantiationError, is_pending_on, next_pending_occurrence},
     recurrence_parser::parse_recurrence,
@@ -575,28 +577,28 @@ fn filter_tasks<'a>(
         return tasks;
     }
 
-    // Resolve project name to ID
-    let project_id = filters.project.as_ref().and_then(|name| {
+    // Resolve project name to storage key
+    let project_key = filters.project.as_ref().and_then(|name| {
         store
             .get_active_projects()
             .find(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
-            .map(|p| p.id)
+            .map(|p| p.storage_key())
     });
 
-    // Resolve area name to ID
-    let area_id = filters.area.as_ref().and_then(|name| {
+    // Resolve area name to storage key
+    let area_key = filters.area.as_ref().and_then(|name| {
         store
             .get_active_areas()
             .find(|a| a.name.to_lowercase().contains(&name.to_lowercase()))
-            .map(|a| a.id)
+            .map(|a| a.storage_key())
     });
 
-    // Collect project IDs belonging to the area (for transitive area filtering)
-    let area_project_ids: Vec<uuid::Uuid> = if let Some(aid) = area_id {
+    // Collect project keys belonging to the area (for transitive area filtering)
+    let area_project_keys: Vec<String> = if let Some(ref akey) = area_key {
         store
-            .get_projects_for_area(aid)
+            .get_projects_for_area(akey)
             .filter(|p| p.deleted_at.is_none())
-            .map(|p| p.id)
+            .map(|p| p.storage_key())
             .collect()
     } else {
         vec![]
@@ -607,8 +609,8 @@ fn filter_tasks<'a>(
         .filter(|t| {
             // --project filter
             if filters.project.is_some() {
-                if let Some(pid) = project_id {
-                    if t.project_id != Some(pid) {
+                if let Some(ref pkey) = project_key {
+                    if t.project_key.as_deref() != Some(pkey.as_str()) {
                         return false;
                     }
                 } else {
@@ -629,11 +631,12 @@ fn filter_tasks<'a>(
 
             // --area filter (direct area or project belongs to area)
             if filters.area.is_some() {
-                if let Some(aid) = area_id {
-                    let direct_match = t.area_id == Some(aid);
+                if let Some(ref akey) = area_key {
+                    let direct_match = t.area_key.as_deref() == Some(akey.as_str());
                     let via_project = t
-                        .project_id
-                        .is_some_and(|pid| area_project_ids.contains(&pid));
+                        .project_key
+                        .as_ref()
+                        .is_some_and(|pkey| area_project_keys.contains(pkey));
                     if !direct_match && !via_project {
                         return false;
                     }
@@ -952,12 +955,12 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 }
             };
             let mut tasks: Vec<_> = store
-                .get_tasks_for_project(project.id)
+                .get_tasks_for_project(&project.storage_key())
                 .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                 .collect();
             tasks.sort_by_key(|t| t.task_number);
-            let header = if let Some(area_id) = project.area_id {
-                if let Some(area) = store.get_area(area_id) {
+            let header = if let Some(ref area_key) = project.area_key {
+                if let Some(area) = store.get_area(area_key) {
                     format!("{} ({})", project.name, area.name)
                 } else {
                     project.name.clone()
@@ -1001,13 +1004,14 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                     std::process::exit(1);
                 }
             };
+            let area_key = area.storage_key();
             let mut direct_tasks: Vec<_> = store
-                .get_tasks_for_area(area.id)
+                .get_tasks_for_area(&area_key)
                 .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                 .collect();
             direct_tasks.sort_by_key(|t| t.task_number);
             let mut projects: Vec<_> = store
-                .get_projects_for_area(area.id)
+                .get_projects_for_area(&area_key)
                 .filter(|p| p.deleted_at.is_none())
                 .collect();
             projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -1015,7 +1019,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .iter()
                 .map(|p| {
                     let mut tasks: Vec<_> = store
-                        .get_tasks_for_project(p.id)
+                        .get_tasks_for_project(&p.storage_key())
                         .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     tasks.sort_by_key(|t| t.task_number);
@@ -1189,7 +1193,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
     // Hide deferred tasks (defer_until > today).
     let overdue_tasks: Vec<_> = store
         .get_active_tasks()
-        .filter(|t| t.parent_task_id.is_none())
+        .filter(|t| t.parent_task_key.is_none())
         .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
         .filter(|t| {
             (include_completed || t.completed_at.is_none()) && t.recurrence.is_none() && {
@@ -1209,7 +1213,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
     // Hide deferred tasks (defer_until > today).
     let today_current: Vec<_> = store
         .get_active_tasks()
-        .filter(|t| t.parent_task_id.is_none())
+        .filter(|t| t.parent_task_key.is_none())
         .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
         .filter(|t| {
             (include_completed || t.completed_at.is_none()) && {
@@ -1249,7 +1253,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
             saku_tdo::ui::render_section_header("Overdue");
             for task in overdue_tasks {
                 saku_tdo::ui::render_task_line(task, store);
-                saku_tdo::ui::render_subtask_children(task.id, store);
+                saku_tdo::ui::render_subtask_children(&task.storage_key(), store);
             }
         }
 
@@ -1257,7 +1261,7 @@ fn render_today_view(store: &saku_tdo::models::store::Store, include_completed: 
         if !today_current.is_empty() {
             for task in today_current {
                 saku_tdo::ui::render_task_line(task, store);
-                saku_tdo::ui::render_subtask_children(task.id, store);
+                saku_tdo::ui::render_subtask_children(&task.storage_key(), store);
             }
         }
     }
@@ -1506,7 +1510,7 @@ fn main() {
             // Filter inbox tasks (excluding subtasks)
             let inbox_tasks: Vec<_> = store
                 .get_active_tasks()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| matches!(t.when, When::Inbox))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
@@ -1519,7 +1523,7 @@ fn main() {
                 saku_tdo::ui::render_view_header("Inbox", inbox_tasks.len());
                 for task in inbox_tasks {
                     saku_tdo::ui::render_task_line(task, &store);
-                    saku_tdo::ui::render_subtask_children(task.id, &store);
+                    saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                 }
             }
         }
@@ -1534,7 +1538,7 @@ fn main() {
             // Filter someday tasks (excluding subtasks)
             let someday_tasks: Vec<_> = store
                 .get_active_tasks()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| matches!(t.when, When::Someday))
                 .filter(|t| t.completed_at.is_none())
                 .collect();
@@ -1547,7 +1551,7 @@ fn main() {
                 saku_tdo::ui::render_view_header("Someday", someday_tasks.len());
                 for task in someday_tasks {
                     saku_tdo::ui::render_task_line(task, &store);
-                    saku_tdo::ui::render_subtask_children(task.id, &store);
+                    saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                 }
             }
         }
@@ -1564,7 +1568,7 @@ fn main() {
             // Collect all active, incomplete tasks (excluding subtasks)
             let all_tasks: Vec<_> = store
                 .get_active_tasks()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .collect();
             let all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, &store);
 
@@ -1593,7 +1597,7 @@ fn main() {
                         saku_tdo::ui::render_view_header(group_name, tasks.len());
                         for task in tasks {
                             saku_tdo::ui::render_task_line(task, &store);
-                            saku_tdo::ui::render_subtask_children(task.id, &store);
+                            saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                         }
                     }
                 }
@@ -1615,7 +1619,7 @@ fn main() {
             // Collect upcoming tasks (scheduled or deadline in the future), excluding subtasks
             let upcoming_tasks: Vec<_> = store
                 .get_active_tasks()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| {
                     t.completed_at.is_none() && {
                         let scheduled_future = match t.when {
@@ -1662,7 +1666,7 @@ fn main() {
                     saku_tdo::ui::render_section_header(&saku_tdo::ui::format_date_header(date));
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, &store);
-                        saku_tdo::ui::render_subtask_children(task.id, &store);
+                        saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                     }
                 }
             }
@@ -1681,7 +1685,7 @@ fn main() {
             let completed_tasks: Vec<_> = store
                 .tasks
                 .values()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| {
                     if let Some(completed_at) = t.completed_at {
                         saku_tdo::ui::is_within_days(completed_at, 14)
@@ -1721,7 +1725,7 @@ fn main() {
 
                     for task in sorted_tasks {
                         saku_tdo::ui::render_task_line_with_completion_date(task, &store);
-                        saku_tdo::ui::render_subtask_children(task.id, &store);
+                        saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                     }
                 }
             }
@@ -1737,7 +1741,7 @@ fn main() {
             // Collect deleted items (exclude cascade-deleted subtasks from top-level list)
             let deleted_tasks: Vec<_> = store
                 .get_deleted_tasks()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .collect();
             let deleted_projects: Vec<_> = store.get_deleted_projects().collect();
             let deleted_areas: Vec<_> = store.get_deleted_areas().collect();
@@ -1927,7 +1931,7 @@ fn main() {
                 ViewEntity::Inbox => {
                     let inbox_tasks: Vec<_> = store
                         .get_active_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| matches!(t.when, When::Inbox))
                         .filter(|t| all || t.completed_at.is_none())
                         .collect();
@@ -1945,7 +1949,7 @@ fn main() {
                 ViewEntity::Someday => {
                     let someday_tasks: Vec<_> = store
                         .get_active_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| matches!(t.when, When::Someday))
                         .filter(|t| all || t.completed_at.is_none())
                         .collect();
@@ -1963,7 +1967,7 @@ fn main() {
                 ViewEntity::All => {
                     let all_tasks: Vec<_> = store
                         .get_active_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .collect();
                     let all_tasks = filter_tasks(all_tasks, &view_filters, &store);
                     let out: Vec<_> = all_tasks
@@ -1980,7 +1984,7 @@ fn main() {
                     let today = jiff::Zoned::now().date();
                     let upcoming_tasks: Vec<_> = store
                         .get_active_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| {
                             (all || t.completed_at.is_none()) && {
                                 let scheduled_future = match t.when {
@@ -2006,7 +2010,7 @@ fn main() {
                 ViewEntity::Deadlines => {
                     let deadline_tasks: Vec<_> = store
                         .get_active_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| (all || t.completed_at.is_none()) && t.deadline.is_some())
                         .collect();
                     let deadline_tasks = filter_tasks(deadline_tasks, &view_filters, &store);
@@ -2024,7 +2028,7 @@ fn main() {
                     let completed_tasks: Vec<_> = store
                         .tasks
                         .values()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| {
                             if let Some(completed_at) = t.completed_at {
                                 saku_tdo::ui::is_within_days(completed_at, 14)
@@ -2046,7 +2050,7 @@ fn main() {
                 ViewEntity::Trash => {
                     let deleted_tasks: Vec<_> = store
                         .get_deleted_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .collect();
                     let deleted_projects: Vec<_> = store.get_deleted_projects().collect();
                     let deleted_areas: Vec<_> = store.get_deleted_areas().collect();
@@ -2162,8 +2166,8 @@ fn main() {
                     };
 
                     let tasks: Vec<_> = store
-                        .get_tasks_for_project(project.id)
-                        .filter(|t| t.parent_task_id.is_none())
+                        .get_tasks_for_project(&project.storage_key())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     let mut tasks = filter_tasks(tasks, &view_filters, &store);
@@ -2185,8 +2189,8 @@ fn main() {
                             output::print_csv(&out);
                         }
                         output::OutputFormat::Pretty => {
-                            let header = if let Some(area_id) = project.area_id {
-                                if let Some(area) = store.get_area(area_id) {
+                            let header = if let Some(ref area_key) = project.area_key {
+                                if let Some(area) = store.get_area(area_key) {
                                     format!("{} ({})", project.name, area.name)
                                 } else {
                                     project.name.clone()
@@ -2200,7 +2204,7 @@ fn main() {
                                 saku_tdo::ui::render_view_header(&header, tasks.len());
                                 for task in tasks {
                                     saku_tdo::ui::render_task_line(task, &store);
-                                    saku_tdo::ui::render_subtask_children(task.id, &store);
+                                    saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                                 }
                             }
                         }
@@ -2235,15 +2239,16 @@ fn main() {
                         }
                     };
 
+                    let area_key = area.storage_key();
                     let mut direct_tasks: Vec<_> = store
-                        .get_tasks_for_area(area.id)
-                        .filter(|t| t.parent_task_id.is_none())
+                        .get_tasks_for_area(&area_key)
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     direct_tasks.sort_by_key(|t| t.task_number);
 
                     let mut projects: Vec<_> = store
-                        .get_projects_for_area(area.id)
+                        .get_projects_for_area(&area_key)
                         .filter(|p| p.deleted_at.is_none())
                         .collect();
                     projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -2252,8 +2257,8 @@ fn main() {
                         .iter()
                         .map(|p| {
                             let mut tasks: Vec<_> = store
-                                .get_tasks_for_project(p.id)
-                                .filter(|t| t.parent_task_id.is_none())
+                                .get_tasks_for_project(&p.storage_key())
+                                .filter(|t| t.parent_task_key.is_none())
                                 .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                                 .collect();
                             tasks.sort_by_key(|t| t.task_number);
@@ -2285,7 +2290,7 @@ fn main() {
                 ViewEntity::Tag { name } => {
                     let tasks: Vec<_> = store
                         .get_active_tasks()
-                        .filter(|t| t.parent_task_id.is_none())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| {
                             (all || t.completed_at.is_none())
                                 && t.tags
@@ -2420,8 +2425,8 @@ fn main() {
                 Ok(task) => {
                     println!("✓ Task added: {}", task.title);
                     println!("  #{}", task.task_number);
-                    if let Some(project_id) = task.project_id
-                        && let Some(project) = store.get_project(project_id)
+                    if let Some(ref project_key) = task.project_key
+                        && let Some(project) = store.get_project(project_key)
                     {
                         println!("  Project: {}", project.name);
                     }
@@ -2873,8 +2878,8 @@ fn main() {
                     Ok(task) => {
                         println!("✓ Task restored: {}", task.title);
                         println!("  #{}", task.task_number);
-                        if let Some(project_id) = task.project_id
-                            && let Some(project) = store.get_project(project_id)
+                        if let Some(ref project_key) = task.project_key
+                            && let Some(project) = store.get_project(project_key)
                         {
                             println!("  Project: {}", project.name);
                         }
@@ -3005,8 +3010,8 @@ fn main() {
                     Ok(task) => {
                         println!("✓ Task moved");
                         println!("  #{}", task.task_number);
-                        if let Some(project_id) = task.project_id
-                            && let Some(project) = store.get_project(project_id)
+                        if let Some(ref project_key) = task.project_key
+                            && let Some(project) = store.get_project(project_key)
                         {
                             println!("  Project: {}", project.name);
                         }
@@ -3169,20 +3174,21 @@ fn main() {
                         if areas.len() == 1 { "area" } else { "areas" }
                     );
                     for area in areas {
+                        let area_key = area.storage_key();
                         let project_count = store
-                            .get_projects_for_area(area.id)
+                            .get_projects_for_area(&area_key)
                             .filter(|p| p.deleted_at.is_none())
                             .count();
                         let direct_task_count = store
-                            .get_tasks_for_area(area.id)
+                            .get_tasks_for_area(&area_key)
                             .filter(|t| t.deleted_at.is_none())
                             .count();
                         let project_task_count: usize = store
-                            .get_projects_for_area(area.id)
+                            .get_projects_for_area(&area_key)
                             .filter(|p| p.deleted_at.is_none())
                             .map(|p| {
                                 store
-                                    .get_tasks_for_project(p.id)
+                                    .get_tasks_for_project(&p.storage_key())
                                     .filter(|t| t.deleted_at.is_none())
                                     .count()
                             })
@@ -3209,20 +3215,21 @@ fn main() {
                 let out: Vec<_> = areas
                     .iter()
                     .map(|area| {
+                        let area_key = area.storage_key();
                         let project_count = store
-                            .get_projects_for_area(area.id)
+                            .get_projects_for_area(&area_key)
                             .filter(|p| p.deleted_at.is_none())
                             .count();
                         let direct_task_count = store
-                            .get_tasks_for_area(area.id)
+                            .get_tasks_for_area(&area_key)
                             .filter(|t| t.deleted_at.is_none())
                             .count();
                         let project_task_count: usize = store
-                            .get_projects_for_area(area.id)
+                            .get_projects_for_area(&area_key)
                             .filter(|p| p.deleted_at.is_none())
                             .map(|p| {
                                 store
-                                    .get_tasks_for_project(p.id)
+                                    .get_tasks_for_project(&p.storage_key())
                                     .filter(|t| t.deleted_at.is_none())
                                     .count()
                             })
@@ -3334,12 +3341,12 @@ fn main() {
                     );
                     for project in projects {
                         let task_count = store
-                            .get_tasks_for_project(project.id)
+                            .get_tasks_for_project(&project.storage_key())
                             .filter(|t| t.deleted_at.is_none())
                             .count();
                         println!("{} {}", "•".green(), project.name.bold());
-                        if let Some(area_id) = project.area_id
-                            && let Some(area) = store.get_area(area_id)
+                        if let Some(ref area_key) = project.area_key
+                            && let Some(area) = store.get_area(area_key)
                         {
                             println!("    {} {}", "Area:".dimmed(), area.name.blue());
                         }
@@ -3357,12 +3364,13 @@ fn main() {
                     .iter()
                     .map(|project| {
                         let task_count = store
-                            .get_tasks_for_project(project.id)
+                            .get_tasks_for_project(&project.storage_key())
                             .filter(|t| t.deleted_at.is_none())
                             .count();
                         let area = project
-                            .area_id
-                            .and_then(|id| store.get_area(id))
+                            .area_key
+                            .as_ref()
+                            .and_then(|key| store.get_area(key))
                             .map(|a| a.name.clone());
                         output::ProjectOutput {
                             name: project.name.clone(),
@@ -3413,8 +3421,8 @@ fn main() {
             };
 
             let mut tasks: Vec<_> = store
-                .get_tasks_for_project(project.id)
-                .filter(|t| t.parent_task_id.is_none())
+                .get_tasks_for_project(&project.storage_key())
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                 .collect();
             tasks.sort_by_key(|t| t.task_number);
@@ -3435,8 +3443,8 @@ fn main() {
                     output::print_csv(&out);
                 }
                 output::OutputFormat::Pretty => {
-                    let header = if let Some(area_id) = project.area_id {
-                        if let Some(area) = store.get_area(area_id) {
+                    let header = if let Some(ref area_key) = project.area_key {
+                        if let Some(area) = store.get_area(area_key) {
                             format!("{} ({})", project.name, area.name)
                         } else {
                             project.name.clone()
@@ -3450,7 +3458,7 @@ fn main() {
                         saku_tdo::ui::render_view_header(&header, tasks.len());
                         for task in tasks {
                             saku_tdo::ui::render_task_line(task, &store);
-                            saku_tdo::ui::render_subtask_children(task.id, &store);
+                            saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                         }
                     }
                 }
@@ -3490,15 +3498,16 @@ fn main() {
                 }
             };
 
+            let area_key = area.storage_key();
             let mut direct_tasks: Vec<_> = store
-                .get_tasks_for_area(area.id)
-                .filter(|t| t.parent_task_id.is_none())
+                .get_tasks_for_area(&area_key)
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                 .collect();
             direct_tasks.sort_by_key(|t| t.task_number);
 
             let mut projects: Vec<_> = store
-                .get_projects_for_area(area.id)
+                .get_projects_for_area(&area_key)
                 .filter(|p| p.deleted_at.is_none())
                 .collect();
             projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -3507,8 +3516,8 @@ fn main() {
                 .iter()
                 .map(|p| {
                     let mut tasks: Vec<_> = store
-                        .get_tasks_for_project(p.id)
-                        .filter(|t| t.parent_task_id.is_none())
+                        .get_tasks_for_project(&p.storage_key())
+                        .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                         .collect();
                     tasks.sort_by_key(|t| t.task_number);
@@ -3547,13 +3556,13 @@ fn main() {
                         saku_tdo::ui::render_view_header(&area.name, total_tasks);
                         for task in &direct_tasks {
                             saku_tdo::ui::render_task_line(task, &store);
-                            saku_tdo::ui::render_subtask_children(task.id, &store);
+                            saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                         }
                         for (project, tasks) in project_tasks.iter() {
                             saku_tdo::ui::render_section_header(&project.name);
                             for task in tasks {
                                 saku_tdo::ui::render_task_line(task, &store);
-                                saku_tdo::ui::render_subtask_children(task.id, &store);
+                                saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                             }
                         }
                     }
@@ -3619,7 +3628,7 @@ fn main() {
             let fmt = output::OutputFormat::from_flags(json, csv);
             let mut tasks: Vec<_> = store
                 .get_active_tasks()
-                .filter(|t| t.parent_task_id.is_none())
+                .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| {
                     t.completed_at.is_none()
                         && t.tags
@@ -3648,7 +3657,7 @@ fn main() {
                     saku_tdo::ui::render_view_header(&format!("#{}", name), tasks.len());
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, &store);
-                        saku_tdo::ui::render_subtask_children(task.id, &store);
+                        saku_tdo::ui::render_subtask_children(&task.storage_key(), &store);
                     }
                 }
             } else {

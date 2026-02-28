@@ -1,7 +1,7 @@
 use colored::*;
 use jiff::civil::Date;
+use saku_storage::entity::Entity;
 use unicode_width::UnicodeWidthStr;
-use uuid::Uuid;
 
 use crate::models::{store::Store, task::Task};
 
@@ -209,12 +209,12 @@ pub fn get_status_glyph(urgency: TaskUrgency) -> ColoredString {
 /// Build an abbreviated context string for a task (first 2 chars of each part)
 /// Used as a fallback when the full context doesn't fit on the line
 fn get_task_context_abbreviated(task: &Task, store: &Store) -> Option<String> {
-    if let Some(project_id) = task.project_id
-        && let Some(project) = store.get_project(project_id)
+    if let Some(project_key) = &task.project_key
+        && let Some(project) = store.get_project(project_key)
     {
         let proj_abbrev: String = project.name.chars().take(2).collect();
-        if let Some(area_id) = project.area_id
-            && let Some(area) = store.get_area(area_id)
+        if let Some(area_key) = &project.area_key
+            && let Some(area) = store.get_area(area_key)
         {
             let area_abbrev: String = area.name.chars().take(2).collect();
             return Some(format!("{} / {}", area_abbrev, proj_abbrev));
@@ -222,8 +222,8 @@ fn get_task_context_abbreviated(task: &Task, store: &Store) -> Option<String> {
         return Some(proj_abbrev);
     }
 
-    if let Some(area_id) = task.area_id
-        && let Some(area) = store.get_area(area_id)
+    if let Some(area_key) = &task.area_key
+        && let Some(area) = store.get_area(area_key)
     {
         let area_abbrev: String = area.name.chars().take(2).collect();
         return Some(area_abbrev);
@@ -235,11 +235,11 @@ fn get_task_context_abbreviated(task: &Task, store: &Store) -> Option<String> {
 /// Build the context string for a task (Area/Project hierarchy)
 /// Returns None if task has no area or project associations
 pub fn get_task_context(task: &Task, store: &Store) -> Option<String> {
-    if let Some(project_id) = task.project_id
-        && let Some(project) = store.get_project(project_id)
+    if let Some(project_key) = &task.project_key
+        && let Some(project) = store.get_project(project_key)
     {
-        if let Some(area_id) = project.area_id
-            && let Some(area) = store.get_area(area_id)
+        if let Some(area_key) = &project.area_key
+            && let Some(area) = store.get_area(area_key)
         {
             // Rule A: {Area Name} / {Project Name}
             return Some(format!("{} / {}", area.name, project.name));
@@ -247,8 +247,8 @@ pub fn get_task_context(task: &Task, store: &Store) -> Option<String> {
         return Some(project.name.clone());
     }
 
-    if let Some(area_id) = task.area_id
-        && let Some(area) = store.get_area(area_id)
+    if let Some(area_key) = &task.area_key
+        && let Some(area) = store.get_area(area_key)
     {
         return Some(area.name.clone());
     }
@@ -548,11 +548,9 @@ pub fn render_subtask_line(task: &Task, store: &Store) {
 }
 
 /// Render all non-deleted subtasks of a parent task, ordered by task_number
-pub fn render_subtask_children(parent_id: Uuid, store: &Store) {
+pub fn render_subtask_children(parent_key: &str, store: &Store) {
     let mut subtasks: Vec<&Task> = store
-        .tasks
-        .values()
-        .filter(|t| t.parent_task_id == Some(parent_id) && t.deleted_at.is_none())
+        .get_subtasks(parent_key)
         .collect();
     subtasks.sort_by_key(|t| t.task_number);
     for subtask in subtasks {
@@ -783,8 +781,8 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
     }
 
     // Subtask of (only if set)
-    if let Some(parent_id) = task.parent_task_id
-        && let Some(parent) = store.get_task(parent_id)
+    if let Some(parent_key) = &task.parent_task_key
+        && let Some(parent) = store.get_task(parent_key)
     {
         let parent_str = format!("#{}  {}", parent.task_number, parent.title);
         field("Subtask of", parent_str.as_str().white());
@@ -815,9 +813,7 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
 
     // Subtasks section (only if present)
     let mut subtasks: Vec<&Task> = store
-        .tasks
-        .values()
-        .filter(|t| t.parent_task_id == Some(task.id) && t.deleted_at.is_none())
+        .get_subtasks(&task.storage_key())
         .collect();
     subtasks.sort_by_key(|t| t.task_number);
 
