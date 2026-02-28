@@ -20,11 +20,12 @@ use saku_tdo::{
             delete_project, edit_project,
         },
         tasks::{
-            AddTaskError, AddTaskParameters, CompleteTaskError, CompleteTaskParameters,
-            DeleteTaskError, DeleteTaskParameters, DependTaskError, DependTaskParameters,
-            EditTaskError, EditTaskParameters, MoveTaskError, MoveTaskParameters,
-            RestoreTaskError, RestoreTaskParameters, add_task, complete_task, delete_task,
-            depend_task, edit_task, move_task, restore_task,
+            AddTaskError, AddTaskParameters, AssignTaskError, AssignTaskParameters,
+            CompleteTaskError, CompleteTaskParameters, DeleteTaskError, DeleteTaskParameters,
+            DependTaskError, DependTaskParameters, EditTaskError, EditTaskParameters,
+            MoveTaskError, MoveTaskParameters, RestoreTaskError, RestoreTaskParameters, add_task,
+            assign_task, complete_task, delete_task, depend_task, edit_task, move_task,
+            restore_task,
         },
     },
     storage::{Storage, json::JsonFileStorage},
@@ -341,6 +342,15 @@ enum Commands {
 
         #[command(subcommand)]
         entity: ListEntity,
+    },
+
+    /// Assign or unassign a task to a person or agent
+    Assign {
+        /// Task number or fuzzy name
+        task_number_or_fuzzy_name: String,
+
+        /// Who to assign the task to (e.g., "agent", "wrk", a person's name). Omit to clear.
+        assignee: Option<String>,
     },
 
     /// Search tasks by title (and optionally notes)
@@ -1179,6 +1189,7 @@ fn is_mutating_command(cmd: &Option<Commands>) -> bool {
                 | Commands::Create { .. }
                 | Commands::Remove { .. }
                 | Commands::Edit { .. }
+                | Commands::Assign { .. }
         )
     )
 }
@@ -1452,14 +1463,7 @@ fn main() {
     }
 
     // Initialize storage
-    let storage_path = std::env::var_os("TDO_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("tdo")
-        })
-        .join("store.json");
+    let storage_path = saku_tdo::storage::default_storage_path();
 
     // Create parent directory if it doesn't exist
     if let Some(parent) = storage_path.parent() {
@@ -2557,6 +2561,42 @@ fn main() {
                         eprintln!("Error: Failed to save task: {}", e);
                         std::process::exit(1);
                     }
+                }
+            }
+        }
+        Some(Commands::Assign {
+            task_number_or_fuzzy_name,
+            assignee,
+        }) => {
+            let params = AssignTaskParameters {
+                task_number_or_fuzzy_name,
+                assignee: assignee.clone(),
+            };
+
+            match assign_task(&mut store, &storage, params) {
+                Ok(task) => {
+                    if let Some(ref who) = assignee {
+                        println!("→ Task assigned to {}: {}", who, task.title);
+                    } else {
+                        println!("→ Task unassigned: {}", task.title);
+                    }
+                    println!("  #{}", task.task_number);
+                }
+                Err(AssignTaskError::TaskNotFound(identifier)) => {
+                    eprintln!("Error: Task '{}' not found", identifier);
+                    std::process::exit(1);
+                }
+                Err(AssignTaskError::AmbiguousTaskName(titles)) => {
+                    eprintln!("Error: Task name is ambiguous. Multiple tasks found:");
+                    for title in titles {
+                        eprintln!("  - {}", title);
+                    }
+                    eprintln!("\nPlease be more specific or use the task number.");
+                    std::process::exit(1);
+                }
+                Err(AssignTaskError::Storage(e)) => {
+                    eprintln!("Error: Failed to save task: {}", e);
+                    std::process::exit(1);
                 }
             }
         }

@@ -63,3 +63,18 @@ pub trait Storage {
     fn load(&self) -> Result<Store, StorageError>;
     fn save(&self, store: &Store) -> Result<(), StorageError>;
 }
+
+/// Returns the default path to the tdo store file.
+///
+/// Respects the `TDO_DATA_DIR` environment variable. Falls back to
+/// `<local-data-dir>/tdo/store.json` (e.g. `~/.local/share/tdo/store.json` on Linux).
+pub fn default_storage_path() -> PathBuf {
+    std::env::var_os("TDO_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("tdo")
+        })
+        .join("store.json")
+}
