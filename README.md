@@ -27,6 +27,7 @@ Tools are organized around the loops of a developer's day, not discrete categori
 
 | Tool | Description | Status |
 |---|---|---|
+| `wrk` | Agent task executor. Picks up tdo tasks assigned to agents and runs them via claude. | **Shipping** v0.1.0 |
 | `ctx` | Session context. Saves and restores where you were — for yourself and for agents. | Planned |
 
 ### Orchestrator
@@ -44,6 +45,14 @@ Tools are organized around the loops of a developer's day, not discrete categori
 ```bash
 cargo install --path crates/tdo
 ```
+
+### Install wrk
+
+```bash
+cargo install --path crates/wrk
+```
+
+See [documentation/wrk-setup.md](documentation/wrk-setup.md) for deployment options (Docker, systemd).
 
 Or build all tools:
 

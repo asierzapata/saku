@@ -1,0 +1,18 @@
+services:
+  wrk:
+    build:
+      context: ../..
+      dockerfile: crates/wrk/Dockerfile
+    volumes:
+      - tdo-data:/data/tdo
+      - wrk-logs:/data/wrk/logs
+      # Mount your project directory (wrk reads CLAUDE.md from here)
+      # - /path/to/your/project:/workspace:ro
+    environment:
+      - TDO_DATA_DIR=/data/tdo
+    command: ["daemon", "--dir", "/workspace", "--poll", "60s", "--max-concurrent", "2"]
+    restart: unless-stopped
+
+volumes:
+  tdo-data:
+  wrk-logs:
