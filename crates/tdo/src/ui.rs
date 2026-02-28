@@ -735,6 +735,11 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
         field("Project", ctx.as_str().white());
     }
 
+    // Assigned to (only if set)
+    if let Some(ref assignee) = task.assigned_to {
+        field("Assigned to", assignee.as_str().white());
+    }
+
     // Tags (only if non-empty)
     if !task.tags.is_empty() {
         let tags_str = task

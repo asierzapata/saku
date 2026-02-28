@@ -13,7 +13,7 @@ Tools are organized around the recurring loops of a developer's day. Each tool s
 ```
 Daily Loop     → tdo, jrn
 Knowledge Loop → dcs
-Work Loop      → ctx
+Work Loop      → wrk, ctx
 Orchestrator   → saku
 ```
 
@@ -22,6 +22,7 @@ Orchestrator   → saku
 | Tool | Loop | Description | Status |
 |---|---|---|---|
 | `tdo` | Daily | Task queue. Work orders for human and agent. | **Shipping** v0.9.0 |
+| `wrk` | Work | Agent task executor. Picks up tdo tasks and runs them via claude. | **Shipping** v0.1.0 |
 | `jrn` | Daily | Daily journal. Chronological log of what happened. | Planned |
 | `dcs` | Knowledge | Decision log. What was decided and why. | Planned |
 | `ctx` | Work | Session context. Save and restore where you left off. | Planned |
@@ -38,6 +39,7 @@ saku/
 ├── Cargo.toml                    # Workspace configuration
 ├── crates/
 │   ├── tdo/                      # Daily loop: task queue
+│   ├── wrk/                      # Work loop: agent task executor
 │   ├── jrn/                      # Daily loop: journal (planned)
 │   ├── dcs/                      # Knowledge loop: decisions (planned)
 │   ├── ctx/                      # Work loop: session context (planned)
@@ -137,11 +139,12 @@ Consistent across all tools:
 
 Tools are independently useful but designed to compose. The integration surface is the filesystem — tools read each other's stores directly, never via network.
 
-**Current integrations (planned):**
+**Current integrations:**
 
-- `ctx` reads active `tdo` tasks when saving session context
-- `saku context` reads from all tool stores to produce the combined snapshot
-- `jrn` entries can reference `tdo` task IDs and `dcs` decision IDs
+- `wrk` reads and writes `tdo`'s store directly — picks up agent-assigned tasks, reports results back
+- `ctx` reads active `tdo` tasks when saving session context (planned)
+- `saku context` reads from all tool stores to produce the combined snapshot (planned)
+- `jrn` entries can reference `tdo` task IDs and `dcs` decision IDs (planned)
 
 **Cross-tool reference format:**
 

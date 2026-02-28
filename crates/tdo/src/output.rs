@@ -43,6 +43,8 @@ pub struct TaskOutput {
     pub completed_at: Option<String>,
     /// Parent task number if this is a subtask, otherwise None
     pub parent_id: Option<u64>,
+    /// Who the task is assigned to
+    pub assigned_to: Option<String>,
 }
 
 impl TaskOutput {
@@ -105,6 +107,7 @@ impl TaskOutput {
             created_at: task.created_at.to_string(),
             completed_at: task.completed_at.map(|t| t.to_string()),
             parent_id,
+            assigned_to: task.assigned_to.clone(),
         }
     }
 }

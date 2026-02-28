@@ -8,6 +8,7 @@ members = [
     "crates/saku-storage",
     "crates/saku-sync",
     "crates/tdo",
+    "crates/wrk",
 ]
 
 [workspace.package]

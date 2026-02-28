@@ -182,6 +182,9 @@ pub struct Task {
     pub created_at: Timestamp,
     /// Hybrid logical clock timestamp for sync conflict resolution
     pub modified_at: HybridTimestamp,
+    /// Who this task is assigned to (e.g., "agent", "wrk", or a username).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned_to: Option<String>,
     /// Recurrence rule. None = one-off task.
     #[serde(default)]
     pub recurrence: Option<Recurrence>,

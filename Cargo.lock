@@ -2617,6 +2617,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "saku-wrk"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dirs",
+ "jiff",
+ "saku-storage",
+ "saku-tdo",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

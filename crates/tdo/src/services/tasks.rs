@@ -191,6 +191,7 @@ pub fn add_task(
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
         modified_at: crate::sync_clock::next_modified_at(),
+        assigned_to: None,
         recurrence: parameters.recurrence,
         completed_occurrences: vec![],
     };
@@ -395,6 +396,7 @@ pub fn move_task(
         deleted_at: task.deleted_at,
         created_at: task.created_at,
         modified_at: crate::sync_clock::next_modified_at(),
+        assigned_to: task.assigned_to.clone(),
         recurrence,
         completed_occurrences: task.completed_occurrences.clone(),
     };
@@ -552,6 +554,78 @@ pub fn complete_task(
 pub struct CompleteTaskResult {
     pub task: Task,
     pub newly_unblocked: Vec<Task>,
+}
+
+// ============================================================================
+// Assign task
+// ============================================================================
+
+#[derive(Debug, Error)]
+pub enum AssignTaskError {
+    #[error("Task '{0}' not found")]
+    TaskNotFound(String),
+
+    #[error("Task name is ambiguous. Multiple tasks found: {}", .0.join(", "))]
+    AmbiguousTaskName(Vec<String>),
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+}
+
+#[derive(Debug)]
+pub struct AssignTaskParameters {
+    pub task_number_or_fuzzy_name: String,
+    /// Who to assign the task to. `None` clears the assignment.
+    pub assignee: Option<String>,
+}
+
+pub fn assign_task(
+    store: &mut Store,
+    storage: &impl Storage,
+    parameters: AssignTaskParameters,
+) -> Result<Task, AssignTaskError> {
+    // Resolve task by number or fuzzy name
+    let task = if let Ok(task_number) = parameters.task_number_or_fuzzy_name.parse::<u64>() {
+        store.get_task_by_number(task_number).ok_or_else(|| {
+            AssignTaskError::TaskNotFound(parameters.task_number_or_fuzzy_name.clone())
+        })?
+    } else {
+        let matching_tasks: Vec<_> = store
+            .get_active_tasks()
+            .filter(|t| {
+                t.title
+                    .to_lowercase()
+                    .contains(&parameters.task_number_or_fuzzy_name.to_lowercase())
+            })
+            .collect();
+
+        match matching_tasks.len() {
+            0 => {
+                return Err(AssignTaskError::TaskNotFound(
+                    parameters.task_number_or_fuzzy_name,
+                ));
+            }
+            1 => matching_tasks[0],
+            _ => {
+                return Err(AssignTaskError::AmbiguousTaskName(
+                    matching_tasks.iter().map(|t| t.title.clone()).collect(),
+                ));
+            }
+        }
+    };
+
+    let task_storage_key = task.storage_key();
+    let mut updated_task = task.clone();
+    updated_task.assigned_to = parameters.assignee;
+    updated_task.modified_at = crate::sync_clock::next_modified_at();
+
+    store
+        .tasks
+        .insert(task_storage_key, updated_task.clone());
+
+    storage.save(store)?;
+
+    Ok(updated_task)
 }
 
 #[derive(Debug, Error)]
@@ -875,6 +949,7 @@ pub fn edit_task(
         deleted_at: task.deleted_at,
         created_at: task.created_at,
         modified_at: crate::sync_clock::next_modified_at(),
+        assigned_to: task.assigned_to.clone(),
         recurrence: task.recurrence.clone(),
         completed_occurrences: task.completed_occurrences.clone(),
     };
