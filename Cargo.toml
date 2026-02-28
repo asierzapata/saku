@@ -17,9 +17,9 @@ publish = false
 
 [workspace.dependencies]
 # Internal dependencies
-saku-crypto = { version = "0.1.1", path = "crates/saku-crypto" }
-saku-storage = { version = "0.1.0", path = "crates/saku-storage" }
-saku-sync = { version = "0.1.0", path = "crates/saku-sync" }
+saku-crypto = { version = "0.2.0", path = "crates/saku-crypto" }
+saku-storage = { version = "0.2.0", path = "crates/saku-storage" }
+saku-sync = { version = "0.2.0", path = "crates/saku-sync" }
 
 # Shared dependencies with versions
 clap = { version = "4.5.58", features = ["derive"] }
