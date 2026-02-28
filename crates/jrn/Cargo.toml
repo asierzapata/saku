@@ -1,0 +1,12 @@
+[package]
+name = "saku-jrn"
+version = "0.1.0"
+description = "Daily journal for the human-agent team"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jrn"
+path = "src/main.rs"
+
+[dependencies]

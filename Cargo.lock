@@ -2516,6 +2516,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "saku-jrn"
+version = "0.1.0"
+
+[[package]]
 name = "saku-nte"
 version = "0.1.0"
 
