@@ -1,7 +1,7 @@
 # RFC: Natural-Key-Based Key-Value Store for saku-storage
 
 **Author:** @asierzapata
-**Status:** Drafting
+**Status:** Implemented
 
 ## Summary
 

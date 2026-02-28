@@ -25,6 +25,16 @@
 - `get_blockers` returns only **incomplete, non-deleted** dependencies
 - Field label width in detail view: 12 chars (`{:<12}`)
 
+## Storage model (v9)
+
+- On-disk format: `{ version: 9, entries: { "project/website": {...}, ... } }` — flat KV map
+- Entities use natural-key storage keys: `project/{name}`, `area/{name}`, `task/{hash}`
+- No UUIDs — tasks use `storage_key_suffix` (hash of device_id + timestamp)
+- `Entity` trait in `saku-storage`: `entity_type()`, `natural_key()`, `storage_key()`
+- `Store` uses `HashMap<String, T>` with `task_number_index` for O(1) lookups
+- Renames use tombstone + new entry pattern (`renamed_to` / `previous_key` fields)
+- Sync uses generic `lww_merge_kv` + `reconcile_renames` + `repair_references`
+
 ## Saku productivity suite
 
 `tdo` is your shared task ledger with the user. Always use it to track work that spans sessions.

@@ -123,7 +123,7 @@ Consistent across all tools:
 
 ### Data Model Conventions
 
-**IDs**: Every entity has a UUID (internal) and a user-facing auto-incrementing number. Agents use UUIDs; humans use numbers. Fuzzy name matching is supported for human convenience.
+**IDs**: Entities use natural-key-based storage keys (`project/website`, `area/work`, `task/k7m2a3x9`). Tasks have a user-facing auto-incrementing `task_number`. Projects and areas are identified by their lowercased name. Fuzzy name matching is supported for human convenience.
 
 **Timestamps**: Use `jiff::Timestamp` (not chrono). `HybridTimestamp` (from `saku-storage`) for entities that participate in sync conflict resolution.
 
@@ -186,7 +186,7 @@ This is a convention, not enforced by the runtime today. As tools mature, `saku`
    clap.workspace = true
    serde.workspace = true
    serde_json.workspace = true
-   uuid.workspace = true
+   saku-storage.workspace = true
    jiff.workspace = true
    colored.workspace = true
    term_size.workspace = true

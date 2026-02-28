@@ -174,34 +174,20 @@ pub struct HybridTimestamp {
 }
 ```
 
-LWW is applied **per entity** (per task UUID, per note file path) — never whole-file for structured data. This means `Task`, `Project`, and `Area` need a `modified_at: HybridTimestamp` field (schema migration).
+LWW is applied **per entry** (per storage key like `task/k7m2a3x9`, per note file path) — never whole-file for structured data. All entities have a `modified_at: HybridTimestamp` field.
 
-#### Name-based deduplication for Projects and Areas
+#### Natural-key KV store eliminates deduplication
 
-When syncing, entities are first merged by ID using LWW. However, if different devices create projects or areas with the same name offline (but different IDs), a second deduplication pass runs:
+The v9 on-disk format uses a flat `entries` map keyed by natural storage keys (`project/website`, `area/work`, `task/k7m2a3x9`). Since projects and areas with the same name share the same storage key, duplicate names are impossible by construction — LWW merge on the same key automatically picks the winner.
 
-**Process:**
-1. **ID-based merge**: Standard LWW merge by entity ID
-2. **Name-based deduplication**: For projects and areas only, group by case-insensitive name
-3. **Winner selection**: For each duplicate name group, the entity with the most recent `modified_at` wins
-4. **Task reassignment**: All tasks pointing to losing project/area IDs are automatically reassigned to the winner
+**Merge process:**
+1. **LWW merge**: `lww_merge_kv` compares `modified_at` for each entry key
+2. **Rename reconciliation**: `reconcile_renames` resolves tombstone-based rename chains
+3. **Reference repair**: `repair_references` follows `renamed_to` chains to fix dangling FK references
+4. **Task number dedup**: Reassign colliding `task_number` values from parallel offline creation
 
-**Example scenario:**
-- Device A (offline) creates project "Website" → UUID `abc-123`
-- Device B (offline) creates project "Website" → UUID `def-456`
-- Device A creates 2 tasks in project `abc-123`
-- Device B creates 3 tasks in project `def-456`
-- When syncing:
-  - Both projects initially merge by ID (2 projects exist)
-  - Name deduplication detects duplicate "Website" 
-  - Project with newer `modified_at` wins (e.g., `def-456`)
-  - All 5 tasks are reassigned to point to `def-456`
-  - Result: 1 project, 5 tasks
-
-**Why projects and areas, but not tasks?**
-- Projects and areas have unique name constraints during local creation
-- Tasks can legitimately have duplicate titles/names
-- Only ID-based merge applies to tasks
+**Rename handling:**
+When a project or area is renamed (e.g., "Website" → "Blog"), a tombstone is created at the old key with `renamed_to` pointing to the new key. The new key has `previous_key` pointing back. During sync, `repair_references` follows these chains to update any tasks still referencing the old key.
 
 For notes: on true conflict (both devices edited offline), write `note.md.conflict.<device_id>` and surface it to the user. Never silently discard either version.
 
