@@ -289,7 +289,7 @@ fn render_task_line_with_options(
     task: &Task,
     store: &Store,
     _is_overdue: bool,
-    show_completion_date: bool,
+    _show_completion_date: bool,
     next_occurrence: Option<jiff::civil::Date>,
 ) {
     let effective_width = get_terminal_width();
@@ -448,23 +448,6 @@ fn render_task_line_with_options(
         }
     }
 
-    // Note preview: show first line of notes beneath the task, dimmed
-    if !show_completion_date {
-        if let Some(ref notes) = task.notes {
-            let first_line = notes.lines().next().unwrap_or("").trim();
-            if !first_line.is_empty() {
-                let indent = "      ┈ ";
-                let indent_len = 8usize; // visible width of indent
-                let max_note_len = effective_width.saturating_sub(indent_len + 1);
-                let display_note = if first_line.width() > max_note_len {
-                    truncate_to_width(first_line, max_note_len, "…")
-                } else {
-                    first_line.to_string()
-                };
-                println!("{}{}", indent.dimmed(), display_note.dimmed());
-            }
-        }
-    }
 }
 
 /// Render a single subtask line, indented under its parent
