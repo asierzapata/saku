@@ -764,6 +764,388 @@ mod tests {
     }
 
     #[test]
+    fn test_migrate_v8_to_v9_simple_store() {
+        let v8_json = serde_json::json!({
+            "version": 8,
+            "next_task_number": 3,
+            "tasks": [
+                {
+                    "id": "uuid-task-1",
+                    "task_number": 1,
+                    "title": "Buy groceries",
+                    "notes": null,
+                    "project_id": "uuid-proj-1",
+                    "area_id": "uuid-area-1",
+                    "parent_task_id": null,
+                    "depends_on": [],
+                    "tags": ["shopping"],
+                    "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 1000, "lamport": 0, "device_id": "dev1"}
+                },
+                {
+                    "id": "uuid-task-2",
+                    "task_number": 2,
+                    "title": "Review PR",
+                    "notes": "Check tests",
+                    "project_id": null,
+                    "area_id": null,
+                    "parent_task_id": null,
+                    "depends_on": [],
+                    "tags": [],
+                    "when": {"type": "Scheduled", "date": "2025-06-15"},
+                    "deadline": null, "defer_until": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-02T00:00:00Z",
+                    "modified_at": {"wall_ms": 2000, "lamport": 0, "device_id": "dev1"}
+                }
+            ],
+            "projects": [
+                {
+                    "id": "uuid-proj-1",
+                    "name": "Website",
+                    "area_id": "uuid-area-1",
+                    "notes": null, "deadline": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-05-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 500, "lamport": 0, "device_id": "dev1"}
+                }
+            ],
+            "areas": [
+                {
+                    "id": "uuid-area-1",
+                    "name": "Work",
+                    "deleted_at": null,
+                    "modified_at": {"wall_ms": 100, "lamport": 0, "device_id": "dev1"}
+                }
+            ]
+        });
+
+        let result = migrate_v8_to_v9(v8_json).unwrap();
+
+        assert_eq!(result["version"], 9);
+
+        let entries = result["entries"].as_object().unwrap();
+
+        // Area converted correctly
+        let area = &entries["area/work"];
+        assert_eq!(area["name"], "Work");
+        assert!(area.get("id").is_none(), "id field should be removed");
+
+        // Project converted with area_key
+        let project = &entries["project/website"];
+        assert_eq!(project["name"], "Website");
+        assert_eq!(project["area_key"], "area/work");
+        assert!(project.get("area_id").is_none(), "area_id should be removed");
+        assert!(project.get("id").is_none(), "id field should be removed");
+
+        // Task 1 converted with project_key and area_key
+        let task1 = &entries["task/uuid-task-1"];
+        assert_eq!(task1["title"], "Buy groceries");
+        assert_eq!(task1["storage_key_suffix"], "uuid-task-1");
+        assert_eq!(task1["project_key"], "project/website");
+        assert_eq!(task1["area_key"], "area/work");
+        assert!(task1.get("id").is_none());
+        assert!(task1.get("project_id").is_none());
+        assert!(task1.get("area_id").is_none());
+        assert_eq!(task1["task_number"], 1);
+
+        // Task 2 with null references
+        let task2 = &entries["task/uuid-task-2"];
+        assert_eq!(task2["title"], "Review PR");
+        assert!(task2["project_key"].is_null());
+        assert!(task2["area_key"].is_null());
+
+        // next_task_number should be gone
+        assert!(result.get("next_task_number").is_none());
+        // Old arrays should be gone
+        assert!(result.get("tasks").is_none());
+        assert!(result.get("projects").is_none());
+        assert!(result.get("areas").is_none());
+    }
+
+    #[test]
+    fn test_migrate_v8_to_v9_subtasks_and_dependencies() {
+        let v8_json = serde_json::json!({
+            "version": 8,
+            "next_task_number": 4,
+            "tasks": [
+                {
+                    "id": "uuid-parent",
+                    "task_number": 1,
+                    "title": "Parent task",
+                    "notes": null,
+                    "project_id": null, "area_id": null,
+                    "parent_task_id": null,
+                    "depends_on": [],
+                    "tags": [],
+                    "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 1000, "lamport": 0, "device_id": "d"}
+                },
+                {
+                    "id": "uuid-child",
+                    "task_number": 2,
+                    "title": "Subtask",
+                    "notes": null,
+                    "project_id": null, "area_id": null,
+                    "parent_task_id": "uuid-parent",
+                    "depends_on": [],
+                    "tags": [],
+                    "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-02T00:00:00Z",
+                    "modified_at": {"wall_ms": 2000, "lamport": 0, "device_id": "d"}
+                },
+                {
+                    "id": "uuid-blocked",
+                    "task_number": 3,
+                    "title": "Blocked task",
+                    "notes": null,
+                    "project_id": null, "area_id": null,
+                    "parent_task_id": null,
+                    "depends_on": ["uuid-parent", "uuid-child"],
+                    "tags": [],
+                    "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-03T00:00:00Z",
+                    "modified_at": {"wall_ms": 3000, "lamport": 0, "device_id": "d"}
+                }
+            ],
+            "projects": [],
+            "areas": []
+        });
+
+        let result = migrate_v8_to_v9(v8_json).unwrap();
+        let entries = result["entries"].as_object().unwrap();
+
+        // Subtask parent_task_key correctly rewritten
+        let child = &entries["task/uuid-child"];
+        assert_eq!(child["parent_task_key"], "task/uuid-parent");
+        assert!(child.get("parent_task_id").is_none());
+
+        // Dependencies correctly rewritten
+        let blocked = &entries["task/uuid-blocked"];
+        let deps = blocked["depends_on"].as_array().unwrap();
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0], "task/uuid-parent");
+        assert_eq!(deps[1], "task/uuid-child");
+    }
+
+    #[test]
+    fn test_migrate_v8_to_v9_deleted_entities_preserved() {
+        let v8_json = serde_json::json!({
+            "version": 8,
+            "next_task_number": 2,
+            "tasks": [
+                {
+                    "id": "uuid-deleted-task",
+                    "task_number": 1,
+                    "title": "Deleted task",
+                    "notes": null,
+                    "project_id": null, "area_id": null,
+                    "parent_task_id": null, "depends_on": [],
+                    "tags": [],
+                    "when": {"type": "Inbox"},
+                    "deadline": null, "defer_until": null,
+                    "completed_at": null,
+                    "deleted_at": "2025-06-10T00:00:00Z",
+                    "created_at": "2025-06-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 1000, "lamport": 0, "device_id": "d"}
+                }
+            ],
+            "projects": [
+                {
+                    "id": "uuid-deleted-proj",
+                    "name": "Dead Project",
+                    "area_id": null, "notes": null, "deadline": null,
+                    "completed_at": null,
+                    "deleted_at": "2025-06-10T00:00:00Z",
+                    "created_at": "2025-05-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 500, "lamport": 0, "device_id": "d"}
+                }
+            ],
+            "areas": []
+        });
+
+        let result = migrate_v8_to_v9(v8_json).unwrap();
+        let entries = result["entries"].as_object().unwrap();
+
+        // Deleted task preserved
+        let task = &entries["task/uuid-deleted-task"];
+        assert_eq!(task["deleted_at"], "2025-06-10T00:00:00Z");
+
+        // Deleted project preserved
+        let proj = &entries["project/dead project"];
+        assert_eq!(proj["deleted_at"], "2025-06-10T00:00:00Z");
+    }
+
+    #[test]
+    fn test_migrate_v8_to_v9_empty_store() {
+        let v8_json = serde_json::json!({
+            "version": 8,
+            "next_task_number": 1,
+            "tasks": [],
+            "projects": [],
+            "areas": []
+        });
+
+        let result = migrate_v8_to_v9(v8_json).unwrap();
+
+        assert_eq!(result["version"], 9);
+        let entries = result["entries"].as_object().unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_migrate_v8_to_v9_roundtrip_via_store() {
+        use crate::models::store::{Store, StoredStore};
+
+        let v8_json = serde_json::json!({
+            "version": 8,
+            "next_task_number": 2,
+            "tasks": [
+                {
+                    "id": "uuid-rt-task",
+                    "task_number": 1,
+                    "title": "Roundtrip task",
+                    "notes": "Some notes",
+                    "project_id": "uuid-rt-proj",
+                    "area_id": "uuid-rt-area",
+                    "parent_task_id": null,
+                    "depends_on": [],
+                    "tags": ["test"],
+                    "when": {"type": "Scheduled", "date": "2025-07-01"},
+                    "deadline": "2025-07-15",
+                    "defer_until": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
+                }
+            ],
+            "projects": [
+                {
+                    "id": "uuid-rt-proj",
+                    "name": "Roundtrip Project",
+                    "area_id": "uuid-rt-area",
+                    "notes": null, "deadline": null,
+                    "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-05-01T00:00:00Z",
+                    "modified_at": {"wall_ms": 500, "lamport": 0, "device_id": "dev-a"}
+                }
+            ],
+            "areas": [
+                {
+                    "id": "uuid-rt-area",
+                    "name": "Roundtrip Area",
+                    "deleted_at": null,
+                    "modified_at": {"wall_ms": 100, "lamport": 0, "device_id": "dev-a"}
+                }
+            ]
+        });
+
+        // Migrate to v9
+        let v9_json = migrate_v8_to_v9(v8_json).unwrap();
+
+        // Deserialize into StoredStore and then Store
+        let stored: StoredStore = serde_json::from_value(v9_json.clone()).unwrap();
+        let store = Store::from_stored(stored);
+
+        // Verify in-memory data is correct
+        assert_eq!(store.tasks.len(), 1);
+        assert_eq!(store.projects.len(), 1);
+        assert_eq!(store.areas.len(), 1);
+
+        let task = store.get_task("task/uuid-rt-task").unwrap();
+        assert_eq!(task.title, "Roundtrip task");
+        assert_eq!(task.project_key, Some("project/roundtrip project".to_string()));
+        assert_eq!(task.area_key, Some("area/roundtrip area".to_string()));
+        assert_eq!(task.task_number, 1);
+        assert_eq!(task.tags, vec!["test"]);
+
+        let project = store.get_project("project/roundtrip project").unwrap();
+        assert_eq!(project.name, "Roundtrip Project");
+        assert_eq!(project.area_key, Some("area/roundtrip area".to_string()));
+
+        let area = store.get_area("area/roundtrip area").unwrap();
+        assert_eq!(area.name, "Roundtrip Area");
+
+        // Save back and reload — verify round-trip stability
+        let stored2 = store.to_stored();
+        let store2 = Store::from_stored(stored2);
+        assert_eq!(store2.tasks.len(), 1);
+        assert_eq!(store2.projects.len(), 1);
+        assert_eq!(store2.areas.len(), 1);
+        let task2 = store2.get_task("task/uuid-rt-task").unwrap();
+        assert_eq!(task2.title, "Roundtrip task");
+    }
+
+    #[test]
+    fn test_full_migration_v1_to_v9() {
+        let v1_json = serde_json::json!({
+            "tasks": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "title": "My task",
+                    "notes": null,
+                    "project_id": "00000000-0000-0000-0000-000000000002",
+                    "area_id": "00000000-0000-0000-0000-000000000003",
+                    "tags": [],
+                    "when": {"type": "Scheduled", "date": "2025-06-15", "evening": true},
+                    "deadline": null, "defer_until": null,
+                    "checklist": [], "completed_at": null, "deleted_at": null,
+                    "created_at": "2025-06-01T00:00:00Z"
+                }
+            ],
+            "projects": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "name": "Project",
+                    "area_id": "00000000-0000-0000-0000-000000000003",
+                    "notes": null, "deadline": null,
+                    "completed_at": null,
+                    "created_at": "2025-05-01T00:00:00Z"
+                }
+            ],
+            "areas": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000003",
+                    "name": "Area"
+                }
+            ]
+        });
+
+        let result = apply_migrations(v1_json, 1, 9).unwrap();
+
+        assert_eq!(result["version"], 9);
+        let entries = result["entries"].as_object().unwrap();
+
+        // All entities present with natural keys
+        assert!(entries.contains_key("area/area"));
+        assert!(entries.contains_key("project/project"));
+        let task_key = "task/00000000-0000-0000-0000-000000000001";
+        assert!(entries.contains_key(task_key));
+
+        // FK references converted
+        let task = &entries[task_key];
+        assert_eq!(task["project_key"], "project/project");
+        assert_eq!(task["area_key"], "area/area");
+        assert!(task.get("project_id").is_none());
+        assert!(task.get("area_id").is_none());
+        assert!(task.get("id").is_none());
+        assert_eq!(task["storage_key_suffix"], "00000000-0000-0000-0000-000000000001");
+
+        // evening removed (v4→v5)
+        assert!(task["when"].get("evening").is_none());
+    }
+
+    #[test]
     fn test_full_migration_v1_to_v5() {
         let v1_json = serde_json::json!({
             "tasks": [
