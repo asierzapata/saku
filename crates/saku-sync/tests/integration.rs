@@ -23,6 +23,44 @@ fn write_store(path: &PathBuf, value: &serde_json::Value) {
     std::fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
 }
 
+fn make_v9_store(entries: Vec<(&str, serde_json::Value)>) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (key, value) in entries {
+        map.insert(key.to_string(), value);
+    }
+    json!({
+        "version": 9,
+        "entries": serde_json::Value::Object(map)
+    })
+}
+
+fn make_task(
+    title: &str,
+    task_number: u64,
+    wall_ms: i64,
+    device_id: &str,
+    created_at: &str,
+) -> serde_json::Value {
+    json!({
+        "storage_key_suffix": format!("task-{}-{}", device_id, task_number),
+        "task_number": task_number,
+        "title": title,
+        "notes": null,
+        "project_key": null,
+        "area_key": null,
+        "parent_task_key": null,
+        "depends_on": [],
+        "tags": [],
+        "when": {"type": "Inbox"},
+        "deadline": null,
+        "defer_until": null,
+        "completed_at": null,
+        "deleted_at": null,
+        "created_at": created_at,
+        "modified_at": {"wall_ms": wall_ms, "lamport": 1, "device_id": device_id}
+    })
+}
+
 /// Two-device simulation:
 /// Device A syncs tasks -> Device B pulls -> Device B adds task -> Device A pulls merged result
 #[test]
@@ -33,29 +71,10 @@ fn two_device_simulation() {
 
     // Device A: create store with one task
     let store_a_path = device_a_dir.path().join("store.json");
-    let store_a = json!({
-        "version": 4,
-        "next_task_number": 2,
-        "tasks": [{
-            "id": "aaaa-1111",
-            "task_number": 1,
-            "title": "Task from A",
-            "notes": null,
-            "project_id": null,
-            "area_id": null,
-            "tags": [],
-            "when": {"type": "Inbox"},
-            "deadline": null,
-            "defer_until": null,
-            "checklist": [],
-            "completed_at": null,
-            "deleted_at": null,
-            "created_at": "2026-01-01T00:00:00Z",
-            "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
-        }],
-        "projects": [],
-        "areas": []
-    });
+    let store_a = make_v9_store(vec![(
+        "task/aaaa-1111",
+        make_task("Task from A", 1, 1000, "dev-a", "2026-01-01T00:00:00Z"),
+    )]);
     write_store(&store_a_path, &store_a);
 
     // Device A syncs (push)
@@ -67,13 +86,7 @@ fn two_device_simulation() {
 
     // Device B: create empty store
     let store_b_path = device_b_dir.path().join("store.json");
-    let store_b = json!({
-        "version": 4,
-        "next_task_number": 1,
-        "tasks": [],
-        "projects": [],
-        "areas": []
-    });
+    let store_b = make_v9_store(vec![]);
     write_store(&store_b_path, &store_b);
 
     // Device B syncs (pull)
@@ -91,52 +104,23 @@ fn two_device_simulation() {
     // Verify Device B now has the task from A
     let b_data: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&store_b_path).unwrap()).unwrap();
-    let tasks = b_data["tasks"].as_array().unwrap();
-    assert!(!tasks.is_empty(), "Device B should have tasks after pull");
+    let entries = b_data["entries"].as_object().unwrap();
+    assert!(
+        entries.contains_key("task/aaaa-1111"),
+        "Device B should have A's task after pull"
+    );
 
     // Device B adds a new task
-    let store_b_updated = json!({
-        "version": 4,
-        "next_task_number": 3,
-        "tasks": [
-            {
-                "id": "aaaa-1111",
-                "task_number": 1,
-                "title": "Task from A",
-                "notes": null,
-                "project_id": null,
-                "area_id": null,
-                "tags": [],
-                "when": {"type": "Inbox"},
-                "deadline": null,
-                "defer_until": null,
-                "checklist": [],
-                "completed_at": null,
-                "deleted_at": null,
-                "created_at": "2026-01-01T00:00:00Z",
-                "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
-            },
-            {
-                "id": "bbbb-2222",
-                "task_number": 2,
-                "title": "Task from B",
-                "notes": null,
-                "project_id": null,
-                "area_id": null,
-                "tags": [],
-                "when": {"type": "Inbox"},
-                "deadline": null,
-                "defer_until": null,
-                "checklist": [],
-                "completed_at": null,
-                "deleted_at": null,
-                "created_at": "2026-01-02T00:00:00Z",
-                "modified_at": {"wall_ms": 2000, "lamport": 1, "device_id": "dev-b"}
-            }
-        ],
-        "projects": [],
-        "areas": []
-    });
+    let store_b_updated = make_v9_store(vec![
+        (
+            "task/aaaa-1111",
+            make_task("Task from A", 1, 1000, "dev-a", "2026-01-01T00:00:00Z"),
+        ),
+        (
+            "task/bbbb-2222",
+            make_task("Task from B", 2, 2000, "dev-b", "2026-01-02T00:00:00Z"),
+        ),
+    ]);
     write_store(&store_b_path, &store_b_updated);
 
     // Device B syncs (push new task)
@@ -154,8 +138,15 @@ fn two_device_simulation() {
     // Verify Device A now has both tasks
     let a_data: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&store_a_path).unwrap()).unwrap();
-    let a_tasks = a_data["tasks"].as_array().unwrap();
-    assert_eq!(a_tasks.len(), 2, "Device A should have 2 tasks after merge");
+    let a_entries = a_data["entries"].as_object().unwrap();
+    assert_eq!(
+        a_entries
+            .keys()
+            .filter(|k| k.starts_with("task/"))
+            .count(),
+        2,
+        "Device A should have 2 tasks after merge"
+    );
 }
 
 /// LWW conflict: Same entity edited on both sides, later timestamp wins
@@ -165,36 +156,12 @@ fn lww_conflict_later_timestamp_wins() {
     let device_a_dir = tempfile::tempdir().unwrap();
     let device_b_dir = tempfile::tempdir().unwrap();
 
-    let base_task = json!({
-        "id": "conflict-task-1",
-        "task_number": 1,
-        "title": "Original title",
-        "notes": null,
-        "project_id": null,
-        "area_id": null,
-        "tags": [],
-        "when": {"type": "Inbox"},
-        "deadline": null,
-        "defer_until": null,
-        "checklist": [],
-        "completed_at": null,
-        "deleted_at": null,
-        "created_at": "2026-01-01T00:00:00Z",
-        "modified_at": {"wall_ms": 1000, "lamport": 1, "device_id": "dev-a"}
-    });
-
     // Device A: edit task with earlier timestamp
     let store_a_path = device_a_dir.path().join("store.json");
-    let mut task_a = base_task.clone();
-    task_a["title"] = json!("Title from A");
+    let mut task_a = make_task("Title from A", 1, 2000, "dev-a", "2026-01-01T00:00:00Z");
     task_a["modified_at"] = json!({"wall_ms": 2000, "lamport": 1, "device_id": "dev-a"});
-    write_store(
-        &store_a_path,
-        &json!({
-            "version": 4, "next_task_number": 2,
-            "tasks": [task_a], "projects": [], "areas": []
-        }),
-    );
+    let store_a = make_v9_store(vec![("task/conflict-task-1", task_a)]);
+    write_store(&store_a_path, &store_a);
 
     // Device A syncs first
     let backend_a = LocalFsSyncBackend::new(remote_dir.path());
@@ -204,16 +171,16 @@ fn lww_conflict_later_timestamp_wins() {
 
     // Device B: edit same task with LATER timestamp
     let store_b_path = device_b_dir.path().join("store.json");
-    let mut task_b = base_task.clone();
-    task_b["title"] = json!("Title from B (winner)");
-    task_b["modified_at"] = json!({"wall_ms": 3000, "lamport": 1, "device_id": "dev-b"});
-    write_store(
-        &store_b_path,
-        &json!({
-            "version": 4, "next_task_number": 2,
-            "tasks": [task_b], "projects": [], "areas": []
-        }),
+    let mut task_b = make_task(
+        "Title from B (winner)",
+        1,
+        3000,
+        "dev-b",
+        "2026-01-01T00:00:00Z",
     );
+    task_b["modified_at"] = json!({"wall_ms": 3000, "lamport": 1, "device_id": "dev-b"});
+    let store_b = make_v9_store(vec![("task/conflict-task-1", task_b)]);
+    write_store(&store_b_path, &store_b);
 
     // Device B syncs (push + pull merge)
     let backend_b = LocalFsSyncBackend::new(remote_dir.path());
@@ -224,9 +191,8 @@ fn lww_conflict_later_timestamp_wins() {
     // Verify Device B's store has the winning title
     let b_data: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&store_b_path).unwrap()).unwrap();
-    let tasks = b_data["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0]["title"], "Title from B (winner)");
+    let entries = b_data["entries"].as_object().unwrap();
+    assert_eq!(entries["task/conflict-task-1"]["title"], "Title from B (winner)");
 }
 
 /// Note conflict: Both sides edit same non-JSON file, conflict file created
@@ -305,82 +271,90 @@ fn three_device_offline_no_duplicates() {
     let dir_b = tempfile::tempdir().unwrap();
     let dir_c = tempfile::tempdir().unwrap();
 
-    let make_store = |device_id: &str, task_id: &str, created_at: &str, wall_ms: i64| {
-        json!({
-            "version": 7,
-            "next_task_number": 2,
-            "tasks": [{
-                "id": task_id,
-                "task_number": 1,
-                "title": format!("Task from {}", device_id),
-                "notes": null,
-                "project_id": null,
-                "area_id": null,
-                "parent_task_id": null,
-                "tags": [],
-                "when": {"type": "Inbox"},
-                "deadline": null,
-                "defer_until": null,
-                "completed_at": null,
-                "deleted_at": null,
-                "depends_on": [],
-                "created_at": created_at,
-                "modified_at": {"wall_ms": wall_ms, "lamport": 1, "device_id": device_id}
-            }],
-            "projects": [],
-            "areas": []
-        })
+    let make_store = |device_id: &str, task_key: &str, created_at: &str, wall_ms: i64| {
+        make_v9_store(vec![(
+            task_key,
+            make_task(
+                &format!("Task from {}", device_id),
+                1,
+                wall_ms,
+                device_id,
+                created_at,
+            ),
+        )])
     };
 
     let store_a_path = dir_a.path().join("store.json");
     let store_b_path = dir_b.path().join("store.json");
     let store_c_path = dir_c.path().join("store.json");
 
-    write_store(&store_a_path, &make_store("dev-a", "task-aaa", "2026-01-01T00:00:00Z", 1000));
-    write_store(&store_b_path, &make_store("dev-b", "task-bbb", "2026-01-02T00:00:00Z", 2000));
-    write_store(&store_c_path, &make_store("dev-c", "task-ccc", "2026-01-03T00:00:00Z", 3000));
+    write_store(
+        &store_a_path,
+        &make_store("dev-a", "task/aaa", "2026-01-01T00:00:00Z", 1000),
+    );
+    write_store(
+        &store_b_path,
+        &make_store("dev-b", "task/bbb", "2026-01-02T00:00:00Z", 2000),
+    );
+    write_store(
+        &store_c_path,
+        &make_store("dev-c", "task/ccc", "2026-01-03T00:00:00Z", 3000),
+    );
 
     // Device A syncs first
     let mut engine_a = SyncEngine::new_in_memory(
         make_config(store_a_path.clone(), dir_a.path().join("sync.db")),
         LocalFsSyncBackend::new(remote_dir.path()),
-    ).unwrap();
+    )
+    .unwrap();
     engine_a.sync().unwrap();
 
     // Device B syncs
     let mut engine_b = SyncEngine::new_in_memory(
         make_config(store_b_path.clone(), dir_b.path().join("sync.db")),
         LocalFsSyncBackend::new(remote_dir.path()),
-    ).unwrap();
+    )
+    .unwrap();
     engine_b.sync().unwrap();
 
     // Device C syncs
     let mut engine_c = SyncEngine::new_in_memory(
         make_config(store_c_path.clone(), dir_c.path().join("sync.db")),
         LocalFsSyncBackend::new(remote_dir.path()),
-    ).unwrap();
+    )
+    .unwrap();
     engine_c.sync().unwrap();
 
     // Device A syncs again to pull B and C
     let mut engine_a2 = SyncEngine::new_in_memory(
         make_config(store_a_path.clone(), dir_a.path().join("sync2.db")),
         LocalFsSyncBackend::new(remote_dir.path()),
-    ).unwrap();
+    )
+    .unwrap();
     engine_a2.sync().unwrap();
 
     let final_store: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&store_a_path).unwrap()).unwrap();
 
-    let tasks = final_store["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 3, "All 3 tasks must be present");
-
-    let mut numbers: Vec<u64> = tasks
+    let entries = final_store["entries"].as_object().unwrap();
+    let task_entries: Vec<_> = entries
         .iter()
-        .filter_map(|t| t["task_number"].as_u64())
+        .filter(|(k, _)| k.starts_with("task/"))
+        .collect();
+    assert_eq!(task_entries.len(), 3, "All 3 tasks must be present");
+
+    let mut numbers: Vec<u64> = task_entries
+        .iter()
+        .filter_map(|(_, v)| v["task_number"].as_u64())
         .collect();
     numbers.sort_unstable();
     numbers.dedup();
-    assert_eq!(numbers.len(), 3, "All task numbers must be unique: {:?}", numbers);
+    assert_eq!(
+        numbers.len(),
+        3,
+        "All task numbers must be unique: {:?}",
+        numbers
+    );
 }
 
 /// Offline queue: Backend unreachable -> ops queue -> backend comes back -> flush succeeds
@@ -390,14 +364,14 @@ fn offline_queue_flushes_when_online() {
     let remote_dir = tempfile::tempdir().unwrap();
 
     let store_path = local_dir.path().join("store.json");
-    write_store(
-        &store_path,
-        &json!({
-            "version": 4, "next_task_number": 2,
-            "tasks": [{"id": "t1", "title": "test", "modified_at": {"wall_ms": 100, "lamport": 1, "device_id": "a"}}],
-            "projects": [], "areas": []
+    let store = make_v9_store(vec![(
+        "task/t1",
+        json!({
+            "title": "test",
+            "modified_at": {"wall_ms": 100, "lamport": 1, "device_id": "a"}
         }),
-    );
+    )]);
+    write_store(&store_path, &store);
 
     // First try: backend unreachable
     let backend = LocalFsSyncBackend::new(std::path::Path::new("/nonexistent/remote"));

@@ -207,7 +207,7 @@ impl<B: SyncBackend> SyncEngine<B> {
                                         serde_json::from_slice(&decrypted)?;
 
                                     let merged =
-                                        conflict::lww_merge_store_json(&local_json, &remote_json);
+                                        conflict::merge_store_json(&local_json, &remote_json);
                                     let merged_bytes = serde_json::to_vec_pretty(&merged)?;
                                     std::fs::write(&tracked.local_path, &merged_bytes)?;
                                 } else if tracked.local_path.exists() {
@@ -352,8 +352,7 @@ mod tests {
         let local_dir = tempfile::tempdir().unwrap();
         let remote_dir = tempfile::tempdir().unwrap();
 
-        let store_content =
-            r#"{"version":4,"next_task_number":2,"tasks":[],"projects":[],"areas":[]}"#;
+        let store_content = r#"{"version":9,"entries":{}}"#;
         let store_path = local_dir.path().join("store.json");
         write_test_store(&store_path, store_content);
 
@@ -378,8 +377,7 @@ mod tests {
         let local_dir = tempfile::tempdir().unwrap();
         let remote_dir = tempfile::tempdir().unwrap();
 
-        let store_content =
-            r#"{"version":4,"next_task_number":2,"tasks":[],"projects":[],"areas":[]}"#;
+        let store_content = r#"{"version":9,"entries":{}}"#;
         let store_path = local_dir.path().join("store.json");
         write_test_store(&store_path, store_content);
 
