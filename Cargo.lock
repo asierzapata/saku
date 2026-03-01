@@ -2518,6 +2518,20 @@ dependencies = [
 [[package]]
 name = "saku-jrn"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "colored",
+ "dirs",
+ "fs2",
+ "jiff",
+ "saku-storage",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "term_size",
+ "thiserror",
+ "unicode-width",
+]
 
 [[package]]
 name = "saku-nte"
