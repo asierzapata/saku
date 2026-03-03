@@ -44,4 +44,11 @@ pub enum IoError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("Failed to read '{path}': {source}")]
+    ReadFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }

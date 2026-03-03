@@ -1,4 +1,5 @@
 pub mod device;
+pub mod dirty_tracker;
 pub mod entity;
 pub mod error;
 pub mod io;
