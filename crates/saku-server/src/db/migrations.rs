@@ -39,6 +39,30 @@ const MIGRATIONS: &[&str] = &[
 
     INSERT INTO schema_version (version) VALUES (1);
     ",
+    // Migration 2: per-entry KV sync tables
+    "
+    CREATE TABLE IF NOT EXISTS kv_entries (
+        user_id     TEXT NOT NULL,
+        tool        TEXT NOT NULL,
+        key         TEXT NOT NULL,
+        blob        BLOB NOT NULL,
+        seq         INTEGER NOT NULL,
+        deleted     BOOLEAN DEFAULT FALSE,
+        written_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        PRIMARY KEY (user_id, tool, key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_kv_seq ON kv_entries (user_id, tool, seq);
+
+    CREATE TABLE IF NOT EXISTS kv_seq_counters (
+        user_id     TEXT NOT NULL,
+        tool        TEXT NOT NULL,
+        next_seq    INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (user_id, tool)
+    );
+
+    UPDATE schema_version SET version = 2;
+    ",
 ];
 
 /// Run all pending migrations.

@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod db;
 mod error;
+mod kv;
 mod state;
 mod sync;
 
@@ -57,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/health", get(health))
         .nest("/api/v1/auth", auth::router())
         .nest("/api/v1/sync", sync::router())
+        .nest("/api/v1/kv", kv::router())
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .with_state(state);
