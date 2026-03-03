@@ -24,6 +24,9 @@ pub enum CryptoError {
     #[error("Content decryption failed — data may be tampered")]
     ContentDecryptionFailed,
 
+    #[error("Entry blob too short — must be at least 24 bytes (nonce)")]
+    EntryBlobTooShort,
+
     #[error("Key derivation error: {0}")]
     Kdf(#[from] KdfError),
 }

@@ -1,6 +1,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
 use rand::rngs::OsRng;
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::KdfError;
@@ -47,6 +48,22 @@ pub fn generate_kek_salt() -> [u8; 16] {
     salt
 }
 
+/// Derive a deterministic 16-byte salt for entry-level encryption.
+///
+/// Every device with the same passphrase produces the same salt, so they
+/// derive the same KEK without out-of-band salt exchange.
+///
+/// `SHA-256(b"saku-sync-kek-salt-v1:" || passphrase)[0..16]`
+pub fn derive_deterministic_salt(passphrase: &[u8]) -> [u8; 16] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"saku-sync-kek-salt-v1:");
+    hasher.update(passphrase);
+    let hash = hasher.finalize();
+    let mut salt = [0u8; 16];
+    salt.copy_from_slice(&hash[..16]);
+    salt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +105,20 @@ mod tests {
     fn generate_salt_is_random() {
         let s1 = generate_kek_salt();
         let s2 = generate_kek_salt();
+        assert_ne!(s1, s2);
+    }
+
+    #[test]
+    fn deterministic_salt_is_deterministic() {
+        let s1 = derive_deterministic_salt(b"my passphrase");
+        let s2 = derive_deterministic_salt(b"my passphrase");
+        assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn different_passphrase_different_salt() {
+        let s1 = derive_deterministic_salt(b"passphrase one");
+        let s2 = derive_deterministic_salt(b"passphrase two");
         assert_ne!(s1, s2);
     }
 }

@@ -1,5 +1,6 @@
 pub mod decrypt;
 pub mod encrypt;
+pub mod entry;
 pub mod error;
 pub mod kdf;
 
@@ -12,8 +13,9 @@ pub mod keychain;
 // Re-exports for convenience
 pub use decrypt::decrypt;
 pub use encrypt::encrypt;
+pub use entry::{decrypt_entry, encrypt_entry};
 pub use error::{CryptoError, KdfError};
-pub use kdf::MasterKey;
+pub use kdf::{MasterKey, derive_deterministic_salt};
 
 #[cfg(test)]
 mod tests {
