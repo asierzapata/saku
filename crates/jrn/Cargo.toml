@@ -21,6 +21,7 @@ dirs.workspace = true
 colored.workspace = true
 term_size.workspace = true
 unicode-width.workspace = true
+toon-format.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

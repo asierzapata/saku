@@ -6,19 +6,22 @@ use saku_tdo::models::{
 };
 use serde::Serialize;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OutputFormat {
     Pretty,
     Json,
     Csv,
+    Toon,
 }
 
 impl OutputFormat {
-    pub fn from_flags(json: bool, csv: bool) -> Self {
+    pub fn from_flags(json: bool, csv: bool, toon: bool) -> Self {
         if json {
             Self::Json
         } else if csv {
             Self::Csv
+        } else if toon {
+            Self::Toon
         } else {
             Self::Pretty
         }
@@ -208,6 +211,10 @@ pub fn print_csv<T: Serialize>(items: &[T]) {
         wtr.serialize(item).unwrap();
     }
     wtr.flush().unwrap();
+}
+
+pub fn print_toon<T: Serialize>(value: &T) {
+    println!("{}", toon_format::encode::encode_default(value).unwrap());
 }
 
 /// Build a complete context snapshot from the store.
@@ -602,5 +609,48 @@ mod tests {
 
         assert!(ctx.ready_tasks.len() <= 10);
         assert!(ctx.recent_completions.len() <= 5);
+    }
+
+    #[test]
+    fn from_flags_json() {
+        assert_eq!(OutputFormat::from_flags(true, false, false), OutputFormat::Json);
+    }
+
+    #[test]
+    fn from_flags_csv() {
+        assert_eq!(OutputFormat::from_flags(false, true, false), OutputFormat::Csv);
+    }
+
+    #[test]
+    fn from_flags_toon() {
+        assert_eq!(OutputFormat::from_flags(false, false, true), OutputFormat::Toon);
+    }
+
+    #[test]
+    fn from_flags_pretty() {
+        assert_eq!(OutputFormat::from_flags(false, false, false), OutputFormat::Pretty);
+    }
+
+    #[test]
+    fn toon_serializes_task_output() {
+        let store = make_store();
+        let task = make_task("Test task", When::Inbox);
+        let out = TaskOutput::from_task(&task, &store);
+        let encoded = toon_format::encode::encode_default(&out).unwrap();
+        assert!(encoded.contains("Test task"));
+    }
+
+    #[test]
+    fn toon_serializes_vec_of_task_outputs() {
+        let store = make_store();
+        let t1 = make_task("Alpha", When::Inbox);
+        let t2 = make_task("Beta", When::Someday);
+        let out: Vec<TaskOutput> = vec![
+            TaskOutput::from_task(&t1, &store),
+            TaskOutput::from_task(&t2, &store),
+        ];
+        let encoded = toon_format::encode::encode_default(&out).unwrap();
+        assert!(encoded.contains("Alpha"));
+        assert!(encoded.contains("Beta"));
     }
 }

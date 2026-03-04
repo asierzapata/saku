@@ -9,7 +9,7 @@ use saku_storage::kv_store::{self, KvStore};
 
 /// Entity schemas for the tdo tool — describes which fields are
 /// cross-entity foreign key references for generic repair.
-fn tdo_entity_schemas() -> Vec<EntitySchema> {
+pub fn tdo_entity_schemas() -> Vec<EntitySchema> {
     vec![
         EntitySchema {
             entity_type: "task",
@@ -32,7 +32,7 @@ fn tdo_entity_schemas() -> Vec<EntitySchema> {
 /// When multiple devices create tasks offline, they may both assign the same
 /// task_number. The oldest task (by created_at, then key) keeps its number;
 /// duplicates get new numbers starting from max(existing_numbers) + 1.
-fn fix_duplicate_task_numbers_kv(entries: &mut HashMap<String, Value>) {
+pub fn fix_duplicate_task_numbers_kv(entries: &mut HashMap<String, Value>) {
     // Collect task entries and their task_numbers
     let task_entries: Vec<(String, u64)> = entries
         .iter()

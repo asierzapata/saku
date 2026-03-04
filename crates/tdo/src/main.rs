@@ -72,15 +72,19 @@ enum Commands {
     /// View tasks and entities
     View {
         /// Output as JSON
-        #[arg(long, short = 'j', conflicts_with = "csv")]
+        #[arg(long, short = 'j', conflicts_with_all = ["csv", "toon"])]
         json: bool,
 
         /// Output as CSV
-        #[arg(long, short = 'c', conflicts_with = "json")]
+        #[arg(long, short = 'c', conflicts_with_all = ["json", "toon"])]
         csv: bool,
 
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, conflicts_with_all = ["json", "csv"])]
+        toon: bool,
+
         /// Watch for changes and re-render automatically (pretty output only)
-        #[arg(long, short = 'w', conflicts_with_all = ["json", "csv"])]
+        #[arg(long, short = 'w', conflicts_with_all = ["json", "csv", "toon"])]
         watch: bool,
 
         /// Include completed tasks (not applicable to Logbook or Trash views)
@@ -307,12 +311,16 @@ enum Commands {
     /// Show details of an area, project, or tag
     Show {
         /// Output as JSON
-        #[arg(long, conflicts_with = "csv")]
+        #[arg(long, conflicts_with_all = ["csv", "toon"])]
         json: bool,
 
         /// Output as CSV
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long, conflicts_with_all = ["json", "toon"])]
         csv: bool,
+
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, conflicts_with_all = ["json", "csv"])]
+        toon: bool,
 
         #[command(subcommand)]
         entity: ShowEntity,
@@ -333,12 +341,16 @@ enum Commands {
     /// List all areas, projects, or tags
     List {
         /// Output as JSON
-        #[arg(long, conflicts_with = "csv")]
+        #[arg(long, conflicts_with_all = ["csv", "toon"])]
         json: bool,
 
         /// Output as CSV
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long, conflicts_with_all = ["json", "toon"])]
         csv: bool,
+
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, conflicts_with_all = ["json", "csv"])]
+        toon: bool,
 
         #[command(subcommand)]
         entity: ListEntity,
@@ -363,23 +375,31 @@ enum Commands {
         notes: bool,
 
         /// Output as JSON
-        #[arg(long, conflicts_with = "csv")]
+        #[arg(long, conflicts_with_all = ["csv", "toon"])]
         json: bool,
 
         /// Output as CSV
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long, conflicts_with_all = ["json", "toon"])]
         csv: bool,
+
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, conflicts_with_all = ["json", "csv"])]
+        toon: bool,
     },
 
     /// Show a full situational snapshot (today, blockers, inbox, overdue, projects)
     Context {
         /// Output as JSON
-        #[arg(long, conflicts_with = "csv")]
+        #[arg(long, conflicts_with_all = ["csv", "toon"])]
         json: bool,
 
         /// Output as CSV (not supported, reserved for consistency)
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long, conflicts_with_all = ["json", "toon"])]
         csv: bool,
+
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, conflicts_with_all = ["json", "csv"])]
+        toon: bool,
     },
 
     /// Generate shell completion script
@@ -1406,11 +1426,11 @@ fn try_sync(storage_path: &std::path::Path) {
                 .and_then(|c| c.passphrase)
             {
                 Some(passphrase) => {
-                    match saku_sync::try_flush_if_online_server(
+                    match saku_sync::try_kv_sync_server(
                         storage_path,
                         passphrase.as_bytes(),
                         &config.server_url,
-                        &config.device_id,
+                        "tdo",
                     ) {
                         Ok(_) => {}
                         Err(e) => {
@@ -1436,6 +1456,51 @@ fn try_sync(storage_path: &std::path::Path) {
                 eprintln!("Warning: sync failed: {}", e);
             }
         }
+    }
+}
+
+/// Snapshot store entry keys and their serialized JSON for dirty detection.
+fn snapshot_entries(store: &saku_tdo::models::store::Store) -> std::collections::HashMap<String, String> {
+    let stored = store.to_stored();
+    stored
+        .entries
+        .into_iter()
+        .filter_map(|(k, v)| serde_json::to_string(&v).ok().map(|s| (k, s)))
+        .collect()
+}
+
+/// Compare before/after snapshots and mark changed keys dirty in the DirtyTracker.
+fn track_dirty_keys(
+    storage_path: &std::path::Path,
+    before: &std::collections::HashMap<String, String>,
+    after: &std::collections::HashMap<String, String>,
+) {
+    let mut changed: Vec<String> = Vec::new();
+
+    // New or modified entries
+    for (key, new_val) in after {
+        match before.get(key) {
+            Some(old_val) if old_val == new_val => {} // unchanged
+            _ => changed.push(key.clone()),
+        }
+    }
+
+    // Deleted entries (in before but not in after — rare, tombstones usually remain)
+    for key in before.keys() {
+        if !after.contains_key(key) {
+            changed.push(key.clone());
+        }
+    }
+
+    if changed.is_empty() {
+        return;
+    }
+
+    let dirty_path = saku_storage::dirty_tracker::DirtyTracker::sidecar_path(storage_path);
+    let mut tracker = saku_storage::dirty_tracker::DirtyTracker::load(&dirty_path).unwrap_or_default();
+    tracker.mark_dirty_many(&changed);
+    if let Err(e) = tracker.save(&dirty_path) {
+        eprintln!("Warning: failed to save dirty tracker: {}", e);
     }
 }
 
@@ -1491,6 +1556,9 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // Snapshot entries before command dispatch for dirty detection
+    let pre_snapshot = if should_sync { Some(snapshot_entries(&store)) } else { None };
 
     match cli.command {
         Some(Commands::Today) => {
@@ -1796,9 +1864,10 @@ fn main() {
             notes,
             json,
             csv,
+            toon,
         }) => {
             let results = store.search_tasks(&query, notes);
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             match fmt {
                 output::OutputFormat::Pretty => {
                     if results.is_empty() {
@@ -1824,18 +1893,28 @@ fn main() {
                         .collect();
                     output::print_csv(&out);
                 }
+                output::OutputFormat::Toon => {
+                    let out: Vec<_> = results
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    output::print_toon(&out);
+                }
             }
         }
-        Some(Commands::Context { json, csv }) => {
+        Some(Commands::Context { json, csv, toon }) => {
             let today = jiff::Zoned::now().date();
             let ctx = output::build_context(&store, today);
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             match fmt {
                 output::OutputFormat::Json => {
                     output::print_json(&ctx);
                 }
+                output::OutputFormat::Toon => {
+                    output::print_toon(&ctx);
+                }
                 output::OutputFormat::Csv => {
-                    eprintln!("CSV output is not supported for context. Use --json instead.");
+                    eprintln!("CSV output is not supported for context. Use --json or --toon instead.");
                     std::process::exit(1);
                 }
                 output::OutputFormat::Pretty => {
@@ -1848,6 +1927,7 @@ fn main() {
             name: entity_name,
             json,
             csv,
+            toon,
             watch,
             all,
             project: filter_project,
@@ -1900,7 +1980,7 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 }
             }
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             if matches!(fmt, output::OutputFormat::Pretty) {
                 render_view_pretty(&entity, &store, all, &view_filters);
             } else {
@@ -1929,6 +2009,7 @@ fn main() {
                         match fmt {
                             output::OutputFormat::Json => output::print_json(&out),
                             output::OutputFormat::Csv => output::print_csv(&out),
+                            output::OutputFormat::Toon => output::print_toon(&out),
                             output::OutputFormat::Pretty => unreachable!(),
                         }
                 }
@@ -1947,6 +2028,7 @@ fn main() {
                         match fmt {
                             output::OutputFormat::Json => output::print_json(&out),
                             output::OutputFormat::Csv => output::print_csv(&out),
+                            output::OutputFormat::Toon => output::print_toon(&out),
                             output::OutputFormat::Pretty => unreachable!(),
                         }
                 }
@@ -1965,6 +2047,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -1981,6 +2064,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2008,6 +2092,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2025,6 +2110,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2048,6 +2134,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2060,7 +2147,7 @@ fn main() {
                     let deleted_areas: Vec<_> = store.get_deleted_areas().collect();
 
                     match fmt {
-                        output::OutputFormat::Json => {
+                        output::OutputFormat::Json | output::OutputFormat::Toon => {
                             let trash = output::TrashOutput {
                                 tasks: deleted_tasks
                                     .iter()
@@ -2079,7 +2166,11 @@ fn main() {
                                     })
                                     .collect(),
                             };
-                            output::print_json(&trash);
+                            match fmt {
+                                output::OutputFormat::Json => output::print_json(&trash),
+                                output::OutputFormat::Toon => output::print_toon(&trash),
+                                _ => unreachable!(),
+                            }
                         }
                         output::OutputFormat::Csv => {
                             let out: Vec<_> = deleted_tasks
@@ -2137,6 +2228,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2178,19 +2270,17 @@ fn main() {
                     tasks.sort_by_key(|t| t.task_number);
 
                     match fmt {
-                        output::OutputFormat::Json => {
+                        output::OutputFormat::Json | output::OutputFormat::Csv | output::OutputFormat::Toon => {
                             let out: Vec<_> = tasks
                                 .iter()
                                 .map(|t| output::TaskOutput::from_task(t, &store))
                                 .collect();
-                            output::print_json(&out);
-                        }
-                        output::OutputFormat::Csv => {
-                            let out: Vec<_> = tasks
-                                .iter()
-                                .map(|t| output::TaskOutput::from_task(t, &store))
-                                .collect();
-                            output::print_csv(&out);
+                            match fmt {
+                                output::OutputFormat::Json => output::print_json(&out),
+                                output::OutputFormat::Csv => output::print_csv(&out),
+                                output::OutputFormat::Toon => output::print_toon(&out),
+                                _ => unreachable!(),
+                            }
                         }
                         output::OutputFormat::Pretty => {
                             let header = if let Some(ref area_key) = project.area_key {
@@ -2288,6 +2378,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2311,6 +2402,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2329,6 +2421,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -2338,6 +2431,7 @@ fn main() {
                         match fmt {
                             output::OutputFormat::Json => output::print_json(&out),
                             output::OutputFormat::Csv => output::print_csv(&[out]),
+                            output::OutputFormat::Toon => output::print_toon(&out),
                             output::OutputFormat::Pretty => unreachable!(),
                         }
                     });
@@ -3198,8 +3292,9 @@ fn main() {
             entity: ListEntity::Areas,
             json,
             csv,
+            toon,
         }) => {
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             let mut areas: Vec<_> = store.get_active_areas().collect();
             areas.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
@@ -3284,6 +3379,7 @@ fn main() {
                 match fmt {
                     output::OutputFormat::Json => output::print_json(&out),
                     output::OutputFormat::Csv => output::print_csv(&out),
+                    output::OutputFormat::Toon => output::print_toon(&out),
                     output::OutputFormat::Pretty => unreachable!(),
                 }
             }
@@ -3364,8 +3460,9 @@ fn main() {
             entity: ListEntity::Projects,
             json,
             csv,
+            toon,
         }) => {
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             let mut projects: Vec<_> = store.get_active_projects().collect();
             projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
@@ -3422,6 +3519,7 @@ fn main() {
                 match fmt {
                     output::OutputFormat::Json => output::print_json(&out),
                     output::OutputFormat::Csv => output::print_csv(&out),
+                    output::OutputFormat::Toon => output::print_toon(&out),
                     output::OutputFormat::Pretty => unreachable!(),
                 }
             }
@@ -3430,8 +3528,9 @@ fn main() {
             entity: ShowEntity::Project { name },
             json,
             csv,
+            toon,
         }) => {
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             let matching: Vec<_> = store
                 .get_active_projects()
                 .filter(|p| p.name.to_lowercase().contains(&name.to_lowercase()))
@@ -3468,19 +3567,17 @@ fn main() {
             tasks.sort_by_key(|t| t.task_number);
 
             match fmt {
-                output::OutputFormat::Json => {
+                output::OutputFormat::Json | output::OutputFormat::Csv | output::OutputFormat::Toon => {
                     let out: Vec<_> = tasks
                         .iter()
                         .map(|t| output::TaskOutput::from_task(t, &store))
                         .collect();
-                    output::print_json(&out);
-                }
-                output::OutputFormat::Csv => {
-                    let out: Vec<_> = tasks
-                        .iter()
-                        .map(|t| output::TaskOutput::from_task(t, &store))
-                        .collect();
-                    output::print_csv(&out);
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
+                        _ => unreachable!(),
+                    }
                 }
                 output::OutputFormat::Pretty => {
                     let header = if let Some(ref area_key) = project.area_key {
@@ -3508,8 +3605,9 @@ fn main() {
             entity: ShowEntity::Area { name },
             json,
             csv,
+            toon,
         }) => {
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             let matching: Vec<_> = store
                 .get_active_areas()
                 .filter(|a| a.name.to_lowercase().contains(&name.to_lowercase()))
@@ -3573,7 +3671,7 @@ fn main() {
                     .sum::<usize>();
 
             match fmt {
-                output::OutputFormat::Json | output::OutputFormat::Csv => {
+                output::OutputFormat::Json | output::OutputFormat::Csv | output::OutputFormat::Toon => {
                     let all_tasks: Vec<&saku_tdo::models::task::Task> = direct_tasks
                         .iter()
                         .chain(project_tasks.iter().flat_map(|(_, tasks)| tasks.iter()))
@@ -3586,6 +3684,7 @@ fn main() {
                     match fmt {
                         output::OutputFormat::Json => output::print_json(&out),
                         output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
@@ -3613,8 +3712,9 @@ fn main() {
             entity: ListEntity::Tags,
             json,
             csv,
+            toon,
         }) => {
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             use std::collections::HashMap;
             let mut tag_counts: HashMap<String, usize> = HashMap::new();
             for task in store.get_active_tasks().filter(|t| t.completed_at.is_none()) {
@@ -3656,6 +3756,7 @@ fn main() {
                 match fmt {
                     output::OutputFormat::Json => output::print_json(&out),
                     output::OutputFormat::Csv => output::print_csv(&out),
+                    output::OutputFormat::Toon => output::print_toon(&out),
                     output::OutputFormat::Pretty => unreachable!(),
                 }
             }
@@ -3664,8 +3765,9 @@ fn main() {
             entity: ShowEntity::Tag { name },
             json,
             csv,
+            toon,
         }) => {
-            let fmt = output::OutputFormat::from_flags(json, csv);
+            let fmt = output::OutputFormat::from_flags(json, csv, toon);
             let mut tasks: Vec<_> = store
                 .get_active_tasks()
                 .filter(|t| t.parent_task_key.is_none())
@@ -3708,6 +3810,7 @@ fn main() {
                 match fmt {
                     output::OutputFormat::Json => output::print_json(&out),
                     output::OutputFormat::Csv => output::print_csv(&out),
+                    output::OutputFormat::Toon => output::print_toon(&out),
                     output::OutputFormat::Pretty => unreachable!(),
                 }
             }
@@ -3867,8 +3970,12 @@ fn main() {
         }
     }
 
-    // After mutation, attempt sync if TDO_SYNC_DIR is set
+    // After mutation, track dirty keys and sync
     if should_sync {
+        if let Some(ref before) = pre_snapshot {
+            let after = snapshot_entries(&store);
+            track_dirty_keys(&storage_path, before, &after);
+        }
         try_sync(&storage_path);
     }
 }

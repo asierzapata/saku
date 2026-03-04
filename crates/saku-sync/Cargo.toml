@@ -10,7 +10,7 @@ publish = true
 
 [features]
 default = []
-server = ["dep:ureq", "dep:toml", "dep:dirs", "saku-crypto/keychain"]
+server = ["dep:ureq", "dep:toml", "dep:dirs", "dep:base64", "saku-crypto/keychain"]
 
 [dependencies]
 saku-storage.workspace = true
@@ -25,6 +25,7 @@ rusqlite.workspace = true
 ureq = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

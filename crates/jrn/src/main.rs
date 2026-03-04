@@ -45,8 +45,12 @@ enum Commands {
         target: String,
 
         /// Output as JSON
-        #[arg(long, short = 'j')]
+        #[arg(long, short = 'j', conflicts_with = "toon")]
         json: bool,
+
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, short = 't', conflicts_with = "json")]
+        toon: bool,
     },
 
     /// Show a single entry in detail
@@ -55,8 +59,12 @@ enum Commands {
         id: u64,
 
         /// Output as JSON
-        #[arg(long, short = 'j')]
+        #[arg(long, short = 'j', conflicts_with = "toon")]
         json: bool,
+
+        /// Output as TOON (token-efficient format for LLMs)
+        #[arg(long, short = 't', conflicts_with = "json")]
+        toon: bool,
     },
 
     /// Write or read a handoff entry
@@ -149,12 +157,16 @@ fn main() {
             }
         }
 
-        Some(Commands::View { target, json }) => match target.as_str() {
+        Some(Commands::View { target, json, toon }) => match target.as_str() {
             "today" => {
                 if json {
                     let today = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
                     let entries = store.get_entries_for_date(&today);
                     println!("{}", serde_json::to_string_pretty(&entries).unwrap());
+                } else if toon {
+                    let today = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
+                    let entries = store.get_entries_for_date(&today);
+                    println!("{}", toon_format::encode::encode_default(&entries).unwrap());
                 } else {
                     saku_jrn::ui::render_today_view(&store);
                 }
@@ -166,10 +178,12 @@ fn main() {
             }
         },
 
-        Some(Commands::Show { id, json }) => match store.get_entry_by_number(id) {
+        Some(Commands::Show { id, json, toon }) => match store.get_entry_by_number(id) {
             Some(entry) => {
                 if json {
                     println!("{}", serde_json::to_string_pretty(entry).unwrap());
+                } else if toon {
+                    println!("{}", toon_format::encode::encode_default(entry).unwrap());
                 } else {
                     saku_jrn::ui::render_entry_detail(entry);
                 }
