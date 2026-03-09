@@ -325,7 +325,7 @@ pub fn has_changes(original_task: &Task, parsed: &ParsedTaskEdit, store: &Store)
 
     let original_estimate = original_task
         .estimate_minutes
-        .map(|m| crate::ui::format_estimate(m));
+        .map(crate::ui::format_estimate);
     if original_estimate.as_deref() != parsed.estimate.as_deref() {
         return true;
     }

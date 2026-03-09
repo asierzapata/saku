@@ -744,7 +744,7 @@ pub fn parse_estimate(s: &str) -> Result<u32, String> {
 pub fn format_estimate(minutes: u32) -> String {
     if minutes < 60 {
         format!("{}m", minutes)
-    } else if minutes % 60 == 0 {
+    } else if minutes.is_multiple_of(60) {
         format!("{}h", minutes / 60)
     } else {
         format!("{}h{}m", minutes / 60, minutes % 60)
