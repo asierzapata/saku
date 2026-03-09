@@ -659,7 +659,7 @@ impl ViewFilters {
 }
 
 /// Sort tasks by estimate (shortest first). Tasks without estimates go to the end.
-fn sort_quick_first<'a>(tasks: &mut Vec<&'a saku_tdo::models::task::Task>) {
+fn sort_quick_first(tasks: &mut Vec<&saku_tdo::models::task::Task>) {
     tasks.sort_by(|a, b| {
         match (a.estimate_minutes, b.estimate_minutes) {
             (Some(ea), Some(eb)) => ea.cmp(&eb),
@@ -1285,7 +1285,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                         format_estimate(total_est),
                     )
                 } else {
-                    format!("Quick Wins")
+                    "Quick Wins".to_string()
                 };
                 saku_tdo::ui::render_view_header(&header, selected.len() + unestimated.len());
                 for task in &selected {
