@@ -57,7 +57,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "catch-panic"] }
 jsonwebtoken = "9"
 bcrypt = "0.17"
-opendal = { version = "0.51", default-features = false, features = ["services-s3"] }
+opendal = { version = "0.51", default-features = false, features = ["services-s3", "services-memory"] }
 base64 = "0.22"
 anyhow = "1"
 
