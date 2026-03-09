@@ -1,6 +1,6 @@
 [package]
 name = "saku-sync"
-version = "0.3.0"
+version = "0.4.0"
 description = "Sync engine for the saku ecosystem"
 repository = "https://github.com/asierzapata/saku"
 authors.workspace = true
