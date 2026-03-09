@@ -39,7 +39,7 @@ impl DirtyTracker {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| IoError::WriteFailed {
                 path: path.to_path_buf(),
-                source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                source: std::io::Error::other(e),
             })?;
         atomic_write(path, &json)
     }
