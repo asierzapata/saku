@@ -185,6 +185,9 @@ pub struct Task {
     /// Who this task is assigned to (e.g., "agent", "wrk", or a username).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_to: Option<String>,
+    /// Estimated time to complete, in minutes (e.g. 15, 60, 90).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_minutes: Option<u32>,
     /// Recurrence rule. None = one-off task.
     #[serde(default)]
     pub recurrence: Option<Recurrence>,

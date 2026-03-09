@@ -107,7 +107,15 @@ enum Commands {
         #[arg(long, short = 'r')]
         ready: bool,
 
-        /// What to view (today, inbox, all, someday, upcoming, deadlines, logbook, trash, recurring, deferred, area, project, tag, task)
+        /// Sort tasks by estimate (shortest first) — quick wins on top
+        #[arg(long)]
+        quick_first: bool,
+
+        /// Time budget for quickwins view (e.g., "1h", "30m", "2h30m")
+        #[arg(long, value_name = "DURATION")]
+        budget: Option<String>,
+
+        /// What to view (today, inbox, all, someday, upcoming, deadlines, logbook, trash, recurring, deferred, quickwins, area, project, tag, task)
         entity: String,
 
         /// Name or ID (required for: area, project, tag, task)
@@ -174,6 +182,10 @@ enum Commands {
         /// Make this a subtask of another task (by task number)
         #[arg(long)]
         parent: Option<u64>,
+
+        /// Estimated time to complete (e.g., "15m", "1h", "1h30m", "90m")
+        #[arg(long, value_name = "DURATION")]
+        estimate: Option<String>,
     },
 
     /// Moves one or more tasks
@@ -257,6 +269,14 @@ enum Commands {
         /// Remove recurrence from this task
         #[arg(long)]
         clear_recurrence: bool,
+
+        /// Set estimated time to complete (e.g., "15m", "1h", "1h30m", "90m")
+        #[arg(long, value_name = "DURATION")]
+        estimate: Option<String>,
+
+        /// Remove time estimate
+        #[arg(long)]
+        clear_estimate: bool,
     },
 
     /// Complete one or more tasks
@@ -486,6 +506,7 @@ enum ViewEntity {
     All,
     Recurring,
     Deferred,
+    QuickWins,
     Area { name: String },
     Project { name: String },
     Tag { name: String },
@@ -504,6 +525,7 @@ fn parse_view_entity(entity: &str, name: Option<String>) -> Result<ViewEntity, S
         "all" => Ok(ViewEntity::All),
         "recurring" => Ok(ViewEntity::Recurring),
         "deferred" => Ok(ViewEntity::Deferred),
+        "quickwins" => Ok(ViewEntity::QuickWins),
         "area" => name
             .ok_or_else(|| "area requires a name argument".to_string())
             .map(|n| ViewEntity::Area { name: n }),
@@ -517,7 +539,7 @@ fn parse_view_entity(entity: &str, name: Option<String>) -> Result<ViewEntity, S
             .ok_or_else(|| "task requires a number or name argument".to_string())
             .map(|n| ViewEntity::Task { id: n }),
         other => Err(format!(
-            "unknown view: '{}'. Options: today, inbox, all, someday, upcoming, deadlines, logbook, trash, recurring, deferred, area, project, tag, task",
+            "unknown view: '{}'. Options: today, inbox, all, someday, upcoming, deadlines, logbook, trash, recurring, deferred, quickwins, area, project, tag, task",
             other
         )),
     }
@@ -583,18 +605,34 @@ fn hostname() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+use saku_tdo::ui::{format_estimate, parse_estimate};
+
 /// Filters to apply to task views.
 struct ViewFilters {
     project: Option<String>,
     tags: Vec<String>,
     area: Option<String>,
     ready: bool,
+    quick_first: bool,
+    budget_minutes: Option<u32>,
 }
 
 impl ViewFilters {
     fn is_empty(&self) -> bool {
         self.project.is_none() && self.tags.is_empty() && self.area.is_none() && !self.ready
     }
+}
+
+/// Sort tasks by estimate (shortest first). Tasks without estimates go to the end.
+fn sort_quick_first<'a>(tasks: &mut Vec<&'a saku_tdo::models::task::Task>) {
+    tasks.sort_by(|a, b| {
+        match (a.estimate_minutes, b.estimate_minutes) {
+            (Some(ea), Some(eb)) => ea.cmp(&eb),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.task_number.cmp(&b.task_number),
+        }
+    });
 }
 
 /// Apply view filters to a list of tasks.
@@ -699,8 +737,11 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
                 .collect();
             let inbox_tasks = filter_tasks(inbox_tasks, filters, store);
-            let inbox_tasks =
+            let mut inbox_tasks =
                 saku_tdo::models::task::order_tasks_with_store(inbox_tasks, store);
+            if filters.quick_first {
+                sort_quick_first(&mut inbox_tasks);
+            }
             if inbox_tasks.is_empty() {
                 println!("Inbox is empty");
             } else {
@@ -717,8 +758,11 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .filter(|t| include_completed || t.completed_at.is_none())
                 .collect();
             let someday_tasks = filter_tasks(someday_tasks, filters, store);
-            let someday_tasks =
+            let mut someday_tasks =
                 saku_tdo::models::task::order_tasks_with_store(someday_tasks, store);
+            if filters.quick_first {
+                sort_quick_first(&mut someday_tasks);
+            }
             if someday_tasks.is_empty() {
                 println!("No someday tasks");
             } else {
@@ -732,7 +776,10 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
             use std::collections::HashMap;
             let all_tasks: Vec<_> = store.get_active_tasks().collect();
             let all_tasks = filter_tasks(all_tasks, filters, store);
-            let all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, store);
+            let mut all_tasks = saku_tdo::models::task::order_tasks_with_store(all_tasks, store);
+            if filters.quick_first {
+                sort_quick_first(&mut all_tasks);
+            }
             if all_tasks.is_empty() {
                 println!("No active tasks");
             } else {
@@ -1145,6 +1192,68 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 saku_tdo::ui::render_view_header("Deferred", deferred_tasks.len());
                 for task in deferred_tasks {
                     saku_tdo::ui::render_task_line(task, store);
+                }
+            }
+        }
+        ViewEntity::QuickWins => {
+            let today = jiff::Zoned::now().date();
+            let budget = filters.budget_minutes;
+
+            // Gather active, non-deleted, non-completed, non-subtask tasks
+            let tasks: Vec<_> = store
+                .get_active_tasks()
+                .filter(|t| t.completed_at.is_none() && t.parent_task_key.is_none())
+                .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
+                .collect();
+            let tasks = filter_tasks(tasks, filters, store);
+
+            // Split into estimated and unestimated
+            let mut estimated: Vec<_> = tasks.iter().filter(|t| t.estimate_minutes.is_some()).copied().collect();
+            let unestimated: Vec<_> = tasks.iter().filter(|t| t.estimate_minutes.is_none()).copied().collect();
+
+            // Sort estimated by duration ascending
+            estimated.sort_by_key(|t| t.estimate_minutes.unwrap_or(u32::MAX));
+
+            // Apply budget: greedily pick tasks that fit
+            let (selected, total_est) = if let Some(budget_mins) = budget {
+                let mut remaining = budget_mins;
+                let mut selected = Vec::new();
+                for task in &estimated {
+                    let est = task.estimate_minutes.unwrap();
+                    if est <= remaining {
+                        selected.push(*task);
+                        remaining -= est;
+                    }
+                }
+                let total: u32 = selected.iter().map(|t| t.estimate_minutes.unwrap()).sum();
+                (selected, total)
+            } else {
+                let total: u32 = estimated.iter().map(|t| t.estimate_minutes.unwrap()).sum();
+                (estimated, total)
+            };
+
+            if selected.is_empty() && unestimated.is_empty() {
+                println!("No tasks available for quick wins");
+            } else {
+                let header = if let Some(budget_mins) = budget {
+                    format!(
+                        "Quick Wins — {} budget ({} tasks, ~{})",
+                        format_estimate(budget_mins),
+                        selected.len(),
+                        format_estimate(total_est),
+                    )
+                } else {
+                    format!("Quick Wins")
+                };
+                saku_tdo::ui::render_view_header(&header, selected.len() + unestimated.len());
+                for task in &selected {
+                    saku_tdo::ui::render_task_line(task, store);
+                }
+                if !unestimated.is_empty() {
+                    saku_tdo::ui::render_section_header(&format!("Unestimated ({})", unestimated.len()));
+                    for task in &unestimated {
+                        saku_tdo::ui::render_task_line(task, store);
+                    }
                 }
             }
         }
@@ -1568,7 +1677,7 @@ fn main() {
             );
             eprintln!("{}", "This command will be removed in v1.0.0.".yellow());
             eprintln!();
-            let no_filters = ViewFilters { project: None, tags: vec![], area: None, ready: false };
+            let no_filters = ViewFilters { project: None, tags: vec![], area: None, ready: false, quick_first: false, budget_minutes: None };
             render_today_view(&store, false, &no_filters);
         }
         Some(Commands::Inbox) => {
@@ -1934,7 +2043,22 @@ fn main() {
             tag: filter_tags,
             area: filter_area,
             ready: filter_ready,
+            quick_first,
+            budget,
         }) => {
+            // Parse budget if provided
+            let budget_minutes = if let Some(budget_str) = budget {
+                match parse_estimate(&budget_str) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        eprintln!("Error: Invalid budget: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
             let entity = match parse_view_entity(&entity_str, entity_name) {
                 Ok(e) => e,
                 Err(msg) => {
@@ -1947,6 +2071,8 @@ fn main() {
                 tags: filter_tags,
                 area: filter_area,
                 ready: filter_ready,
+                quick_first,
+                budget_minutes,
             };
             if watch {
                 loop {
@@ -2425,6 +2551,43 @@ fn main() {
                         output::OutputFormat::Pretty => unreachable!(),
                     }
                 }
+                ViewEntity::QuickWins => {
+                    let today = jiff::Zoned::now().date();
+                    let tasks: Vec<_> = store
+                        .get_active_tasks()
+                        .filter(|t| t.completed_at.is_none() && t.parent_task_key.is_none())
+                        .filter(|t| t.defer_until.is_none() || t.defer_until.unwrap() <= today)
+                        .collect();
+                    let tasks = filter_tasks(tasks, &view_filters, &store);
+                    let mut estimated: Vec<_> = tasks.iter().filter(|t| t.estimate_minutes.is_some()).copied().collect();
+                    let unestimated: Vec<_> = tasks.iter().filter(|t| t.estimate_minutes.is_none()).copied().collect();
+                    estimated.sort_by_key(|t| t.estimate_minutes.unwrap_or(u32::MAX));
+                    let selected = if let Some(budget_mins) = view_filters.budget_minutes {
+                        let mut remaining = budget_mins;
+                        let mut selected = Vec::new();
+                        for task in &estimated {
+                            let est = task.estimate_minutes.unwrap();
+                            if est <= remaining {
+                                selected.push(*task);
+                                remaining -= est;
+                            }
+                        }
+                        selected
+                    } else {
+                        estimated
+                    };
+                    let all_tasks: Vec<_> = selected.iter().chain(unestimated.iter()).copied().collect();
+                    let out: Vec<_> = all_tasks
+                        .iter()
+                        .map(|t| output::TaskOutput::from_task(t, &store))
+                        .collect();
+                    match fmt {
+                        output::OutputFormat::Json => output::print_json(&out),
+                        output::OutputFormat::Csv => output::print_csv(&out),
+                        output::OutputFormat::Toon => output::print_toon(&out),
+                        output::OutputFormat::Pretty => unreachable!(),
+                    }
+                }
                 ViewEntity::Task { id } => {
                     resolve_task_by_id_or_fuzzy(&id, &store, |task| {
                         let out = output::TaskOutput::from_task(task, &store);
@@ -2455,7 +2618,21 @@ fn main() {
             every,
             until,
             parent,
+            estimate,
         }) => {
+            // Parse estimate if provided
+            let estimate_minutes = if let Some(est_str) = estimate {
+                match parse_estimate(&est_str) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
             // Parse when flags
             let when = match When::from_command_flags(today, tomorrow, next_week, someday, on) {
                 Ok(w) => w,
@@ -2516,6 +2693,7 @@ fn main() {
                 tags: tag,
                 recurrence,
                 parent_task_number: parent,
+                estimate_minutes,
             };
 
             // Call service
@@ -2527,6 +2705,9 @@ fn main() {
                         && let Some(project) = store.get_project(project_key)
                     {
                         println!("  Project: {}", project.name);
+                    }
+                    if let Some(est) = task.estimate_minutes {
+                        println!("  ⏱ Estimate: {}", format_estimate(est));
                     }
                     if let Some(ref r) = task.recurrence {
                         println!("  ↻ Repeats: {}", r);
@@ -3058,7 +3239,22 @@ fn main() {
             every,
             until,
             clear_recurrence,
+            estimate,
+            clear_estimate,
         }) => {
+            // Parse estimate if provided
+            let estimate_minutes = if let Some(est_str) = estimate {
+                match parse_estimate(&est_str) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
             // Parse when flags (if any scheduling flag is provided)
             let when = if today || tomorrow || next_week || someday || on.is_some() {
                 match When::from_command_flags(today, tomorrow, next_week, someday, on) {
@@ -3137,6 +3333,8 @@ fn main() {
                     clear_defer,
                     recurrence: recurrence.clone(),
                     clear_recurrence,
+                    estimate_minutes,
+                    clear_estimate,
                 };
 
                 // Call service
@@ -3965,6 +4163,8 @@ fn main() {
                 tags: vec![],
                 area: None,
                 ready: false,
+                quick_first: false,
+                budget_minutes: None,
             };
             render_today_view(&store, false, &no_filters);
         }

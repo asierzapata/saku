@@ -88,7 +88,15 @@ pub fn serialize_task_for_edit(task: &Task, store: &Store) -> String {
         output.push_str(&defer_until.to_string());
     }
     output.push('\n');
-    output.push_str("# Format: YYYY-MM-DD or leave empty\n");
+    output.push_str("# Format: YYYY-MM-DD or leave empty\n\n");
+
+    // Estimate
+    output.push_str("Estimate: ");
+    if let Some(minutes) = task.estimate_minutes {
+        output.push_str(&crate::ui::format_estimate(minutes));
+    }
+    output.push('\n');
+    output.push_str("# Format: 15m, 1h, 1h30m, 90m, or leave empty\n");
 
     output
 }
@@ -158,6 +166,7 @@ pub struct ParsedTaskEdit {
     pub when: String,
     pub deadline: Option<String>,
     pub defer_until: Option<String>,
+    pub estimate: Option<String>,
 }
 
 /// Parse the edited content back into structured fields
@@ -170,6 +179,7 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
     let mut when: Option<String> = None;
     let mut deadline: Option<String> = None;
     let mut defer_until: Option<String> = None;
+    let mut estimate: Option<String> = None;
 
     let mut in_notes = false;
 
@@ -187,7 +197,8 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
             || line.starts_with("Tags:")
             || line.starts_with("When:")
             || line.starts_with("Deadline:")
-            || line.starts_with("Defer Until:");
+            || line.starts_with("Defer Until:")
+            || line.starts_with("Estimate:");
 
         if is_field_header {
             // Process field header
@@ -220,6 +231,9 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
             } else if line.starts_with("Defer Until: ") {
                 defer_until = Some(line.trim_start_matches("Defer Until: ").trim().to_string());
                 in_notes = false;
+            } else if line.starts_with("Estimate: ") {
+                estimate = Some(line.trim_start_matches("Estimate: ").trim().to_string());
+                in_notes = false;
             }
         } else if in_notes {
             notes_lines.push(line.to_string());
@@ -248,6 +262,7 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
     let when = when.unwrap_or_else(|| "inbox".to_string());
     let deadline = deadline.and_then(|s| if s.is_empty() { None } else { Some(s) });
     let defer_until = defer_until.and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let estimate = estimate.and_then(|s| if s.is_empty() { None } else { Some(s) });
 
     Ok(ParsedTaskEdit {
         title,
@@ -258,6 +273,7 @@ pub fn parse_edited_task(content: &str) -> Result<ParsedTaskEdit, String> {
         when,
         deadline,
         defer_until,
+        estimate,
     })
 }
 
@@ -304,6 +320,13 @@ pub fn has_changes(original_task: &Task, parsed: &ParsedTaskEdit, store: &Store)
 
     let original_defer = original_task.defer_until.map(|d| d.to_string());
     if original_defer.as_deref() != parsed.defer_until.as_deref() {
+        return true;
+    }
+
+    let original_estimate = original_task
+        .estimate_minutes
+        .map(|m| crate::ui::format_estimate(m));
+    if original_estimate.as_deref() != parsed.estimate.as_deref() {
         return true;
     }
 
@@ -499,6 +522,7 @@ Checklist:
             when: "inbox".to_string(),
             deadline: None,
             defer_until: None,
+            estimate: None,
         };
 
         assert!(has_changes(&task, &parsed, &store));
@@ -523,6 +547,7 @@ Checklist:
             when: "inbox".to_string(),
             deadline: None,
             defer_until: None,
+            estimate: None,
         };
 
         assert!(!has_changes(&task, &parsed, &store));
