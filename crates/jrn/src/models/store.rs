@@ -47,11 +47,11 @@ impl Store {
         let mut entry_number_index = HashMap::new();
 
         for (key, value) in stored.entries {
-            if key.starts_with("entry/") {
-                if let Ok(entry) = serde_json::from_value::<Entry>(value) {
-                    entry_number_index.insert(entry.entry_number, key.clone());
-                    entries.insert(key, entry);
-                }
+            if key.starts_with("entry/")
+                && let Ok(entry) = serde_json::from_value::<Entry>(value)
+            {
+                entry_number_index.insert(entry.entry_number, key.clone());
+                entries.insert(key, entry);
             }
         }
 

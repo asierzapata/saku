@@ -2,17 +2,12 @@ use saku_storage::entity::Entity;
 use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
+    #[default]
     Log,
     Handoff,
-}
-
-impl Default for EntryKind {
-    fn default() -> Self {
-        EntryKind::Log
-    }
 }
 
 impl std::fmt::Display for EntryKind {

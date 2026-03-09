@@ -78,10 +78,10 @@ pub fn add_entry(
 ///
 /// Priority: JRN_AUTHOR env var > CLAUDE_CODE env presence > "human"
 pub fn detect_author() -> String {
-    if let Ok(author) = std::env::var("JRN_AUTHOR") {
-        if !author.is_empty() {
-            return author;
-        }
+    if let Ok(author) = std::env::var("JRN_AUTHOR")
+        && !author.is_empty()
+    {
+        return author;
     }
     if std::env::var("CLAUDE_CODE").is_ok() {
         return "claude".to_string();

@@ -34,10 +34,10 @@ impl Storage for JsonFileStorage {
                     })?;
 
                 // Check version
-                if let Some(version) = data.get("version").and_then(|v| v.as_u64()) {
-                    if version as u32 > CURRENT_VERSION {
-                        return Err(StorageError::FutureVersion(version as u32));
-                    }
+                if let Some(version) = data.get("version").and_then(|v| v.as_u64())
+                    && version as u32 > CURRENT_VERSION
+                {
+                    return Err(StorageError::FutureVersion(version as u32));
                 }
 
                 let stored_store: StoredStore =

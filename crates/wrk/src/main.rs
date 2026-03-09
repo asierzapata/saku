@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -84,7 +84,7 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
     }
 }
 
-fn load_store(storage_path: &PathBuf) -> (JsonFileStorage, saku_tdo::models::store::Store) {
+fn load_store(storage_path: &Path) -> (JsonFileStorage, saku_tdo::models::store::Store) {
     // Create parent directory if needed
     if let Some(parent) = storage_path.parent() {
         std::fs::create_dir_all(parent).unwrap_or_else(|e| {
@@ -93,7 +93,7 @@ fn load_store(storage_path: &PathBuf) -> (JsonFileStorage, saku_tdo::models::sto
         });
     }
 
-    let storage = JsonFileStorage::new(storage_path.clone());
+    let storage = JsonFileStorage::new(storage_path.to_path_buf());
     let store = match storage.load() {
         Ok(store) => store,
         Err(e) => {

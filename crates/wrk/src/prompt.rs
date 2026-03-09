@@ -21,16 +21,16 @@ pub fn build_prompt(task: &Task, store: &Store, project_claude_md: Option<&str>)
     if let Some(ref project_key) = task.project_key {
         if let Some(project) = store.get_project(project_key) {
             context_lines.push(format!("Project: {}", project.name));
-            if let Some(ref area_key) = project.area_key {
-                if let Some(area) = store.get_area(area_key) {
-                    context_lines.push(format!("Area: {}", area.name));
-                }
+            if let Some(ref area_key) = project.area_key
+                && let Some(area) = store.get_area(area_key)
+            {
+                context_lines.push(format!("Area: {}", area.name));
             }
         }
-    } else if let Some(ref area_key) = task.area_key {
-        if let Some(area) = store.get_area(area_key) {
-            context_lines.push(format!("Area: {}", area.name));
-        }
+    } else if let Some(ref area_key) = task.area_key
+        && let Some(area) = store.get_area(area_key)
+    {
+        context_lines.push(format!("Area: {}", area.name));
     }
 
     if let Some(deadline) = task.deadline {
