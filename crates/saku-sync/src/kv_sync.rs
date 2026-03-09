@@ -251,7 +251,7 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
     let client = KvHttpClient::new(&config.server_url)?;
     let dirty_path = DirtyTracker::sidecar_path(&config.store_path);
     let mut tracker = DirtyTracker::load(&dirty_path)
-        .map_err(|e| SyncError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| SyncError::Io(std::io::Error::other(e.to_string())))?;
 
     // Derive master key
     let salt = derive_deterministic_salt(&config.passphrase);
@@ -348,7 +348,7 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
     // Save cookie and tracker
     tracker.set_cookie(last_cookie);
     tracker.save(&dirty_path)
-        .map_err(|e| SyncError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| SyncError::Io(std::io::Error::other(e.to_string())))?;
 
     Ok(KvSyncOutcome {
         pulled: pulled_count,
@@ -394,7 +394,7 @@ fn save_store_json(path: &Path, store: &KvStore) -> Result<(), SyncError> {
         std::fs::create_dir_all(parent)?;
     }
     saku_storage::io::atomic_writer::atomic_write(path, &json)
-        .map_err(|e| SyncError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| SyncError::Io(std::io::Error::other(e.to_string())))?;
     Ok(())
 }
 
