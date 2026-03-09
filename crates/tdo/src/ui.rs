@@ -672,6 +672,85 @@ fn render_detail_section_header(label: &str) {
     );
 }
 
+/// Parse a human-friendly duration string into minutes.
+/// Supports: "15m", "1h", "1h30m", "90m", "2h", "1.5h", plain number treated as minutes.
+pub fn parse_estimate(s: &str) -> Result<u32, String> {
+    let s = s.trim().to_lowercase();
+    if s.is_empty() {
+        return Err("Estimate cannot be empty".to_string());
+    }
+
+    // Try plain number (minutes)
+    if let Ok(n) = s.parse::<u32>() {
+        return if n == 0 {
+            Err("Estimate must be greater than 0".to_string())
+        } else {
+            Ok(n)
+        };
+    }
+
+    // Try decimal hours like "1.5h"
+    if s.ends_with('h') && !s.contains('m') {
+        let num_str = &s[..s.len() - 1];
+        if let Ok(hours) = num_str.parse::<f64>() {
+            let minutes = (hours * 60.0).round() as u32;
+            return if minutes == 0 {
+                Err("Estimate must be greater than 0".to_string())
+            } else {
+                Ok(minutes)
+            };
+        }
+    }
+
+    // Try "XhYm" or "Xh" or "Ym" patterns
+    let mut total_minutes: u32 = 0;
+    let mut found_any = false;
+
+    // Extract hours
+    if let Some(h_pos) = s.find('h') {
+        let h_str = &s[..h_pos];
+        let hours: u32 = h_str
+            .parse()
+            .map_err(|_| format!("Invalid hours in estimate: '{}'", s))?;
+        total_minutes += hours * 60;
+        found_any = true;
+    }
+
+    // Extract minutes
+    if let Some(m_pos) = s.find('m') {
+        let start = s.find('h').map(|p| p + 1).unwrap_or(0);
+        let m_str = &s[start..m_pos];
+        if !m_str.is_empty() {
+            let mins: u32 = m_str
+                .parse()
+                .map_err(|_| format!("Invalid minutes in estimate: '{}'", s))?;
+            total_minutes += mins;
+            found_any = true;
+        }
+    }
+
+    if !found_any || total_minutes == 0 {
+        return Err(format!(
+            "Invalid estimate format: '{}'. Use e.g. 15m, 1h, 1h30m, 90m",
+            s
+        ));
+    }
+
+    Ok(total_minutes)
+}
+
+/// Format minutes as a compact human-friendly duration string.
+/// e.g. 30 -> "30m", 60 -> "1h", 90 -> "1h30m"
+pub fn format_estimate(minutes: u32) -> String {
+    if minutes < 60 {
+        format!("{}m", minutes)
+    } else if minutes % 60 == 0 {
+        format!("{}h", minutes / 60)
+    } else {
+        format!("{}h{}m", minutes / 60, minutes % 60)
+    }
+}
+
 /// Render a full detail view for a single task.
 pub fn render_task_detail_view(task: &Task, store: &Store) {
     let urgency = calculate_task_urgency(task);
@@ -733,6 +812,12 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
     // Project / Area context (only if set)
     if let Some(ctx) = get_task_context(task, store) {
         field("Project", ctx.as_str().white());
+    }
+
+    // Estimate (only if set)
+    if let Some(est) = task.estimate_minutes {
+        let est_str = format!("⏱ {}", format_estimate(est));
+        field("Estimate", est_str.as_str().white());
     }
 
     // Assigned to (only if set)
@@ -811,5 +896,72 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
             render_subtask_line(subtask, store);
         }
         println!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_estimate_minutes_only() {
+        assert_eq!(parse_estimate("15m").unwrap(), 15);
+        assert_eq!(parse_estimate("90m").unwrap(), 90);
+        assert_eq!(parse_estimate("5m").unwrap(), 5);
+    }
+
+    #[test]
+    fn parse_estimate_hours_only() {
+        assert_eq!(parse_estimate("1h").unwrap(), 60);
+        assert_eq!(parse_estimate("2h").unwrap(), 120);
+    }
+
+    #[test]
+    fn parse_estimate_hours_and_minutes() {
+        assert_eq!(parse_estimate("1h30m").unwrap(), 90);
+        assert_eq!(parse_estimate("2h15m").unwrap(), 135);
+    }
+
+    #[test]
+    fn parse_estimate_decimal_hours() {
+        assert_eq!(parse_estimate("1.5h").unwrap(), 90);
+        assert_eq!(parse_estimate("0.5h").unwrap(), 30);
+    }
+
+    #[test]
+    fn parse_estimate_plain_number() {
+        assert_eq!(parse_estimate("30").unwrap(), 30);
+        assert_eq!(parse_estimate("60").unwrap(), 60);
+    }
+
+    #[test]
+    fn parse_estimate_case_insensitive() {
+        assert_eq!(parse_estimate("1H30M").unwrap(), 90);
+        assert_eq!(parse_estimate("2H").unwrap(), 120);
+    }
+
+    #[test]
+    fn parse_estimate_invalid() {
+        assert!(parse_estimate("").is_err());
+        assert!(parse_estimate("0").is_err());
+        assert!(parse_estimate("abc").is_err());
+    }
+
+    #[test]
+    fn format_estimate_minutes_only() {
+        assert_eq!(format_estimate(15), "15m");
+        assert_eq!(format_estimate(45), "45m");
+    }
+
+    #[test]
+    fn format_estimate_exact_hours() {
+        assert_eq!(format_estimate(60), "1h");
+        assert_eq!(format_estimate(120), "2h");
+    }
+
+    #[test]
+    fn format_estimate_hours_and_minutes() {
+        assert_eq!(format_estimate(90), "1h30m");
+        assert_eq!(format_estimate(135), "2h15m");
     }
 }

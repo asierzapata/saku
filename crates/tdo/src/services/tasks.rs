@@ -57,6 +57,8 @@ pub struct AddTaskParameters {
     pub recurrence: Option<Recurrence>,
     /// If set, this task becomes a subtask of the given task number
     pub parent_task_number: Option<u64>,
+    /// Estimated time to complete, in minutes
+    pub estimate_minutes: Option<u32>,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number, task.key)))]
@@ -194,6 +196,7 @@ pub fn add_task(
         assigned_to: None,
         recurrence: parameters.recurrence,
         completed_occurrences: vec![],
+        estimate_minutes: parameters.estimate_minutes,
     };
 
     let task_storage_key = task.storage_key();
@@ -277,6 +280,10 @@ pub struct MoveTaskParameters {
     pub recurrence: Option<Recurrence>,
     /// Remove the recurrence rule entirely.
     pub clear_recurrence: bool,
+    /// Set a new time estimate (in minutes).
+    pub estimate_minutes: Option<u32>,
+    /// Remove the time estimate entirely.
+    pub clear_estimate: bool,
 }
 
 #[cfg_attr(feature = "logging", instrument(skip(store, storage), fields(task.number)))]
@@ -379,6 +386,14 @@ pub fn move_task(
         task.recurrence.clone()
     };
 
+    let estimate_minutes = if parameters.clear_estimate {
+        None
+    } else if parameters.estimate_minutes.is_some() {
+        parameters.estimate_minutes
+    } else {
+        task.estimate_minutes
+    };
+
     let new_task = Task {
         storage_key_suffix: task.storage_key_suffix.clone(),
         task_number: task.task_number,
@@ -399,6 +414,7 @@ pub fn move_task(
         assigned_to: task.assigned_to.clone(),
         recurrence,
         completed_occurrences: task.completed_occurrences.clone(),
+        estimate_minutes,
     };
 
     let task_storage_key = new_task.storage_key();
@@ -931,6 +947,16 @@ pub fn edit_task(
             None
         };
 
+    // 10b. Parse estimate if provided
+    let estimate_minutes = if let Some(est_str) = parsed.estimate {
+        use crate::ui::parse_estimate;
+        Some(parse_estimate(&est_str).map_err(|e| {
+            EditTaskError::InvalidDate("estimate".to_string(), e)
+        })?)
+    } else {
+        None
+    };
+
     // 11. Build updated task
     let updated_task = Task {
         storage_key_suffix: task.storage_key_suffix.clone(),
@@ -952,6 +978,7 @@ pub fn edit_task(
         assigned_to: task.assigned_to.clone(),
         recurrence: task.recurrence.clone(),
         completed_occurrences: task.completed_occurrences.clone(),
+        estimate_minutes,
     };
 
     let task_storage_key = updated_task.storage_key();
@@ -1199,6 +1226,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1231,6 +1259,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1260,6 +1289,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1287,6 +1317,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1315,6 +1346,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1343,6 +1375,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1371,6 +1404,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1399,6 +1433,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1425,6 +1460,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1453,6 +1489,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1479,6 +1516,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         );
 
@@ -1505,6 +1543,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         )
         .unwrap();
@@ -1524,6 +1563,7 @@ mod tests {
                 recurrence: None,
                 parent_task_number: None,
                 defer_until: None,
+                estimate_minutes: None,
             },
         )
         .unwrap();
@@ -1563,6 +1603,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1597,6 +1639,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1631,6 +1675,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1665,6 +1711,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1699,6 +1747,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1733,6 +1783,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1766,6 +1818,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1798,6 +1852,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1830,6 +1886,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1862,6 +1920,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1894,6 +1954,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1942,6 +2004,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -1991,6 +2055,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -2040,6 +2106,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 
@@ -2089,6 +2157,8 @@ mod tests {
                 clear_recurrence: false,
                 defer_until: None,
                 clear_defer: false,
+                estimate_minutes: None,
+                clear_estimate: false,
             },
         );
 

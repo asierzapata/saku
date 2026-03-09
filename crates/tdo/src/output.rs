@@ -48,6 +48,8 @@ pub struct TaskOutput {
     pub parent_id: Option<u64>,
     /// Who the task is assigned to
     pub assigned_to: Option<String>,
+    /// Estimated time to complete in minutes
+    pub estimate_minutes: Option<u32>,
 }
 
 impl TaskOutput {
@@ -111,6 +113,7 @@ impl TaskOutput {
             completed_at: task.completed_at.map(|t| t.to_string()),
             parent_id,
             assigned_to: task.assigned_to.clone(),
+            estimate_minutes: task.estimate_minutes,
         }
     }
 }
