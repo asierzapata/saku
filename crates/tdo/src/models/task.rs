@@ -580,7 +580,14 @@ fn order_tasks_impl<'a>(
 ) -> Vec<&'a Task> {
     let mut ordered = tasks;
     ordered.sort_by(|a, b| {
-        // 0. Blocked tasks sort to the bottom
+        // 0. Completed tasks sort to the bottom
+        match (a.completed_at.is_some(), b.completed_at.is_some()) {
+            (true, false) => return Ordering::Greater,
+            (false, true) => return Ordering::Less,
+            _ => {}
+        }
+
+        // 1. Blocked tasks sort to the bottom
         let a_blocked = store.is_some_and(|s| s.is_task_blocked(a));
         let b_blocked = store.is_some_and(|s| s.is_task_blocked(b));
         let blocked_ord = match (a_blocked, b_blocked) {
@@ -822,5 +829,24 @@ mod tests {
             }
             _ => panic!("Expected Scheduled variant"),
         }
+    }
+
+    #[test]
+    fn completed_tasks_sort_after_incomplete() {
+        let incomplete = make_task(2, None, None, None);
+        let mut completed = make_task(1, Some(date(2025, 1, 1)), None, None);
+        completed.completed_at = Some(jiff::Zoned::now().timestamp());
+
+        let tasks = vec![&completed, &incomplete];
+        let ordered = order_tasks(tasks);
+
+        assert_eq!(
+            ordered[0].task_number, 2,
+            "incomplete task should be first"
+        );
+        assert_eq!(
+            ordered[1].task_number, 1,
+            "completed task should be last"
+        );
     }
 }

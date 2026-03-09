@@ -535,7 +535,7 @@ pub fn render_subtask_children(parent_key: &str, store: &Store) {
     let mut subtasks: Vec<&Task> = store
         .get_subtasks(parent_key)
         .collect();
-    subtasks.sort_by_key(|t| t.task_number);
+    subtasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
     for subtask in subtasks {
         render_subtask_line(subtask, store);
     }
@@ -803,7 +803,7 @@ pub fn render_task_detail_view(task: &Task, store: &Store) {
     let mut subtasks: Vec<&Task> = store
         .get_subtasks(&task.storage_key())
         .collect();
-    subtasks.sort_by_key(|t| t.task_number);
+    subtasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
     if !subtasks.is_empty() {
         render_detail_section_header(&format!("Subtasks ({})", subtasks.len()));
