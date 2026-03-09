@@ -1,6 +1,6 @@
 [package]
 name = "saku-storage"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared storage infrastructure for the saku ecosystem"
 repository = "https://github.com/asierzapata/saku"
 authors.workspace = true
