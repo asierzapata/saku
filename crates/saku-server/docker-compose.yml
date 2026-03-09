@@ -1,3 +1,7 @@
+# NOTE: If code has changed, rebuild the image before deploying:
+#   docker compose up -d --build
+# A plain `docker compose up -d` only restarts containers with the existing image.
+
 services:
   saku-server:
     build:
