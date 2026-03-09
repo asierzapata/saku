@@ -798,7 +798,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 }
                 saku_tdo::ui::render_view_header("Upcoming", upcoming_tasks.len());
                 for (date, mut tasks) in grouped {
-                    tasks.sort_by_key(|t| t.task_number);
+                    tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
                     saku_tdo::ui::render_section_header(&saku_tdo::ui::format_date_header(date));
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, store);
@@ -817,8 +817,10 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 println!("No tasks with deadlines");
             } else {
                 deadline_tasks.sort_by(|a, b| {
-                    a.deadline
-                        .cmp(&b.deadline)
+                    a.completed_at
+                        .is_some()
+                        .cmp(&b.completed_at.is_some())
+                        .then(a.deadline.cmp(&b.deadline))
                         .then(a.task_number.cmp(&b.task_number))
                 });
                 saku_tdo::ui::render_view_header("Deadlines", deadline_tasks.len());
@@ -988,7 +990,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .get_tasks_for_project(&project.storage_key())
                 .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                 .collect();
-            tasks.sort_by_key(|t| t.task_number);
+            tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
             let header = if let Some(ref area_key) = project.area_key {
                 if let Some(area) = store.get_area(area_key) {
                     format!("{} ({})", project.name, area.name)
@@ -1039,7 +1041,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 .get_tasks_for_area(&area_key)
                 .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                 .collect();
-            direct_tasks.sort_by_key(|t| t.task_number);
+            direct_tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
             let mut projects: Vec<_> = store
                 .get_projects_for_area(&area_key)
                 .filter(|p| p.deleted_at.is_none())
@@ -1052,7 +1054,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                         .get_tasks_for_project(&p.storage_key())
                         .filter(|t| (include_completed || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
-                    tasks.sort_by_key(|t| t.task_number);
+                    tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
                     (*p, tasks)
                 })
                 .filter(|(_, tasks)| !tasks.is_empty())
@@ -1088,7 +1090,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
                 })
                 .collect();
             let mut tasks = filter_tasks(tasks, filters, store);
-            tasks.sort_by_key(|t| t.task_number);
+            tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
             if tasks.is_empty() {
                 println!("No tasks with tag '{}'", name);
                 use std::collections::HashSet;
@@ -1113,7 +1115,7 @@ fn render_view_pretty(entity: &ViewEntity, store: &saku_tdo::models::store::Stor
         ViewEntity::Recurring => {
             let today = jiff::Zoned::now().date();
             let mut tasks: Vec<_> = store.get_recurring_tasks().collect();
-            tasks.sort_by_key(|t| t.task_number);
+            tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
             if tasks.is_empty() {
                 println!("No recurring tasks.");
@@ -1734,7 +1736,7 @@ fn main() {
 
                 // Display by date
                 for (date, mut tasks) in grouped {
-                    tasks.sort_by_key(|t| t.task_number);
+                    tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
                     saku_tdo::ui::render_section_header(&saku_tdo::ui::format_date_header(date));
                     for task in tasks {
                         saku_tdo::ui::render_task_line(task, &store);
@@ -2267,7 +2269,7 @@ fn main() {
                         .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
                     let mut tasks = filter_tasks(tasks, &view_filters, &store);
-                    tasks.sort_by_key(|t| t.task_number);
+                    tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
                     match fmt {
                         output::OutputFormat::Json | output::OutputFormat::Csv | output::OutputFormat::Toon => {
@@ -2339,7 +2341,7 @@ fn main() {
                         .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                         .collect();
-                    direct_tasks.sort_by_key(|t| t.task_number);
+                    direct_tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
                     let mut projects: Vec<_> = store
                         .get_projects_for_area(&area_key)
@@ -2355,7 +2357,7 @@ fn main() {
                                 .filter(|t| t.parent_task_key.is_none())
                                 .filter(|t| (all || t.completed_at.is_none()) && t.deleted_at.is_none())
                                 .collect();
-                            tasks.sort_by_key(|t| t.task_number);
+                            tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
                             (*p, tasks)
                         })
                         .filter(|(_, tasks)| !tasks.is_empty())
@@ -2394,7 +2396,7 @@ fn main() {
                         })
                         .collect();
                     let mut tasks = filter_tasks(tasks, &view_filters, &store);
-                    tasks.sort_by_key(|t| t.task_number);
+                    tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
                     let out: Vec<_> = tasks
                         .iter()
                         .map(|t| output::TaskOutput::from_task(t, &store))
@@ -3564,7 +3566,7 @@ fn main() {
                 .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                 .collect();
-            tasks.sort_by_key(|t| t.task_number);
+            tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
             match fmt {
                 output::OutputFormat::Json | output::OutputFormat::Csv | output::OutputFormat::Toon => {
@@ -3642,7 +3644,7 @@ fn main() {
                 .filter(|t| t.parent_task_key.is_none())
                 .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                 .collect();
-            direct_tasks.sort_by_key(|t| t.task_number);
+            direct_tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
             let mut projects: Vec<_> = store
                 .get_projects_for_area(&area_key)
@@ -3658,7 +3660,7 @@ fn main() {
                         .filter(|t| t.parent_task_key.is_none())
                         .filter(|t| t.completed_at.is_none() && t.deleted_at.is_none())
                         .collect();
-                    tasks.sort_by_key(|t| t.task_number);
+                    tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
                     (*p, tasks)
                 })
                 .filter(|(_, tasks)| !tasks.is_empty())
@@ -3778,7 +3780,7 @@ fn main() {
                             .any(|tag| tag.to_lowercase() == name.to_lowercase())
                 })
                 .collect();
-            tasks.sort_by_key(|t| t.task_number);
+            tasks.sort_by_key(|t| (t.completed_at.is_some(), t.task_number));
 
             if matches!(fmt, output::OutputFormat::Pretty) {
                 if tasks.is_empty() {
