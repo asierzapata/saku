@@ -5,9 +5,9 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta
             name="description"
-            content="Saku (作) - Terminal-first productivity suite. Fast, focused CLI tools built in Rust for task management, note-taking, and more."
+            content="Saku (作) — The shared context layer for human-agent teams. Terminal-first CLI tools built in Rust. Local data, sub-10ms startup."
         />
-        <title>Saku (作) - Terminal Productivity Suite</title>
+        <title>Saku (作) — Productivity for Human-Agent Teams</title>
 
         <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -421,6 +421,15 @@
             .pillar-icon.focus {
                 color: var(--accent-urgent);
             }
+            .pillar-icon.composable {
+                color: var(--accent-neutral);
+            }
+            .pillar-icon.legible {
+                color: var(--accent-pending);
+            }
+            .pillar-icon.opinionated {
+                color: var(--accent-complete);
+            }
 
             .pillar h3 {
                 color: var(--text-primary);
@@ -532,7 +541,8 @@
                 letter-spacing: 0.05em;
             }
 
-            .badge-implemented {
+            .badge-implemented,
+            .badge-shipping {
                 background: rgba(127, 217, 98, 0.2);
                 color: var(--accent-complete);
                 border: 1px solid var(--accent-complete);
@@ -600,6 +610,40 @@
                 color: var(--text-secondary);
                 margin-top: 0.5rem;
                 line-height: 1.6;
+            }
+
+            /* Loop group layout */
+            .loop-group {
+                margin-bottom: var(--space-xl);
+            }
+
+            .loop-group:last-child {
+                margin-bottom: 0;
+            }
+
+            .loop-group-header {
+                display: flex;
+                align-items: baseline;
+                gap: var(--space-sm);
+                margin-bottom: var(--space-sm);
+            }
+
+            .loop-group-name {
+                font-family: var(--font-serif);
+                font-size: 1.5rem;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+
+            .loop-group-question {
+                font-family: var(--font-sans);
+                font-size: 1rem;
+                color: var(--text-tertiary);
+                font-style: italic;
+            }
+
+            .loop-group .tools-grid {
+                margin-top: var(--space-sm);
             }
 
             /* ============================================
@@ -909,11 +953,11 @@
                     <span class="cursor"></span>
                 </div>
                 <h1 class="fade-in delay-1">
-                    Terminal productivity<br />redefined
+                    Your team is no longer<br />just you
                 </h1>
                 <p class="hero-subtitle fade-in delay-2">
-                    Fast, focused CLI tools built in Rust.<br />
-                    Own your data. Master your workflow.
+                    In 2026, "you" is a human-agent team.<br />
+                    Saku is the shared context layer between intention and execution.
                 </p>
             </div>
 
@@ -923,35 +967,62 @@
         <!-- PHILOSOPHY SECTION -->
         <section class="philosophy">
             <div class="container">
-                <h2 class="fade-in">Why Saku?</h2>
+                <h2 class="fade-in">Design Principles</h2>
                 <div class="pillars">
                     <div class="pillar fade-in delay-1">
-                        <div class="pillar-icon speed">✓</div>
-                        <h3>Speed</h3>
+                        <div class="pillar-icon speed">&gt;_</div>
+                        <h3>Terminal-first</h3>
                         <p>
-                            Built in Rust for instant feedback. No loading
-                            screens, no lag—just pure terminal velocity. Your
-                            tasks, notes, and workflows respond as fast as you
-                            think.
+                            The CLI is the universal interface. Humans type
+                            commands; agents call them programmatically. Both
+                            get the same tool, the same behavior, the same
+                            exit codes.
                         </p>
                     </div>
                     <div class="pillar fade-in delay-2">
-                        <div class="pillar-icon ownership">○</div>
-                        <h3>Ownership</h3>
+                        <div class="pillar-icon ownership">⬡</div>
+                        <h3>Local-first</h3>
                         <p>
-                            Human-readable JSON storage. No cloud lock-in, no
-                            proprietary formats. Your data lives in simple files
-                            you can inspect, backup, and control. AGPL-3.0
-                            licensed.
+                            Data lives in <code>~/.local/share/</code>.
+                            Human-readable JSON. No internet required, no
+                            account, no vendor lock-in. Sync is opt-in and
+                            self-hosted.
                         </p>
                     </div>
                     <div class="pillar fade-in delay-3">
-                        <div class="pillar-icon focus">●</div>
-                        <h3>Focus</h3>
+                        <div class="pillar-icon focus">⚡</div>
+                        <h3>Fast by default</h3>
                         <p>
-                            Minimal, composable tools that do one thing
-                            exceptionally well. Terminal-first design means zero
-                            distractions and keyboard-driven efficiency.
+                            Sub-10ms startup. No async overhead, no daemon.
+                            Fast enough to be called hundreds of times per
+                            day by an agent without friction.
+                        </p>
+                    </div>
+                    <div class="pillar fade-in delay-4">
+                        <div class="pillar-icon composable">◇</div>
+                        <h3>Composable</h3>
+                        <p>
+                            Each tool does one thing, serves one loop. Tools
+                            reference each other but remain independently
+                            useful. The Unix philosophy for human-agent work.
+                        </p>
+                    </div>
+                    <div class="pillar fade-in delay-5">
+                        <div class="pillar-icon legible">◑</div>
+                        <h3>Legible to both</h3>
+                        <p>
+                            Every output—terminal display, JSON export, exit
+                            codes—is equally readable by a human skimming
+                            and a program parsing.
+                        </p>
+                    </div>
+                    <div class="pillar fade-in delay-6">
+                        <div class="pillar-icon opinionated">▸</div>
+                        <h3>Opinionated</h3>
+                        <p>
+                            We make choices so you don't have to. The data
+                            model, visual language, command structure—all
+                            decided. Configuration is a last resort.
                         </p>
                     </div>
                 </div>
@@ -961,141 +1032,143 @@
         <!-- TOOLS SECTION -->
         <section class="tools">
             <div class="container">
-                <h2 class="fade-in">The Suite</h2>
-                <div class="tools-grid">
-                    <!-- TDO - Featured -->
-                    <div class="tool-card featured fade-in delay-1">
-                        <div class="tool-header">
-                            <div>
-                                <div class="tool-name">tdo</div>
-                                <div class="tool-glyphs">○ ● ✓</div>
+                <h2 class="fade-in">The Loops</h2>
+
+                <!-- Daily Loop -->
+                <div class="loop-group fade-in delay-1">
+                    <div class="loop-group-header">
+                        <span class="loop-group-name">Daily Loop</span>
+                        <span class="loop-group-question">"What's the plan? What happened? What do we hand off?"</span>
+                    </div>
+                    <div class="tools-grid">
+                        <div class="tool-card">
+                            <div class="tool-header">
+                                <div>
+                                    <div class="tool-name">tdo</div>
+                                    <div class="tool-glyphs">○ ● ✓</div>
+                                </div>
+                                <span class="tool-badge badge-shipping">Shipping</span>
                             </div>
-                            <span class="tool-badge badge-implemented"
-                                >Implemented</span
-                            >
+                            <p class="tool-description">
+                                Work queue for the human-agent team. Inbox is
+                                the async dialogue surface—agents surface tasks,
+                                humans prioritize and delegate. The logbook is
+                                the audit trail.
+                            </p>
+                            <ul class="tool-features">
+                                <li>Inbox as human-agent dialogue surface</li>
+                                <li>Dependencies and subtasks for structured work</li>
+                                <li>Human-readable JSON in <code>~/.local/share/</code></li>
+                            </ul>
+                            <div class="tool-demo">
+                                <div class="prompt">$ tdo today</div>
+                                <div class="output">
+                                    Today (Mar 10) 4 tasks
+                                    1 <span style="color: var(--accent-urgent)">●</span> Review agent's auth refactor PR &nbsp;&nbsp; saku / tdo
+                                    2 <span style="color: var(--accent-pending)">○</span> Spec out ctx save/restore behavior &nbsp;&nbsp; saku / ctx
+                                    3 <span style="color: var(--accent-pending)">○</span> [agent] Run integration test suite &nbsp;&nbsp; saku / tdo
+                                    4 <span style="color: var(--accent-pending)">○</span> [agent] Draft jrn schema migration &nbsp;&nbsp; saku / jrn
+                                </div>
+                            </div>
                         </div>
-                        <p class="tool-description">
-                            Task management that thinks like you do. Flexible
-                            scheduling modes (Today, Inbox, Upcoming, Anytime,
-                            Someday), Areas & Projects for organization, and
-                            lightning-fast Rust performance.
-                        </p>
-                        <ul class="tool-features">
-                            <li>
-                                Flexible scheduling:
-                                Today/Inbox/Upcoming/Anytime/Someday/Logbook
-                            </li>
-                            <li>
-                                Areas & Projects for hierarchical organization
-                            </li>
-                            <li>Simple JSON storage with automatic backups</li>
-                        </ul>
-                        <div class="tool-demo">
-                            <div class="prompt">$ tdo today</div>
-                            <div class="output">
-                                Today (Feb 16) 5 tasks 1
-                                <span style="color: var(--accent-urgent)"
-                                    >●</span
-                                >
-                                Submit expense report Work / Admin 2
-                                <span style="color: var(--accent-pending)"
-                                    >○</span
-                                >
-                                Review PR for auth refactor Work / rust-24m 3
-                                <span style="color: var(--accent-pending)"
-                                    >○</span
-                                >
-                                Buy milk Personal / Errands 4
-                                <span style="color: var(--accent-pending)"
-                                    >○</span
-                                >
-                                Write landing page for Saku Side Projects / tdo
+                        <div class="tool-card planned">
+                            <div class="tool-header">
+                                <div>
+                                    <div class="tool-name">jrn</div>
+                                </div>
+                                <span class="tool-badge badge-planned">Planned</span>
                             </div>
+                            <p class="tool-description">
+                                Daily journal. Chronological log of what
+                                happened—written by human or agent, reviewed by
+                                the other. Handoffs are first-class: the async
+                                channel between shifts.
+                            </p>
                         </div>
                     </div>
+                </div>
 
-                    <!-- NTE - In Development -->
-                    <div class="tool-card fade-in delay-2">
-                        <div class="tool-header">
-                            <div>
-                                <div class="tool-name">nte</div>
-                            </div>
-                            <span class="tool-badge badge-in-development"
-                                >In Development</span
-                            >
-                        </div>
-                        <p class="tool-description">
-                            Agent-friendly note-taking with structured
-                            mutations. YAML frontmatter + Markdown content.
-                            Humans get <code>note edit</code>, agents get verbs
-                            like <code>append</code>, <code>replace</code>,
-                            <code>set</code>.
-                        </p>
+                <!-- Knowledge Loop -->
+                <div class="loop-group fade-in delay-2">
+                    <div class="loop-group-header">
+                        <span class="loop-group-name">Knowledge Loop</span>
+                        <span class="loop-group-question">"Why did we decide this?"</span>
                     </div>
-
-                    <!-- CAL - Planned -->
-                    <div class="tool-card planned fade-in delay-3">
-                        <div class="tool-header">
-                            <div>
-                                <div class="tool-name">cal</div>
+                    <div class="tools-grid">
+                        <div class="tool-card planned">
+                            <div class="tool-header">
+                                <div>
+                                    <div class="tool-name">dcs</div>
+                                </div>
+                                <span class="tool-badge badge-planned">Planned</span>
                             </div>
-                            <span class="tool-badge badge-planned"
-                                >Planned</span
-                            >
+                            <p class="tool-description">
+                                Decision log. Records what was decided, why, and
+                                what alternatives were rejected. Agents read it
+                                before proposing changes—no re-litigating closed
+                                questions.
+                            </p>
                         </div>
-                        <p class="tool-description">
-                            Calendar and events management. Natural language
-                            scheduling, recurring events, and integration with
-                            tdo tasks.
-                        </p>
                     </div>
+                </div>
 
-                    <!-- HBT - Planned -->
-                    <div class="tool-card planned fade-in delay-4">
-                        <div class="tool-header">
-                            <div>
-                                <div class="tool-name">hbt</div>
-                            </div>
-                            <span class="tool-badge badge-planned"
-                                >Planned</span
-                            >
-                        </div>
-                        <p class="tool-description">
-                            Habit tracking with streaks, momentum, and insights.
-                            Build consistency with data-driven feedback loops.
-                        </p>
+                <!-- Work Loop -->
+                <div class="loop-group fade-in delay-3">
+                    <div class="loop-group-header">
+                        <span class="loop-group-name">Work Loop</span>
+                        <span class="loop-group-question">"What am I doing right now? Where did I leave off?"</span>
                     </div>
-
-                    <!-- TMR - Planned -->
-                    <div class="tool-card planned fade-in delay-5">
-                        <div class="tool-header">
-                            <div>
-                                <div class="tool-name">tmr</div>
+                    <div class="tools-grid">
+                        <div class="tool-card">
+                            <div class="tool-header">
+                                <div>
+                                    <div class="tool-name">wrk</div>
+                                </div>
+                                <span class="tool-badge badge-shipping">Shipping</span>
                             </div>
-                            <span class="tool-badge badge-planned"
-                                >Planned</span
-                            >
+                            <p class="tool-description">
+                                Agent task executor. Picks up work orders from
+                                tdo, runs them through Claude, and reports
+                                results back. The bridge between task queue and
+                                execution.
+                            </p>
                         </div>
-                        <p class="tool-description">
-                            Time tracking and pomodoro timers. Focus sessions,
-                            productivity analytics, and deep work optimization.
-                        </p>
+                        <div class="tool-card planned">
+                            <div class="tool-header">
+                                <div>
+                                    <div class="tool-name">ctx</div>
+                                </div>
+                                <span class="tool-badge badge-planned">Planned</span>
+                            </div>
+                            <p class="tool-description">
+                                Session context. Saves and restores the mental
+                                model of a work session—so whether a human
+                                resumes after a meeting or an agent resumes
+                                after being spawned, the thread is intact.
+                            </p>
+                        </div>
                     </div>
+                </div>
 
-                    <!-- BKM - Planned -->
-                    <div class="tool-card planned fade-in delay-6">
-                        <div class="tool-header">
-                            <div>
-                                <div class="tool-name">bkm</div>
+                <!-- Orchestrator -->
+                <div class="loop-group fade-in delay-4">
+                    <div class="loop-group-header">
+                        <span class="loop-group-name">Orchestrator</span>
+                    </div>
+                    <div class="tools-grid">
+                        <div class="tool-card planned">
+                            <div class="tool-header">
+                                <div>
+                                    <div class="tool-name">saku</div>
+                                </div>
+                                <span class="tool-badge badge-planned">Planned</span>
                             </div>
-                            <span class="tool-badge badge-planned"
-                                >Planned</span
-                            >
+                            <p class="tool-description">
+                                Cross-tool context, search, and sync
+                                coordination. The glue that connects every loop
+                                into a coherent workspace.
+                            </p>
                         </div>
-                        <p class="tool-description">
-                            Bookmark management for the terminal. Tag, search,
-                            and organize links without leaving your workflow.
-                        </p>
                     </div>
                 </div>
             </div>
@@ -1112,57 +1185,39 @@
                         <div class="terminal-button green"></div>
                     </div>
                     <div class="terminal-content">
-                        <div class="header">Today (Feb 16) 5 tasks</div>
+                        <div class="header">Today (Mar 10) 4 tasks</div>
                         <div style="height: 0.5rem"></div>
                         <div class="task-line">
                             <div class="task-left">
                                 <span class="task-id">1</span>
                                 <span class="task-glyph overdue">●</span>
-                                <span class="task-title"
-                                    >Submit expense report</span
-                                >
+                                <span class="task-title">Review agent's auth refactor PR</span>
                             </div>
-                            <span class="task-context">Work / Admin</span>
+                            <span class="task-context">saku / tdo</span>
                         </div>
                         <div class="task-line">
                             <div class="task-left">
                                 <span class="task-id">2</span>
                                 <span class="task-glyph pending">○</span>
-                                <span class="task-title"
-                                    >Review PR for auth refactor</span
-                                >
+                                <span class="task-title">Spec out ctx save/restore behavior</span>
                             </div>
-                            <span class="task-context">Work / rust-24m</span>
+                            <span class="task-context">saku / ctx</span>
                         </div>
                         <div class="task-line">
                             <div class="task-left">
                                 <span class="task-id">3</span>
                                 <span class="task-glyph pending">○</span>
-                                <span class="task-title"
-                                    >Call dentist to reschedule</span
-                                >
+                                <span class="task-title">[agent] Run integration test suite</span>
                             </div>
-                            <span class="task-context">Personal</span>
+                            <span class="task-context">saku / tdo</span>
                         </div>
                         <div class="task-line">
                             <div class="task-left">
                                 <span class="task-id">4</span>
                                 <span class="task-glyph pending">○</span>
-                                <span class="task-title">Buy milk</span>
+                                <span class="task-title">[agent] Draft jrn schema migration</span>
                             </div>
-                            <span class="task-context">Personal / Errands</span>
-                        </div>
-                        <div class="task-line">
-                            <div class="task-left">
-                                <span class="task-id">5</span>
-                                <span class="task-glyph pending">○</span>
-                                <span class="task-title"
-                                    >Write landing page for Saku</span
-                                >
-                            </div>
-                            <span class="task-context"
-                                >Side Projects / tdo</span
-                            >
+                            <span class="task-context">saku / jrn</span>
                         </div>
                         <div style="height: 1rem"></div>
                         <span class="terminal-cursor"></span>
@@ -1213,7 +1268,7 @@ cargo build --release --workspace"
                             </button>
                             <pre><code><span class="comment"># Clone the repository</span>
 <span class="command">git clone https://github.com/asierzapata/saku.git</span>
-<span class="command">cd tdo</span>
+<span class="command">cd saku</span>
 
 <span class="comment"># Build all tools</span>
 <span class="command">cargo build --release --workspace</span></code></pre>
@@ -1222,7 +1277,7 @@ cargo build --release --workspace"
                             Binaries will be in <code>target/release/</code>
                         </p>
                         <a
-                            href="https://github.com/asierzapata/tdo"
+                            href="https://github.com/asierzapata/saku"
                             class="github-link"
                             target="_blank"
                             rel="noopener"
@@ -1240,27 +1295,27 @@ cargo build --release --workspace"
                 <div class="footer-content">
                     <div class="footer-links">
                         <a
-                            href="https://github.com/asierzapata/tdo"
+                            href="https://github.com/asierzapata/saku"
                             target="_blank"
                             rel="noopener"
                             >GitHub</a
                         >
                         <a
-                            href="https://github.com/asierzapata/tdo/blob/main/LICENSE"
+                            href="https://github.com/asierzapata/saku/blob/main/LICENSE"
                             target="_blank"
                             rel="noopener"
                             >AGPL-3.0 License</a
                         >
                         <a
-                            href="https://github.com/asierzapata/tdo/tree/main/documentation"
+                            href="https://github.com/asierzapata/saku/tree/main/documentation"
                             target="_blank"
                             rel="noopener"
                             >Documentation</a
                         >
                     </div>
                     <p class="footer-tagline">
-                        Built with <strong>Rust</strong> · Designed for terminal
-                        artisans
+                        Built with <strong>Rust</strong> · The shared workspace
+                        for human-agent teams
                     </p>
                 </div>
             </div>
