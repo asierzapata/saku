@@ -274,14 +274,45 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
         )?;
 
         for entry in &resp.entries {
-            let blob_bytes = BASE64
-                .decode(&entry.blob)
-                .map_err(|e| SyncError::Backend {
-                    message: format!("Invalid base64 in entry {}: {e}", entry.key),
-                })?;
+            // Skip deleted entries — no valid blob to decrypt
+            if entry.deleted {
+                pulled_count += 1;
+                continue;
+            }
 
-            let plaintext = decrypt_entry(&blob_bytes, &master_key)?;
-            let remote_value: Value = serde_json::from_slice(&plaintext)?;
+            let blob_bytes = match BASE64.decode(&entry.blob) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: skipping entry '{}': invalid base64 ({e})",
+                        entry.key
+                    );
+                    continue;
+                }
+            };
+
+            let plaintext = match decrypt_entry(&blob_bytes, &master_key) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: skipping entry '{}': {e} (blob {} bytes)",
+                        entry.key,
+                        blob_bytes.len()
+                    );
+                    continue;
+                }
+            };
+
+            let remote_value: Value = match serde_json::from_slice(&plaintext) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: skipping entry '{}': invalid JSON ({e})",
+                        entry.key
+                    );
+                    continue;
+                }
+            };
 
             // LWW merge: compare with local entry
             merge_single_entry(&mut local_kv, &entry.key, remote_value);
