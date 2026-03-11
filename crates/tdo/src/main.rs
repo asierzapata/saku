@@ -1583,7 +1583,14 @@ fn try_sync(storage_path: &std::path::Path) {
                         &config.server_url,
                         "tdo",
                     ) {
-                        Ok(_) => {}
+                        Ok(outcome) => {
+                            if outcome.healed > 0 {
+                                eprintln!(
+                                    "Sync: healed {} corrupted server entries",
+                                    outcome.healed
+                                );
+                            }
+                        }
                         Err(e) => {
                             eprintln!("Warning: sync failed: {}", e);
                         }
