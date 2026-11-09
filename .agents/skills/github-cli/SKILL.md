@@ -16,7 +16,7 @@ Use `gh` from the shell for GitHub operations instead of building URLs by hand o
 | PR diff | `gh pr diff 123` |
 | PR checks | `gh pr checks` |
 | PR review comments | `gh api repos/{owner}/{repo}/pulls/123/comments --jq '.[] \| {author: .user.login, path, line, body}'` |
-| Create a draft PR | `gh pr create --draft --base main --title "..." --body-file <file>` |
+| Create a PR (ready for review, not a draft) | `gh pr create --base main --title "..." --body-file <file>` |
 | Issues | `gh issue list`, `gh issue view 123`, `gh issue create` |
 | CI runs | `gh run list`, `gh run view <id> --log-failed` |
 | Auth | `gh auth status` |

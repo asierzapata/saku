@@ -67,7 +67,7 @@ Repository skills live in `.agents/skills/`. Use `review-change` when asked for 
 
 ## PRs and documentation
 
-Title PRs with the affected tools or crates in parentheses and an imperative summary, for example `(tdo) Add blocked filter to view today`. Describe the purpose and the meaningful changes, and state what was verified. Let the diff carry routine detail.
+Title PRs with the affected tools or crates in parentheses and an imperative summary, for example `(tdo) Add blocked filter to view today`. Describe the purpose and the meaningful changes, and state what was verified. Let the diff carry routine detail. Open PRs ready for review, not as drafts, unless the user asks for a draft.
 
 Update documentation when a changed contract, command, or architectural decision makes it inaccurate. A code edit alone does not require a new document.
 

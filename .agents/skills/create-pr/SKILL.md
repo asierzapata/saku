@@ -36,4 +36,4 @@ Do not enumerate files, describe each function, reproduce the diff, or narrate t
 
 ## Deliver or publish
 
-For a description-only request, return the title and body ready to use. When the user asks you to open the PR, check for an existing one first, push only the intended branch, and open it with `gh pr create`, as a draft unless the user asked otherwise. An existing PR does not authorize overwriting its body unless the user asked for that update. Read back the title, base, and draft status, and report the URL with any unresolved item.
+For a description-only request, return the title and body ready to use. When the user asks you to open the PR, check for an existing one first, push only the intended branch, and open it with `gh pr create` ready for review, not as a draft, unless the user asks for a draft. An existing PR does not authorize overwriting its body unless the user asked for that update. Read back the title, base, and draft status, and report the URL with any unresolved item.
