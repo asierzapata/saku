@@ -42,9 +42,9 @@ See `documentation/architecture.md` for conventions shared across all tools, and
 
 ## Key conventions
 
-- `render_view_pretty(&entity, &store)` dispatches all pretty-print rendering for `tdo view`
+- `render_view_pretty(&entity, &store, completion_filter, &view_filters)` dispatches all pretty-print rendering for `tdo view`
 - The watch loop calls `render_view_pretty` automatically — new `ViewEntity` arms get watch support for free
-- JSON/CSV output lives in the `else { match entity { ... } }` block after the watch loop (~line 1450)
+- JSON/CSV output lives in the `else { match entity { ... } }` block after `if watch {` in the `View` command handler
 - Task resolution by number-or-fuzzy uses `resolve_task_by_id_or_fuzzy(id, store, closure)` (defined in main.rs)
 - `get_blockers` returns only **incomplete, non-deleted** dependencies
 - Field label width in detail view: 12 chars (`{:<12}`)

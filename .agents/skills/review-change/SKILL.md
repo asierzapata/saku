@@ -13,7 +13,7 @@ Report what you find without editing files. The agent or person who asked for th
 
 Work out what you were asked to review and which branch the change is based on. It is usually `main`, but a stacked branch may have another base. Compare against the merge base, for example `git diff $(git merge-base main HEAD)`. Include uncommitted changes only when the request covers them.
 
-Read the diff, the code that uses what changed, and the code the change relies on. Go further only to follow a specific effect. Read `CLAUDE.md` and `documentation/architecture.md` for the conventions the change must respect. For a change to storage or sync, also read `documentation/sync-architecture.md` and the RFCs under `documentation/`.
+Read the diff, the code that uses what changed, and the code the change relies on. Go further only to follow a specific effect. Read `AGENTS.md` and `documentation/architecture.md` for the conventions the change must respect. For a change to storage or sync, also read `documentation/sync-architecture.md` and the RFCs under `documentation/`.
 
 When the request lists checks that already ran, such as `cargo test`, do not run them again just to confirm they pass. They cover only the code they exercise. When the diff can affect code outside them, such as another caller of a changed function or another crate in the workspace, check that code yourself.
 
