@@ -23,6 +23,8 @@ use crate::error::SyncError;
 pub struct KvSyncOutcome {
     pub pulled: usize,
     pub pushed: usize,
+    /// Entries re-pushed to overwrite corrupted/undecryptable server blobs.
+    pub healed: usize,
 }
 
 /// Configuration for a KV sync run.
@@ -265,6 +267,7 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
     let mut pulled_count = 0;
     let mut last_cookie = tracker.last_cookie.clone();
     let is_initial_sync = last_cookie.is_none();
+    let mut skipped_keys: Vec<String> = Vec::new();
 
     loop {
         let resp = client.pull_entries(
@@ -282,34 +285,24 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
 
             let blob_bytes = match BASE64.decode(&entry.blob) {
                 Ok(b) => b,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: skipping entry '{}': invalid base64 ({e})",
-                        entry.key
-                    );
+                Err(_) => {
+                    skipped_keys.push(entry.key.clone());
                     continue;
                 }
             };
 
             let plaintext = match decrypt_entry(&blob_bytes, &master_key) {
                 Ok(p) => p,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: skipping entry '{}': {e} (blob {} bytes)",
-                        entry.key,
-                        blob_bytes.len()
-                    );
+                Err(_) => {
+                    skipped_keys.push(entry.key.clone());
                     continue;
                 }
             };
 
             let remote_value: Value = match serde_json::from_slice(&plaintext) {
                 Ok(v) => v,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: skipping entry '{}': invalid JSON ({e})",
-                        entry.key
-                    );
+                Err(_) => {
+                    skipped_keys.push(entry.key.clone());
                     continue;
                 }
             };
@@ -323,6 +316,31 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
 
         if !resp.has_more {
             break;
+        }
+    }
+
+    // ------ SELF-HEALING: re-push entries that couldn't be decrypted ------
+    let mut healed_count = 0;
+    if !skipped_keys.is_empty() {
+        let healable: Vec<String> = skipped_keys
+            .iter()
+            .filter(|k| local_kv.entries.contains_key(k.as_str()))
+            .cloned()
+            .collect();
+        healed_count = healable.len();
+        if !healable.is_empty() {
+            eprintln!(
+                "Sync: {} entries couldn't be decrypted; pushing local copies to heal",
+                healable.len()
+            );
+            tracker.mark_dirty_many(healable);
+        }
+        let unrecoverable = skipped_keys.len() - healed_count;
+        if unrecoverable > 0 {
+            eprintln!(
+                "Sync: {} entries couldn't be decrypted and have no local data (skipped)",
+                unrecoverable
+            );
         }
     }
 
@@ -384,6 +402,7 @@ pub fn sync_kv(config: &KvSyncConfig) -> Result<KvSyncOutcome, SyncError> {
     Ok(KvSyncOutcome {
         pulled: pulled_count,
         pushed: pushed_count,
+        healed: healed_count,
     })
 }
 

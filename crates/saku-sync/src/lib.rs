@@ -102,3 +102,66 @@ pub fn try_kv_sync_server(
     };
     kv_sync::sync_kv(&config)
 }
+
+#[cfg(test)]
+mod self_healing_tests {
+    use saku_crypto::kdf::{derive_deterministic_salt, derive_master_key};
+    use saku_storage::dirty_tracker::DirtyTracker;
+    use saku_storage::kv_store::KvStore;
+    use serde_json::json;
+
+    #[test]
+    fn skipped_entries_marked_dirty_for_healing() {
+        let passphrase_a = b"device-a-passphrase";
+        let passphrase_b = b"device-b-different";
+
+        let salt_a = derive_deterministic_salt(passphrase_a);
+        let mk_a = derive_master_key(passphrase_a, &salt_a).unwrap();
+
+        let salt_b = derive_deterministic_salt(passphrase_b);
+        let mk_b = derive_master_key(passphrase_b, &salt_b).unwrap();
+
+        // Encrypt with key A, try to decrypt with key B — should fail
+        let plaintext = br#"{"title":"test"}"#;
+        let blob = saku_crypto::encrypt_entry(plaintext, &mk_a);
+        assert!(saku_crypto::decrypt_entry(&blob, &mk_b).is_err());
+
+        // Simulate self-healing: local data exists for this key → mark dirty
+        let mut store = KvStore::new(9);
+        store.entries.insert(
+            "task/abc".to_string(),
+            json!({"title": "local version"}),
+        );
+
+        let skipped_keys = vec!["task/abc".to_string()];
+        let mut tracker = DirtyTracker::new();
+        tracker.set_cookie(Some("5".to_string()));
+
+        let healable: Vec<String> = skipped_keys
+            .iter()
+            .filter(|k| store.entries.contains_key(k.as_str()))
+            .cloned()
+            .collect();
+        tracker.mark_dirty_many(&healable);
+
+        assert!(tracker.is_dirty("task/abc"));
+        assert_eq!(tracker.dirty_count(), 1);
+    }
+
+    #[test]
+    fn skipped_entries_without_local_data_not_marked_dirty() {
+        let store = KvStore::new(9);
+        let mut tracker = DirtyTracker::new();
+
+        let skipped_keys = vec!["task/unknown".to_string()];
+        let healable: Vec<String> = skipped_keys
+            .iter()
+            .filter(|k| store.entries.contains_key(k.as_str()))
+            .cloned()
+            .collect();
+        tracker.mark_dirty_many(&healable);
+
+        assert!(!tracker.is_dirty("task/unknown"));
+        assert_eq!(tracker.dirty_count(), 0);
+    }
+}
