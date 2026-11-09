@@ -43,7 +43,7 @@ When two devices create entities offline, each generates a fresh UUID. After syn
 
 This works, but it has real problems:
 
-**The sync layer knows tdo's business rules.** `deduplicate_by_name` hardcodes that projects and areas have a `name` field, that it should be compared case-insensitively, and that tasks have `project_id` and `area_id` fields that need reassignment. If we build `jrn` (journal) or `dcs` (decisions) with their own entity types and uniqueness rules, we'd need to add more tool-specific code to `saku-sync`.
+**The sync layer knows tdo's business rules.** `deduplicate_by_name` hardcodes that projects and areas have a `name` field, that it should be compared case-insensitively, and that tasks have `project_id` and `area_id` fields that need reassignment. Adding entity types with different uniqueness rules would require more tool-specific code in `saku-sync`.
 
 **Local writes don't enforce uniqueness.** Nothing prevents `Store::add_project()` from creating a second "Website" project on the same device. The check happens only during sync merge — and only for projects and areas, not for any other entity type that might need it.
 
@@ -670,7 +670,7 @@ Overall: **a significant refactor** that touches most files. The highest-risk pi
 | **Sync becomes generic** | One `lww_merge_kv` function works for any tool. No entity-type-specific merge code. ~925 lines → ~60 lines. |
 | **Local writes enforce uniqueness** | `Store::add_project("Website")` returns the existing project if one exists, instead of silently creating a duplicate. |
 | **Simpler mental model** | For named entities: "the key is the name." For tasks: short hash key for storage, sequential number for display. No UUIDs. |
-| **New tools get it for free** | `jrn`, `dcs`, `ctx` just implement `Entity` with their natural key function. No custom merge code in the sync layer. |
+| **Shared entity contract** | Entity types implement `Entity` with their natural key function and reuse the merge machinery. |
 | **References are human-readable** | `project_key: "project/website"` is instantly debuggable. Reading the JSON store makes sense without cross-referencing UUIDs. |
 | **Task number stays sequential** | Each device allocates 1, 2, 3... locally. No jarring gaps. Muscle memory preserved. |
 | **Foundation for multi-platform** | A KV store maps naturally to SQLite (iOS), IndexedDB (web), and remote APIs. The merge algorithm is ~30 lines in any language. |

@@ -182,7 +182,7 @@ pub struct Task {
     pub created_at: Timestamp,
     /// Hybrid logical clock timestamp for sync conflict resolution
     pub modified_at: HybridTimestamp,
-    /// Who this task is assigned to (e.g., "agent", "wrk", or a username).
+    /// Who this task is assigned to (e.g., "agent" or a username).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_to: Option<String>,
     /// Estimated time to complete, in minutes (e.g. 15, 60, 90).

@@ -157,13 +157,13 @@ mod tests {
 
         let mut with_new = sample_input();
         with_new.insert(
-            "nte".to_string(),
+            "other-tool".to_string(),
             vec![("note.md".to_string(), "xyz789".to_string())],
         );
         let tree2 = MerkleTree::build(with_new);
 
         let diffs = tree1.differing_tools(&tree2);
-        assert!(diffs.contains(&"nte"));
+        assert!(diffs.contains(&"other-tool"));
     }
 
     #[test]

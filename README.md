@@ -1,101 +1,69 @@
-# Saku (作) — Terminal Productivity Suite
+# Saku (作) — Focused Terminal Tools
 
-A suite of focused, fast terminal tools for the human-agent team. Designed to be used by a developer and their AI agents interchangeably — same CLI, same data, same protocol.
-
-See [documentation/PHILOSOPHY.md](documentation/PHILOSOPHY.md) for the full design intent.
-
----
+Lightweight, local-first tools for your work, equally accessible to humans, scripts, and agents. The current focus is `tdo`; future tools remain planned until their own development phases.
 
 ## The Suite
 
-Tools are organized around the loops of a developer's day, not discrete categories.
-
-### Daily Loop — What's the plan? What happened? What do we hand off?
-
-| Tool | Description | Status |
+| Tool | Purpose | Status |
 |---|---|---|
-| `tdo` | Task queue. Work orders for human and agent. | **Shipping** v0.9.0 |
-| `jrn` | Daily journal. Chronological log of what happened. | Planned |
+| `tdo` | Tasks, projects, scheduling, and deadlines. | Available v0.13.0; active development |
+| `mdr` | Render Markdown documents inside the terminal. | Planned; not implemented |
+| `sch` | Run explicitly configured commands on a local schedule. | Planned; not implemented |
 
-### Knowledge Loop — Why did we decide this?
-
-| Tool | Description | Status |
-|---|---|---|
-| `dcs` | Decision log. What was decided, why, and what alternatives were considered. | Planned |
-
-### Work Loop — What am I doing right now? Where did I leave off?
-
-| Tool | Description | Status |
-|---|---|---|
-| `wrk` | Agent task executor. Picks up tdo tasks assigned to agents and runs them via claude. | **Shipping** v0.1.0 |
-| `ctx` | Session context. Saves and restores where you were — for yourself and for agents. | Planned |
-
-### Orchestrator
-
-| Tool | Description | Status |
-|---|---|---|
-| `saku` | Cross-tool context, search, and sync. | Planned |
-
----
+See [the philosophy](documentation/PHILOSOPHY.md) for the product boundaries and [the architecture](documentation/architecture.md) for the current implementation.
 
 ## Installation
 
-### Install tdo
+Install the task CLI from crates.io:
+
+```bash
+cargo install saku-tdo
+```
+
+Or from this checkout:
 
 ```bash
 cargo install --path crates/tdo
 ```
 
-### Install wrk
+To omit server sync and keychain support:
 
 ```bash
-cargo install --path crates/wrk
+cargo install --path crates/tdo --no-default-features
 ```
 
-See [documentation/wrk-setup.md](documentation/wrk-setup.md) for deployment options (Docker, systemd).
-
-Or build all tools:
+## Usage
 
 ```bash
-cargo build --release --workspace
+tdo add "Review deployment" --today
+tdo view today
+tdo context --json
 ```
 
-The binaries will be available in `target/release/`.
+The current CLI renders today's tasks when called without a subcommand. An interactive TUI for bare invocation is a future design goal, not part of this cleanup.
 
----
+See the [command reference](documentation/tdo/commands-cheat-sheet.md) for more operations.
 
 ## Development
 
-This is a Cargo workspace. To build a specific tool:
-
 ```bash
-cargo build --release -p tdo
-cargo run -p tdo -- view today
+cargo build -p saku-tdo
+cargo run -p saku-tdo -- view today
+cargo test -p saku-tdo --no-default-features
 ```
 
-See [documentation/architecture.md](documentation/architecture.md) for conventions shared across all tools.
+Build the task CLI and its infrastructure together with `cargo build --release --workspace`. Binaries are written to `target/release/`.
 
----
+## Agent Access
 
-## AI Agent Integration
+Agents use the same task CLI and data as humans. Explicit commands and structured output remain first-class; no agent-specific execution service is required.
 
-Saku is designed as a shared workspace for humans and AI agents. Integration uses two parts:
-
-1. **A CLAUDE.md snippet** — tells the AI to proactively use `tdo` as a shared task ledger (~120 tokens, always loaded).
-2. **A skill** (`saku-integration`) — the full command reference, loaded on demand when the AI needs it.
-
-Both are needed. The snippet steers behavior; the skill provides the knowledge.
-
-See [skills/README.md](skills/README.md) for full setup instructions (Claude Code, Cursor, per-project).
-
----
+The existing [integration skill and setup guide](skills/README.md) provide the task command reference and shared-ledger conventions.
 
 ## Sync
 
-Saku tools sync across devices via a self-hosted server. See [documentation/sync-setup.md](documentation/sync-setup.md) for setup.
-
----
+`tdo` supports optional encrypted sync through a self-hosted server. Its storage, encryption, sync, and server crates remain in the workspace. See [sync setup](documentation/sync-setup.md); that guide still includes the legacy whole-file deployment path.
 
 ## License
 
-GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
+GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later).

@@ -920,7 +920,7 @@ Existing CLI installations use whole-file encryption (random salt stored in the 
 
 ### 2. Conflict UI on iOS — deferred
 
-**Decision:** Not relevant for the tdo iOS app. LWW handles all structured data conflicts automatically — the user never sees a conflict. Conflict copies (`.conflict.{device_id}`) only apply to unstructured files like notes (nte). We'll design the conflict UI when we add nte to iOS.
+**Decision:** This RFC does not specify a conflict UI. The legacy whole-file engine retains conflict copies for unstructured files; the current tdo server path uses per-entry sync.
 
 ### 3. Task numbers are not shown on iOS or web
 

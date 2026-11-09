@@ -210,8 +210,8 @@ fn note_conflict_creates_conflict_file() {
         db_path: device_a_dir.path().join("sync.db"),
         passphrase: b"test-pass".to_vec(),
         tracked_files: vec![TrackedFile {
-            file_key: "nte/note.md".to_string(),
-            tool: "nte".to_string(),
+            file_key: "other-tool/note.md".to_string(),
+            tool: "other-tool".to_string(),
             relative_path: "note.md".to_string(),
             local_path: note_a_path.clone(),
         }],
@@ -229,8 +229,8 @@ fn note_conflict_creates_conflict_file() {
         db_path: device_b_dir.path().join("sync.db"),
         passphrase: b"test-pass".to_vec(),
         tracked_files: vec![TrackedFile {
-            file_key: "nte/note.md".to_string(),
-            tool: "nte".to_string(),
+            file_key: "other-tool/note.md".to_string(),
+            tool: "other-tool".to_string(),
             relative_path: "note.md".to_string(),
             local_path: note_b_path.clone(),
         }],

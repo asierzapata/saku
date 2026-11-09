@@ -13,7 +13,6 @@ This directory contains scripts for publishing crates to crates.io and creating 
 
 # Release a binary crate (automatically checks library versions)
 ./scripts/release.sh tdo patch   # or minor, or major
-./scripts/release.sh nte patch   # or minor, or major
 ```
 
 ## How It Works
@@ -62,7 +61,7 @@ When you make changes to a library and manually bump its version in `Cargo.toml`
 
 ## Binary Crates (User-facing applications)
 
-Binary crates (`tdo`, `nte`) get full releases with:
+The `tdo` binary crate gets full releases with:
 - Version bump in Cargo.toml
 - Git commit and tag
 - GitHub release with changelog
@@ -73,13 +72,11 @@ Binary crates (`tdo`, `nte`) get full releases with:
 
 ```bash
 ./scripts/release.sh tdo patch   # or minor, or major
-# or
-./scripts/release.sh nte patch   # or minor, or major
 ```
 
 The script will automatically:
 1. Check if library crates need publishing (and stop if they do)
-2. Run tests and checks
+2. Run build and clippy checks (tests are currently skipped to avoid keychain prompts)
 3. Bump version
 4. Create tag and GitHub release
 5. Publish to crates.io

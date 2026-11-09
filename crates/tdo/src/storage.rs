@@ -6,6 +6,7 @@ use crate::models::store::Store;
 
 pub mod json;
 pub mod migrations;
+pub mod sqlite;
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -57,6 +58,15 @@ pub enum StorageError {
 
     #[error("Store file has unsupported version {0}. This version of tdo cannot read this file.")]
     UnsupportedVersion(u32),
+
+    #[error("SQLite storage error: {0}")]
+    Database(#[from] rusqlite::Error),
+
+    #[error("Unsupported SQLite schema version {0}")]
+    UnsupportedDatabaseVersion(i64),
+
+    #[error("Invalid task store: {0}")]
+    InvalidData(String),
 }
 
 pub trait Storage {
@@ -67,7 +77,7 @@ pub trait Storage {
 /// Returns the default path to the tdo store file.
 ///
 /// Respects the `TDO_DATA_DIR` environment variable. Falls back to
-/// `<local-data-dir>/tdo/store.json` (e.g. `~/.local/share/tdo/store.json` on Linux).
+/// `<local-data-dir>/tdo/store.sqlite3` (e.g. `~/.local/share/tdo/store.sqlite3` on Linux).
 pub fn default_storage_path() -> PathBuf {
     std::env::var_os("TDO_DATA_DIR")
         .map(PathBuf::from)
@@ -76,5 +86,9 @@ pub fn default_storage_path() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("tdo")
         })
-        .join("store.json")
+        .join("store.sqlite3")
+}
+
+pub fn legacy_storage_path() -> PathBuf {
+    default_storage_path().with_file_name("store.json")
 }

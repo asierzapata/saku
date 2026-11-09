@@ -28,7 +28,7 @@ use saku_tdo::{
             restore_task,
         },
     },
-    storage::{Storage, json::JsonFileStorage},
+    storage::{Storage, sqlite::{CommandMode, SqliteStorage}},
 };
 
 #[cfg(feature = "logging")]
@@ -385,7 +385,7 @@ enum Commands {
         /// Task number or fuzzy name
         task_number_or_fuzzy_name: String,
 
-        /// Who to assign the task to (e.g., "agent", "wrk", a person's name). Omit to clear.
+        /// Who to assign the task to (e.g., "agent", a person's name). Omit to clear.
         assignee: Option<String>,
     },
 
@@ -426,6 +426,15 @@ enum Commands {
         toon: bool,
     },
 
+    #[command(about = "Import the existing v9 JSON ledger into SQLite without modifying the source")]
+    Migrate { path: Option<PathBuf> },
+
+    #[command(about = "Import v9 JSON into a pristine SQLite store (use - for stdin)")]
+    Import { path: PathBuf },
+
+    #[command(about = "Export portable v9 JSON (stdout by default; output file must not exist)")]
+    Export { path: Option<PathBuf> },
+
     /// Generate shell completion script
     Completion {
         /// Shell to generate completions for
@@ -444,6 +453,8 @@ enum Commands {
 #[cfg(feature = "sync")]
 #[derive(Debug, Subcommand)]
 enum SyncAction {
+    #[command(about = "Run encrypted task synchronization")]
+    Run,
     /// Log in to a sync server
     Login {
         /// Server URL (e.g. http://localhost:8080)
@@ -1346,7 +1357,7 @@ where
     }
 }
 
-/// Check if a command is a mutating (write) command that should trigger sync.
+/// Check if a command is a mutating (write) command.
 fn is_mutating_command(cmd: &Option<Commands>) -> bool {
     matches!(
         cmd,
@@ -1557,102 +1568,76 @@ fn render_context_pretty(
     println!();
 }
 
-/// Attempt to sync after a mutation.
-/// Tries server sync first (if configured), falls back to TDO_SYNC_DIR for local dev.
-/// Sync is best-effort: errors are printed as warnings but never abort.
-fn try_sync(storage_path: &std::path::Path) {
-    // Allow tests (and users) to fully disable sync without keychain prompts
+fn open_store(allow_import: bool) -> Result<SqliteStorage, Box<dyn std::error::Error>> {
+    let path = saku_tdo::storage::default_storage_path();
+    let legacy_exists = saku_tdo::storage::legacy_storage_path().try_exists()?;
+    if !allow_import && legacy_exists {
+        if !path.try_exists()? || SqliteStorage::existing_is_pristine(&path)? {
+            return Err("Legacy JSON ledger found; run 'tdo migrate' first".into());
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let storage = SqliteStorage::open(&path)?;
+    if !allow_import && legacy_exists && storage.is_pristine()? {
+        return Err("Legacy JSON ledger found; run 'tdo migrate' first".into());
+    }
+    Ok(storage)
+}
+
+fn fail(error: impl std::fmt::Display) -> ! {
+    eprintln!("Error: {error}");
+    std::process::exit(1)
+}
+
+fn read_import(path: &std::path::Path) -> Result<String, std::io::Error> {
+    if path == std::path::Path::new("-") {
+        let mut source = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut source)?;
+        Ok(source)
+    } else {
+        std::fs::read_to_string(path)
+    }
+}
+
+fn export_file(path: &std::path::Path, data: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(data.as_bytes())?;
+    temporary.as_file().sync_all()?;
+    temporary.persist_noclobber(path)?;
+    Ok(())
+}
+
+#[cfg(feature = "sync")]
+fn run_sync() -> Result<(), Box<dyn std::error::Error>> {
+    use fs2::FileExt;
+
     if std::env::var_os("TDO_NO_SYNC").is_some() {
-        return;
+        return Err("Sync disabled by TDO_NO_SYNC".into());
     }
-
-    // Try server sync first (if the sync feature is enabled and configured)
-    #[cfg(feature = "sync")]
-    {
-        if let Ok(Some(config)) = saku_sync::config::load_sync_config() {
-            // Read passphrase from keychain
-            match saku_crypto::keychain::SyncCredentialStore::new()
-                .and_then(|s| s.load_or_migrate())
-                .ok()
-                .and_then(|c| c.passphrase)
-            {
-                Some(passphrase) => {
-                    match saku_sync::try_kv_sync_server(
-                        storage_path,
-                        passphrase.as_bytes(),
-                        &config.server_url,
-                        "tdo",
-                    ) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Warning: sync failed: {}", e);
-                        }
-                    }
-                    return;
-                }
-                None => {
-                    // No passphrase in keychain, fall through to local sync
-                }
-            }
+    let mut storage = open_store(false)?;
+    let config = saku_sync::config::load_sync_config()?
+        .ok_or("Sync not configured; run 'tdo sync login'")?;
+    let credentials = saku_crypto::keychain::SyncCredentialStore::new()
+        .and_then(|store| store.load_or_migrate())
+        .map_err(|_| "Sync credentials unavailable; run 'tdo sync login'")?;
+    let passphrase = credentials.passphrase.filter(|p| !p.is_empty())
+        .ok_or("Encryption passphrase missing; run 'tdo sync login'")?;
+    let lock_path = saku_tdo::storage::default_storage_path().with_file_name("store.sqlite3.sync.lock");
+    let lock = std::fs::OpenOptions::new().read(true).write(true).create(true).open(lock_path)?;
+    FileExt::try_lock_exclusive(&lock).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            std::io::Error::new(error.kind(), "sync already running")
+        } else {
+            error
         }
-    }
-
-    // Fallback: local filesystem sync via TDO_SYNC_DIR env var
-    if let Some(sync_dir) = std::env::var_os("TDO_SYNC_DIR") {
-        let sync_dir = PathBuf::from(sync_dir);
-        let passphrase = b"saku-dev-passphrase";
-        match saku_sync::try_flush_if_online(storage_path, passphrase, &sync_dir) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Warning: sync failed: {}", e);
-            }
-        }
-    }
-}
-
-/// Snapshot store entry keys and their serialized JSON for dirty detection.
-fn snapshot_entries(store: &saku_tdo::models::store::Store) -> std::collections::HashMap<String, String> {
-    let stored = store.to_stored();
-    stored
-        .entries
-        .into_iter()
-        .filter_map(|(k, v)| serde_json::to_string(&v).ok().map(|s| (k, s)))
-        .collect()
-}
-
-/// Compare before/after snapshots and mark changed keys dirty in the DirtyTracker.
-fn track_dirty_keys(
-    storage_path: &std::path::Path,
-    before: &std::collections::HashMap<String, String>,
-    after: &std::collections::HashMap<String, String>,
-) {
-    let mut changed: Vec<String> = Vec::new();
-
-    // New or modified entries
-    for (key, new_val) in after {
-        match before.get(key) {
-            Some(old_val) if old_val == new_val => {} // unchanged
-            _ => changed.push(key.clone()),
-        }
-    }
-
-    // Deleted entries (in before but not in after — rare, tombstones usually remain)
-    for key in before.keys() {
-        if !after.contains_key(key) {
-            changed.push(key.clone());
-        }
-    }
-
-    if changed.is_empty() {
-        return;
-    }
-
-    let dirty_path = saku_storage::dirty_tracker::DirtyTracker::sidecar_path(storage_path);
-    let mut tracker = saku_storage::dirty_tracker::DirtyTracker::load(&dirty_path).unwrap_or_default();
-    tracker.mark_dirty_many(&changed);
-    if let Err(e) = tracker.save(&dirty_path) {
-        eprintln!("Warning: failed to save dirty tracker: {}", e);
-    }
+    })?;
+    let outcome = saku_sync::try_kv_sync_server(&mut storage, passphrase.as_bytes(), &config.server_url, "tdo")?;
+    println!("Sync complete: {} pulled, {} pushed", outcome.pulled, outcome.pushed);
+    Ok(())
 }
 
 fn main() {
@@ -1670,36 +1655,51 @@ fn main() {
 
     let cli = Cli::parse();
 
-    // Check if this is a mutating command (for post-mutation sync)
-    let should_sync = is_mutating_command(&cli.command);
-
-    // Ensure device_id exists (created on first run, used by sync in the future)
-    if let Err(e) = saku_storage::device::get_or_create_device_id() {
-        eprintln!("Warning: Failed to initialize device ID: {}", e);
+    if let Some(Commands::Completion { shell }) = &cli.command {
+        let mut cmd = Cli::command();
+        clap_complete::generate(*shell, &mut cmd, "tdo", &mut std::io::stdout());
+        return;
     }
-
-    // Initialize storage
-    let storage_path = saku_tdo::storage::default_storage_path();
-
-    // Create parent directory if it doesn't exist
-    if let Some(parent) = storage_path.parent() {
-        std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-            eprintln!("Error: Failed to create data directory: {}", e);
-            std::process::exit(1);
-        });
+    if let Some(command @ (Commands::Migrate { .. } | Commands::Import { .. })) = &cli.command {
+        let path = match command {
+            Commands::Migrate { path } => path.clone().unwrap_or_else(saku_tdo::storage::legacy_storage_path),
+            Commands::Import { path } => path.clone(),
+            _ => unreachable!(),
+        };
+        let source = read_import(&path).unwrap_or_else(|e| fail(e));
+        let mut db = open_store(true).unwrap_or_else(|e| fail(e));
+        db.import_json(&source).unwrap_or_else(|e| fail(e));
+        println!("Imported v9 JSON; source retained and changes pending sync.");
+        return;
     }
-
-    let storage = JsonFileStorage::new(storage_path.clone());
-
-    // Sync BEFORE loading store (unless this is a sync management command)
     #[cfg(feature = "sync")]
-    let is_sync_command = matches!(cli.command, Some(Commands::Sync { .. }));
+    if matches!(&cli.command, Some(Commands::Sync { action: SyncAction::Run })) {
+        run_sync().unwrap_or_else(|e| fail(e));
+        return;
+    }
+    #[cfg(feature = "sync")]
+    let is_sync_command = matches!(&cli.command, Some(Commands::Sync { .. }));
     #[cfg(not(feature = "sync"))]
     let is_sync_command = false;
-    if !is_sync_command {
-        try_sync(&storage_path);
-    }
 
+    let mut db = if is_sync_command {
+        SqliteStorage::open(":memory:").unwrap_or_else(|e| fail(e))
+    } else {
+        open_store(false).unwrap_or_else(|e| fail(e))
+    };
+    if let Some(Commands::Export { path }) = &cli.command {
+        let data = db.export_json().unwrap_or_else(|e| fail(e));
+        match path {
+            None => println!("{data}"),
+            Some(path) if path == std::path::Path::new("-") => println!("{data}"),
+            Some(path) => export_file(path, &data).unwrap_or_else(|e| fail(e)),
+        }
+        return;
+    }
+    let edit = matches!(&cli.command, Some(Commands::Edit { entity: EditEntity::Task { .. } }));
+    let write = is_mutating_command(&cli.command) && !edit;
+    let mode = if edit { CommandMode::Edit } else if write { CommandMode::Write } else { CommandMode::Read };
+    let storage = db.command(mode).unwrap_or_else(|e| fail(e));
     let mut store = match storage.load() {
         Ok(store) => store,
         Err(e) => {
@@ -1708,10 +1708,8 @@ fn main() {
         }
     };
 
-    // Snapshot entries before command dispatch for dirty detection
-    let pre_snapshot = if should_sync { Some(snapshot_entries(&store)) } else { None };
-
     match cli.command {
+        Some(Commands::Migrate { .. } | Commands::Import { .. } | Commands::Export { .. }) => unreachable!(),
         Some(Commands::Today) => {
             eprintln!(
                 "{}",
@@ -4064,6 +4062,7 @@ fn main() {
         #[cfg(feature = "sync")]
         Some(Commands::Sync { action }) => {
             match action {
+                SyncAction::Run => unreachable!(),
                 SyncAction::Login { server, email } => {
                     // Prompt for password
                     let password = match rpassword::prompt_password("Password: ") {
@@ -4194,6 +4193,15 @@ fn main() {
                             eprintln!("Error reading sync config: {}", e);
                         }
                     }
+                    let path = saku_tdo::storage::default_storage_path();
+                    match path.try_exists() {
+                        Ok(true) => match SqliteStorage::open(path).and_then(|db| db.pending_changes()) {
+                            Ok(pending) => println!("  Pending changes: {}", pending.len()),
+                            Err(e) => eprintln!("Pending changes unavailable: {e}"),
+                        },
+                        Ok(false) => println!("  Pending changes: no SQLite store"),
+                        Err(e) => eprintln!("Pending changes unavailable: {e}"),
+                    }
                 }
             }
             return;
@@ -4218,12 +4226,8 @@ fn main() {
         }
     }
 
-    // After mutation, track dirty keys and sync
-    if should_sync {
-        if let Some(ref before) = pre_snapshot {
-            let after = snapshot_entries(&store);
-            track_dirty_keys(&storage_path, before, &after);
-        }
-        try_sync(&storage_path);
+    if write {
+        storage.save(&store).unwrap_or_else(|e| fail(e));
     }
+    storage.commit().unwrap_or_else(|e| fail(e));
 }

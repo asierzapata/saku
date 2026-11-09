@@ -220,8 +220,8 @@ async fn tool_isolation() {
     })];
     put_kv_batch(&app, &token, "tdo", json!({ "entries": entries })).await;
 
-    // Tool "nte" should see nothing
-    let resp = get_kv(&app, &token, "nte", None, None).await;
+    // Tool "other-tool" should see nothing
+    let resp = get_kv(&app, &token, "other-tool", None, None).await;
     let (_, body): (_, Value) = parse_json(resp).await;
     assert_eq!(body["entries"].as_array().unwrap().len(), 0);
 

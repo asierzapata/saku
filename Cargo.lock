@@ -3234,29 +3234,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "saku-jrn"
-version = "0.1.0"
-dependencies = [
- "clap",
- "colored",
- "dirs",
- "fs2",
- "jiff",
- "saku-storage",
- "serde",
- "serde_json",
- "tempfile",
- "term_size",
- "thiserror",
- "toon-format",
- "unicode-width 0.2.0",
-]
-
-[[package]]
-name = "saku-nte"
-version = "0.1.0"
-
-[[package]]
 name = "saku-server"
 version = "0.1.0"
 dependencies = [
@@ -3337,6 +3314,7 @@ dependencies = [
  "predicates",
  "proptest",
  "rpassword",
+ "rusqlite",
  "saku-crypto",
  "saku-storage",
  "saku-sync",
@@ -3352,21 +3330,6 @@ dependencies = [
  "unicode-width 0.2.0",
  "ureq",
  "uuid",
-]
-
-[[package]]
-name = "saku-wrk"
-version = "0.1.0"
-dependencies = [
- "clap",
- "dirs",
- "jiff",
- "saku-storage",
- "saku-tdo",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
 ]
 
 [[package]]

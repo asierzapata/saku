@@ -9,7 +9,6 @@ crates/
   saku-sync/        # sync engine (queue, Merkle, S3)
   saku-server/      # auth/coordination server
   tdo/              # existing
-  nte/              # existing
 ```
 
 ---
@@ -25,7 +24,7 @@ pub trait AppStorage: Serialize + DeserializeOwned {
     fn file_path() -> PathBuf;
 }
 
-// AppFiles: unstructured text files (nte markdown notes)
+// AppFiles: unstructured text files in the legacy sync engine
 pub trait AppFiles {
     fn file_root() -> PathBuf;
     fn supported_extensions() -> &'static [&'static str]; // ["md"]

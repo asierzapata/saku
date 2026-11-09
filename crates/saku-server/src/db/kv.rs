@@ -288,12 +288,12 @@ mod tests {
         let (results, _) = batch_upsert(
             &conn,
             "user1",
-            "nte",
+            "other-tool",
             &[("b".into(), b"2".to_vec())],
         )
         .unwrap();
 
-        // nte should start at seq 1, not continue from tdo's seq
+        // other-tool should start at seq 1, not continue from tdo's seq
         assert_eq!(results[0].seq, 1);
     }
 

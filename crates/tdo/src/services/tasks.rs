@@ -1,5 +1,6 @@
 use jiff::civil::Date;
 use saku_storage::entity::Entity;
+#[cfg(test)]
 use saku_storage::key_gen::generate_task_key;
 use thiserror::Error;
 
@@ -71,10 +72,12 @@ pub fn add_task(
     info!(title = %parameters.title, when = ?parameters.when, "Adding new task");
 
     // Generate a unique key suffix for this task
-    let now_ms = jiff::Timestamp::now().as_millisecond();
-    let device_id =
-        saku_storage::device::get_or_create_device_id().unwrap_or_else(|_| "unknown".to_string());
-    let key_suffix = generate_task_key(&device_id, now_ms);
+    let key_suffix = loop {
+        let candidate = uuid::Uuid::new_v4().simple().to_string();
+        if !store.tasks.contains_key(&format!("task/{candidate}")) {
+            break candidate;
+        }
+    };
 
     // 1. If parent_task_number is provided, resolve parent and inherit context
     let (project_key, area_key, parent_task_key) =
@@ -202,6 +205,9 @@ pub fn add_task(
     let task_storage_key = task.storage_key();
 
     // 5. Add to store (assigns task_number)
+    if store.tasks.values().any(|task| task.task_number == u64::MAX) {
+        return Err(AddTaskError::Storage(StorageError::InvalidData("task number exhausted".into())));
+    }
     store.add_task(task);
 
     // 6. Persist to storage

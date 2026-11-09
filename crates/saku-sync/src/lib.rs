@@ -3,6 +3,7 @@ pub mod conflict;
 pub mod error;
 pub mod hash;
 pub mod merkle;
+pub mod replica;
 pub mod state_db;
 pub mod sync_engine;
 
@@ -84,21 +85,17 @@ pub fn try_flush_if_online_server(
 }
 
 /// Convenience function: run per-entry KV sync against the server.
-///
-/// Loads the store from disk, pulls remote changes (paginated), merges via LWW,
-/// pushes dirty entries, and saves the DirtyTracker sidecar.
 #[cfg(feature = "server")]
 pub fn try_kv_sync_server(
-    store_path: &std::path::Path,
+    replica: &mut impl replica::Replica,
     passphrase: &[u8],
     server_url: &str,
     tool: &str,
-) -> Result<kv_sync::KvSyncOutcome, SyncError> {
+) -> Result<replica::SyncOutcome, SyncError> {
     let config = kv_sync::KvSyncConfig {
         server_url: server_url.to_string(),
         tool: tool.to_string(),
         passphrase: passphrase.to_vec(),
-        store_path: store_path.to_path_buf(),
     };
-    kv_sync::sync_kv(&config)
+    kv_sync::sync_kv(&config, replica)
 }

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage: ./scripts/release.sh <crate> <bump>
-#   crate: tdo | nte
+#   crate: tdo
 #   bump:  patch | minor | major
 
 CRATE="${1:-}"
@@ -11,13 +11,13 @@ BUMP="${2:-}"
 # 1. Validate args
 if [[ -z "$CRATE" || -z "$BUMP" ]]; then
   echo "Usage: $0 <crate> <bump>"
-  echo "  crate: tdo | nte"
+  echo "  crate: tdo"
   echo "  bump:  patch | minor | major"
   exit 1
 fi
 
-if [[ "$CRATE" != "tdo" && "$CRATE" != "nte" ]]; then
-  echo "Error: crate must be 'tdo' or 'nte', got '$CRATE'"
+if [[ "$CRATE" != "tdo" ]]; then
+  echo "Error: crate must be 'tdo', got '$CRATE'"
   exit 1
 fi
 
@@ -38,15 +38,9 @@ git checkout main
 git pull origin main
 
 # 4. Set crate info
-if [[ "$CRATE" == "tdo" ]]; then
-  PACKAGE="saku-tdo"
-  CRATE_PATH="crates/tdo"
-  TAG_PREFIX="saku-tdo-v"
-elif [[ "$CRATE" == "nte" ]]; then
-  PACKAGE="saku-nte"
-  CRATE_PATH="crates/nte"
-  TAG_PREFIX="saku-nte-v"
-fi
+PACKAGE="saku-tdo"
+CRATE_PATH="crates/tdo"
+TAG_PREFIX="saku-tdo-v"
 
 # 5. Get current version
 CURRENT_VERSION=$(grep '^version = ' "${CRATE_PATH}/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
