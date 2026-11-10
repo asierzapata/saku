@@ -6,7 +6,7 @@ Lightweight, local-first tools for your work, equally accessible to humans, scri
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `tdo` | Tasks, projects, scheduling, and deadlines. | Available v0.13.0; active development |
+| `tdo` | Tasks, projects, scheduling, and deadlines. | Available v0.14.0; active development |
 | `mdr` | Render Markdown documents inside the terminal. | Planned; not implemented |
 | `sch` | Run explicitly configured commands on a local schedule. | Planned; not implemented |
 

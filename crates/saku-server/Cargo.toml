@@ -1,6 +1,6 @@
 [package]
 name = "saku-server"
-version = "0.13.0"
+version = "0.14.0"
 description = "Auth and coordination server for saku sync"
 repository = "https://github.com/asierzapata/saku"
 authors.workspace = true
