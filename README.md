@@ -60,7 +60,7 @@ Guarded KV v2 atomically checks each pushed key against the completed pull cooki
 
 `tdo history export` writes a version 1 archive that `tdo import` cannot import. The v9 `tdo export` excludes history: export both to preserve portable content, though neither is a full operational backup.
 
-The current CLI renders today's tasks when called without a subcommand. An interactive TUI for bare invocation is a future design goal, not part of this cleanup.
+In this unreleased checkout, bare `tdo` opens a local interactive TUI when stdin and stdout are terminals and `TERM` is not `dumb`. Otherwise it prints usage without opening storage; use explicit commands such as `tdo view today --json` for scripts. The TUI does not sync automatically. See the [TUI keys](crates/tdo/README.md#interactive-tui).
 
 See the [command reference](documentation/tdo/commands-cheat-sheet.md) for more operations.
 

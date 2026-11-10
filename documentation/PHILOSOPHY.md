@@ -26,7 +26,7 @@ The intended interaction convention is:
 - Interactive actions are explicit; scripting paths do not unexpectedly prompt.
 - Both interfaces share the same domain operations.
 
-This is the target convention. Today's `tdo` still displays a noninteractive today view when invoked without a subcommand; the TUI has not been implemented.
+In the current checkout, bare `tdo` opens its local TUI in an interactive terminal and prints usage otherwise. Use explicit subcommands for noninteractive work.
 
 ## Lightweight by Default
 

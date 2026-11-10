@@ -95,6 +95,23 @@ fn assert_normalized(
 }
 
 #[test]
+fn bare_noninteractive_legacy_store_prints_help_without_opening_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("store.json"), fixture()).unwrap();
+    let output = success(run(&dir, &[]));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Usage: tdo"));
+    assert!(stdout.contains("Use 'tdo view today' for a noninteractive task view."));
+    assert!(!stdout.contains('\x1b'));
+    assert!(!dir.path().join("store.sqlite3").exists());
+
+    let output = run(&dir, &["view", "today"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("run 'tdo migrate' first"));
+    assert!(!dir.path().join("store.sqlite3").exists());
+}
+
+#[test]
 fn local_add_and_view_use_sqlite_without_legacy_sync() {
     let dir = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
@@ -104,7 +121,8 @@ fn local_add_and_view_use_sqlite_without_legacy_sync() {
         .args(["add", "local task"])
         .output()
         .unwrap();
-    success(output);
+    let added = success(output);
+    assert!(!added.stdout.contains(&0x1b));
     let path = dir.path().join("store.sqlite3");
     assert!(path.exists());
     assert!(!dir.path().join("store.json").exists());
@@ -113,6 +131,7 @@ fn local_add_and_view_use_sqlite_without_legacy_sync() {
     let storage = SqliteStorage::open(path).unwrap();
     assert_eq!(storage.pending_changes().unwrap().len(), 1);
     let view = success(run(&dir, &["view", "inbox", "--json"]));
+    assert!(!view.stdout.contains(&0x1b));
     let tasks: serde_json::Value = serde_json::from_slice(&view.stdout).unwrap();
     assert_eq!(tasks[0]["title"], "local task");
 }

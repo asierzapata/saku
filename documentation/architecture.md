@@ -21,9 +21,10 @@ This document describes the current task-focused workspace. See [PHILOSOPHY.md](
 - `crates/tdo/src/models/`: tasks, projects, areas, recurrence, and store types.
 - `crates/tdo/src/storage/`: persistence and schema migrations.
 - `crates/tdo/src/ui.rs`: terminal rendering.
+- `crates/tdo/src/tui.rs`: interactive task navigation and actions over the same services.
 - `crates/tdo/src/output.rs`: structured output.
 
-The existing CLI is shared by humans, scripts, and agents. Bare invocation currently renders today's tasks; a TUI is a future change. Read commands support structured output where applicable, including JSON, CSV, and TOON.
+The CLI is shared by humans, scripts, and agents. Bare invocation opens the local TUI when stdin and stdout are interactive terminals and `TERM` is not `dumb`, or prints usage without opening storage otherwise. Explicit read commands support structured output where applicable, including JSON, CSV, and TOON. The TUI does not synchronize automatically.
 
 ## Current Task Storage
 

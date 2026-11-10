@@ -20,7 +20,7 @@
 
 | Command                  | Shows                         |
 | ------------------------ | ----------------------------- |
-| `tdo`                    | Today (default)               |
+| `tdo`                    | Local TUI in a terminal; usage otherwise |
 | `tdo view today`         | Today + overdue               |
 | `tdo view inbox`         | Uncategorized tasks           |
 | `tdo view upcoming`      | Future-dated, grouped by date |
@@ -37,7 +37,8 @@
 
 **Notes:**
 
-- These are read-only view commands. To modify task scheduling, use `tdo move <id>` (see Move / Schedule section)
+- Explicit `tdo view` and `tdo list` commands are read-only. To modify task scheduling, use `tdo move <id>` (see Move / Schedule section).
+- For the TUI keyboard reference, see [interactive TUI](../../crates/tdo/README.md#interactive-tui). Agents should use explicit commands such as `tdo view today --json`.
 - Fuzzy matching applies to `done` command with title matching (case-insensitive substring search)
 - **Deprecation:** Old direct commands (`tdo today`, `tdo inbox`, etc.) still work but show deprecation warnings. They will be removed in v1.0.0. Use `tdo view <subcommand>` instead.
 

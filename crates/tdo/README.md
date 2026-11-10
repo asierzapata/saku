@@ -30,6 +30,24 @@ cargo install --path crates/tdo --no-default-features
 
 ## Usage
 
+### Interactive TUI
+
+In this unreleased checkout, run `tdo` with interactive stdin and stdout and a `TERM` other than `dumb` to open the local TUI. Redirected input or output, or `TERM=dumb`, prints usage without opening storage; use `tdo view today --json` for scripts. No TUI action synchronizes automatically.
+
+| Keys | Action |
+|---|---|
+| `1` / `2` / `3` / `4`, `Tab` | Today, Inbox, Projects, All; cycle views |
+| `j` / `k`, arrows, Home / End, PgUp / PgDown | Select or scroll |
+| Enter, Esc | Open a project or task details; close or go back |
+| `a` | Add a task to Inbox, regardless of the current view |
+| `x` / Space | Complete the selected task |
+| `s` | Schedule with a date, natural date, `inbox`, or `someday` |
+| `e` | Edit the selected task with `$VISUAL` or `$EDITOR` |
+| `/` | Search titles, notes, and project names |
+| `r`, `?`, `q` / Ctrl-C | Refresh, help, quit |
+
+Subtasks are individually selectable. Editing requires an available external editor; absent `$VISUAL` and `$EDITOR`, the fallback is `vi` on Unix and `notepad` on Windows. Concurrent changes can cause a stale editor save to be rejected.
+
 ### View tasks
 
 ```bash

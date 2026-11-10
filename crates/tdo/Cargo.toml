@@ -47,6 +47,8 @@ term_size.workspace = true
 tempfile.workspace = true
 unicode-width.workspace = true
 rusqlite.workspace = true
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+crossterm = "0.28"
 
 [dev-dependencies]
 saku-crypto.workspace = true

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::io::IsTerminal;
 
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -35,6 +36,7 @@ use saku_tdo::{
 use saku_tdo::logging;
 
 mod output;
+mod tui;
 
 #[derive(Parser)]
 #[command(
@@ -1682,6 +1684,19 @@ fn main() {
     let _span = tracing::info_span!("tdo_app", version = env!("CARGO_PKG_VERSION")).entered();
 
     let cli = Cli::parse();
+
+    if cli.command.is_none() {
+        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()
+            || std::env::var("TERM").is_ok_and(|term| term == "dumb")
+        {
+            Cli::command().print_help().unwrap_or_else(|e| fail(e));
+            println!("\nUse 'tdo view today' for a noninteractive task view.");
+            return;
+        }
+        let mut db = open_store(false).unwrap_or_else(|e| fail(e));
+        tui::run(&mut db).unwrap_or_else(|e| fail(e));
+        return;
+    }
 
     if let Some(Commands::Completion { shell }) = &cli.command {
         let mut cmd = Cli::command();
@@ -4281,16 +4296,7 @@ fn main() {
             return;
         }
         None => {
-            // Default: show today view (same as `tdo today`)
-            let no_filters = ViewFilters {
-                project: None,
-                tags: vec![],
-                area: None,
-                ready: false,
-                quick_first: false,
-                budget_minutes: None,
-            };
-            render_today_view(&store, CompletionFilter::Default, &no_filters);
+            unreachable!("bare invocation handled before opening a command session")
         }
     }
 

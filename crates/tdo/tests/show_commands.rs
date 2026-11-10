@@ -20,7 +20,10 @@ fn default_view_empty() {
     tdo(&temp)
         .assert()
         .success()
-        .stdout(predicate::str::contains("No tasks for today"));
+        .stdout(predicate::str::contains("Usage: tdo"))
+        .stdout(predicate::str::contains("Use 'tdo view today' for a noninteractive task view."))
+        .stdout(predicate::str::contains("\x1b").not());
+    assert!(!temp.path().join("store.sqlite3").exists());
 }
 
 #[test]
