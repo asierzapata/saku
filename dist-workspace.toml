@@ -21,3 +21,6 @@ publish-jobs = ["homebrew"]
 tap = "asierzapata/homebrew-saku"
 # Customize the Homebrew formula name
 formula = "saku"
+
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
