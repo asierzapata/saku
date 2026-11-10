@@ -60,7 +60,7 @@ pub fn create_project(
         name: parameters.name,
         created_at: jiff::Timestamp::now(),
         area_key,
-        modified_at: crate::sync_clock::next_modified_at(),
+        modified_at: storage.next_modified_at()?,
         ..Project::default()
     };
 
@@ -134,14 +134,14 @@ pub fn delete_project(
     for task_key in task_keys_to_delete {
         if let Some(task) = store.get_task_mut(&task_key) {
             task.deleted_at = Some(now);
-            task.modified_at = crate::sync_clock::next_modified_at();
+            task.modified_at = storage.next_modified_at()?;
         }
     }
 
     // Mark project as deleted
     if let Some(project) = store.get_project_mut(&project_key) {
         project.deleted_at = Some(now);
-        project.modified_at = crate::sync_clock::next_modified_at();
+        project.modified_at = storage.next_modified_at()?;
     }
 
     // Persist to storage
@@ -249,10 +249,11 @@ pub fn edit_project(
     };
 
     // Handle rename via store (tombstone + new entry + reference updates)
+    let modified_at = storage.next_modified_at()?;
     let final_key = if let Some(new_name) = parameters.new_name {
         let old_name = project.name.clone();
         store
-            .rename_project(&old_name, &new_name)
+            .rename_project(&old_name, &new_name, modified_at.clone())
             .unwrap_or(current_key.clone())
     } else {
         current_key.clone()
@@ -263,7 +264,7 @@ pub fn edit_project(
         if let Some(area_key) = new_area_key {
             project.area_key = area_key;
         }
-        project.modified_at = crate::sync_clock::next_modified_at();
+        project.modified_at = modified_at;
     }
 
     // Persist to storage
@@ -314,7 +315,7 @@ pub fn restore_project(
     // Restore project (does NOT auto-restore tasks - user must restore them separately)
     if let Some(project) = store.get_project_mut(&project_key) {
         project.deleted_at = None;
-        project.modified_at = crate::sync_clock::next_modified_at();
+        project.modified_at = storage.next_modified_at()?;
     }
 
     // Persist to storage

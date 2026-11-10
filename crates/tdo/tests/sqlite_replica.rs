@@ -45,6 +45,7 @@ fn page(cookie: &str, more: bool, entries: Vec<RemoteEntry>) -> PullPage {
 struct FakeTransport {
     pages: VecDeque<PullPage>,
     pull_cookies: Vec<Option<String>>,
+    base_cookies: Vec<String>,
     pushed: Vec<Vec<(String, Vec<u8>)>>,
     bad_ack: bool,
     fail_push: bool,
@@ -63,7 +64,8 @@ impl Transport for FakeTransport {
         })
     }
 
-    fn push(&mut self, entries: &[(String, Vec<u8>)]) -> Result<Vec<String>, SyncError> {
+    fn push(&mut self, entries: &[(String, Vec<u8>)], base_cookie: &str) -> Result<Vec<String>, SyncError> {
+        self.base_cookies.push(base_cookie.to_owned());
         if let Some(callback) = self.before_push.take() {
             callback();
         }
@@ -343,6 +345,8 @@ fn bad_ciphertext_and_hard_deletes_do_not_advance_page() {
     };
     assert!(sync_replica(&mut storage, &mut transport, key(), "server").is_err());
     assert_eq!(storage.prepare_sync("server").unwrap(), None);
+    assert!(storage.history_entries(None).unwrap().is_empty());
+    assert!(transport.pushed.is_empty());
     let mut transport = FakeTransport {
         pages: VecDeque::from([page(
             "1",
@@ -357,6 +361,63 @@ fn bad_ciphertext_and_hard_deletes_do_not_advance_page() {
     };
     assert!(sync_replica(&mut storage, &mut transport, key(), "server").is_err());
     assert_eq!(storage.prepare_sync("server").unwrap(), None);
+    assert!(storage.history_entries(None).unwrap().is_empty());
+    assert!(transport.pushed.is_empty());
+}
+
+#[test]
+fn ciphertext_failure_preserves_history_and_never_pushes() {
+    for fail_later in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        add(&path, "a", "local");
+        let mut storage = SqliteStorage::open(&path).unwrap();
+        storage.prepare_sync("server").unwrap();
+        let before = storage.export_json().unwrap();
+        let local: Value =
+            serde_json::from_str::<Value>(&before).unwrap()["entries"]["task/a"].clone();
+        let pending = storage.pending_changes().unwrap();
+        let changed = task("a", 1, "remote", 100);
+        let good = remote("task/a", &changed.to_string());
+        let bad = RemoteEntry {
+            key: "task/b".into(),
+            blob: vec![0],
+            deleted: false,
+        };
+        let mut transport = if fail_later {
+            FakeTransport {
+                pages: VecDeque::from([
+                    page("1", true, vec![good.clone()]),
+                    page("2", false, vec![good, bad]),
+                ]),
+                ..Default::default()
+            }
+        } else {
+            FakeTransport {
+                pages: VecDeque::from([page("1", false, vec![good, bad])]),
+                ..Default::default()
+            }
+        };
+        assert!(sync_replica(&mut storage, &mut transport, key(), "server").is_err());
+        assert!(transport.pushed.is_empty());
+        if fail_later {
+            assert_eq!(
+                storage.prepare_sync("server").unwrap().as_deref(),
+                Some("1")
+            );
+            let history = storage.history_entries(None).unwrap();
+            assert_eq!(history.len(), 2);
+            assert_eq!(history[0].value, local);
+            assert_eq!(history[1].value, changed);
+            assert!(storage.pending_changes().unwrap().is_empty());
+            assert_eq!(storage.load().unwrap().tasks["task/a"].title, "remote");
+        } else {
+            assert_eq!(storage.prepare_sync("server").unwrap(), None);
+            assert_eq!(storage.export_json().unwrap(), before);
+            assert_eq!(storage.pending_changes().unwrap(), pending);
+            assert!(storage.history_entries(None).unwrap().is_empty());
+        }
+    }
 }
 
 #[test]
@@ -489,6 +550,16 @@ fn hard_deletion_remains_pending_and_is_not_pushed() {
         storage.prepare_sync("server").unwrap().as_deref(),
         Some("1")
     );
+    storage.reset_sync("server", Some("1")).unwrap();
+    assert_eq!(storage.prepare_sync("server").unwrap(), None);
+    assert_eq!(storage.pending_changes().unwrap()[0].value, None);
+    let mut recovery = FakeTransport {
+        pages: VecDeque::from([page("0", false, vec![])]),
+        ..Default::default()
+    };
+    assert!(sync_replica(&mut storage, &mut recovery, key(), "server").is_err());
+    assert!(recovery.pushed.is_empty());
+    assert_eq!(storage.pending_changes().unwrap()[0].value, None);
 }
 
 #[test]
@@ -659,10 +730,14 @@ impl Transport for ServerTransport {
         })
     }
 
-    fn push(&mut self, entries: &[(String, Vec<u8>)]) -> Result<Vec<String>, SyncError> {
+    fn push(&mut self, entries: &[(String, Vec<u8>)], base_cookie: &str) -> Result<Vec<String>, SyncError> {
         let mut server = self.server.borrow_mut();
         if let Some((key, blob)) = self.before_push.take() {
             server.write(&key, blob);
+        }
+        let base = base_cookie.parse::<i64>().unwrap();
+        if entries.iter().any(|(key, _)| server.values.get(key).is_some_and(|(seq, _)| *seq > base)) {
+            return Err(SyncError::StaleWrite);
         }
         for (key, blob) in entries {
             server.write(key, blob.clone());
@@ -806,4 +881,41 @@ fn remote_update_between_pull_and_push_is_not_skipped() {
     assert!(!storage.load().unwrap().areas.contains_key("area/remote"));
     sync_replica(&mut storage, &mut transport, key(), "server").unwrap();
     assert!(storage.load().unwrap().areas.contains_key("area/remote"));
+}
+
+#[test]
+fn same_key_write_repulls_merges_and_preserves_history_in_both_directions() {
+    for (local_ms, expected) in [(300, "local edit"), (150, "remote edit")] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = SqliteStorage::open(dir.path().join("db")).unwrap();
+        let initial = task("a", 1, "initial", 100);
+        storage.import_json(&json!({"version":9,"entries":{"task/a":initial}}).to_string()).unwrap();
+        let server = std::rc::Rc::new(std::cell::RefCell::new(Server::default()));
+        let mut transport = ServerTransport { server: server.clone(), page_size: 100, before_push: None };
+        sync_replica(&mut storage, &mut transport, key(), "server").unwrap();
+        sync_replica(&mut storage, &mut transport, key(), "server").unwrap();
+        storage.transaction::<_, StorageError>(|store, _| {
+            let task = store.tasks.get_mut("task/a").unwrap();
+            task.title = "local edit".into();
+            task.modified_at.wall_ms = local_ms;
+            Ok(())
+        }).unwrap();
+        let local: Value = serde_json::from_str(&storage.export_json().unwrap()).unwrap();
+        let mut remote = initial.clone();
+        remote["title"] = json!("remote edit");
+        remote["modified_at"]["wall_ms"] = json!(200);
+        transport.before_push = Some(("task/a".into(), encrypt_entry(&serde_json::to_vec(&remote).unwrap(), key())));
+        sync_replica(&mut storage, &mut transport, key(), "server").unwrap();
+        assert_eq!(storage.load().unwrap().tasks["task/a"].title, expected);
+        assert_eq!(server.borrow().plaintext()["task/a"]["title"], expected);
+        let history = storage.history_entries(Some("task/a")).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(history.iter().any(|entry| entry.source == "local" && entry.value == local["entries"]["task/a"]));
+        assert!(history.iter().any(|entry| entry.source == "remote" && entry.value == remote));
+        assert!(storage.pending_changes().unwrap().is_empty());
+        sync_replica(&mut storage, &mut transport, key(), "server").unwrap();
+        assert_eq!(storage.load().unwrap().tasks["task/a"].title, expected);
+        assert_eq!(storage.history_entries(Some("task/a")).unwrap(), history);
+        assert!(storage.pending_changes().unwrap().is_empty());
+    }
 }

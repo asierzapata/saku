@@ -435,6 +435,12 @@ enum Commands {
     #[command(about = "Export portable v9 JSON (stdout by default; output file must not exist)")]
     Export { path: Option<PathBuf> },
 
+    #[command(about = "Inspect local copies preserved during sync merges")]
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
+
     /// Generate shell completion script
     Completion {
         /// Shell to generate completions for
@@ -447,6 +453,28 @@ enum Commands {
     Sync {
         #[command(subcommand)]
         action: SyncAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HistoryAction {
+    #[command(about = "List preserved versions (oldest first)")]
+    List {
+        #[arg(long)]
+        key: Option<String>,
+        #[arg(long, short = 'j')]
+        json: bool,
+    },
+    #[command(about = "Show a preserved version as JSON")]
+    Show {
+        #[arg(value_parser = clap::value_parser!(i64).range(1..))]
+        id: i64,
+    },
+    #[command(about = "Export local recovery history as JSON (output file must not exist)")]
+    Export {
+        path: Option<PathBuf>,
+        #[arg(long)]
+        key: Option<String>,
     },
 }
 
@@ -1696,6 +1724,46 @@ fn main() {
         }
         return;
     }
+    if let Some(Commands::History { action }) = &cli.command {
+        match action {
+            HistoryAction::List { key, json } => {
+                let entries = db.history_entries(key.as_deref()).unwrap_or_else(|e| fail(e));
+                if *json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&entries).unwrap_or_else(|e| fail(e))
+                    );
+                } else {
+                    println!("ID\tKEY\tSOURCE\tRECORDED_AT_MS");
+                    for entry in entries {
+                        println!(
+                            "{}\t{}\t{}\t{}",
+                            entry.id, entry.key, entry.source, entry.recorded_at_ms
+                        );
+                    }
+                }
+            }
+            HistoryAction::Show { id } => {
+                let entry = db
+                    .history_entry(*id)
+                    .unwrap_or_else(|e| fail(e))
+                    .unwrap_or_else(|| fail(format!("History entry {id} not found")));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|e| fail(e))
+                );
+            }
+            HistoryAction::Export { path, key } => {
+                let data = db.export_history_json(key.as_deref()).unwrap_or_else(|e| fail(e));
+                match path {
+                    None => println!("{data}"),
+                    Some(path) if path == std::path::Path::new("-") => println!("{data}"),
+                    Some(path) => export_file(path, &data).unwrap_or_else(|e| fail(e)),
+                }
+            }
+        }
+        return;
+    }
     let edit = matches!(&cli.command, Some(Commands::Edit { entity: EditEntity::Task { .. } }));
     let write = is_mutating_command(&cli.command) && !edit;
     let mode = if edit { CommandMode::Edit } else if write { CommandMode::Write } else { CommandMode::Read };
@@ -1709,7 +1777,7 @@ fn main() {
     };
 
     match cli.command {
-        Some(Commands::Migrate { .. } | Commands::Import { .. } | Commands::Export { .. }) => unreachable!(),
+        Some(Commands::Migrate { .. } | Commands::Import { .. } | Commands::Export { .. } | Commands::History { .. }) => unreachable!(),
         Some(Commands::Today) => {
             eprintln!(
                 "{}",

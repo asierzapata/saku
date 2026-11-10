@@ -178,6 +178,9 @@ pub fn add_task(
         None
     };
 
+    if store.tasks.values().any(|task| task.task_number == u64::MAX) {
+        return Err(AddTaskError::Storage(StorageError::InvalidData("task number exhausted".into())));
+    }
     // 4. Create the task (task_number will be assigned by store.add_task)
     let task = Task {
         storage_key_suffix: key_suffix.clone(),
@@ -195,7 +198,7 @@ pub fn add_task(
         completed_at: None,
         deleted_at: None,
         created_at: jiff::Timestamp::now(),
-        modified_at: crate::sync_clock::next_modified_at(),
+        modified_at: storage.next_modified_at()?,
         assigned_to: None,
         recurrence: parameters.recurrence,
         completed_occurrences: vec![],
@@ -205,9 +208,6 @@ pub fn add_task(
     let task_storage_key = task.storage_key();
 
     // 5. Add to store (assigns task_number)
-    if store.tasks.values().any(|task| task.task_number == u64::MAX) {
-        return Err(AddTaskError::Storage(StorageError::InvalidData("task number exhausted".into())));
-    }
     store.add_task(task);
 
     // 6. Persist to storage
@@ -416,7 +416,7 @@ pub fn move_task(
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
-        modified_at: crate::sync_clock::next_modified_at(),
+        modified_at: storage.next_modified_at()?,
         assigned_to: task.assigned_to.clone(),
         recurrence,
         completed_occurrences: task.completed_occurrences.clone(),
@@ -524,7 +524,7 @@ pub fn complete_task(
 
     // Mark task as completed — behaviour differs for recurring tasks.
     let mut updated_task = task.clone();
-    updated_task.modified_at = crate::sync_clock::next_modified_at();
+    updated_task.modified_at = storage.next_modified_at()?;
 
     // Append note if provided
     if let Some(note_text) = &parameters.note {
@@ -639,7 +639,7 @@ pub fn assign_task(
     let task_storage_key = task.storage_key();
     let mut updated_task = task.clone();
     updated_task.assigned_to = parameters.assignee;
-    updated_task.modified_at = crate::sync_clock::next_modified_at();
+    updated_task.modified_at = storage.next_modified_at()?;
 
     store
         .tasks
@@ -715,7 +715,7 @@ pub fn delete_task(
     let task_storage_key = task.storage_key();
     let mut updated_task = task.clone();
     updated_task.deleted_at = Some(jiff::Timestamp::now());
-    updated_task.modified_at = crate::sync_clock::next_modified_at();
+    updated_task.modified_at = storage.next_modified_at()?;
 
     // Update in store
     store
@@ -731,7 +731,7 @@ pub fn delete_task(
     for subtask_key in subtask_keys {
         if let Some(subtask) = store.get_task_mut(&subtask_key) {
             subtask.deleted_at = Some(now);
-            subtask.modified_at = crate::sync_clock::next_modified_at();
+            subtask.modified_at = storage.next_modified_at()?;
         }
     }
 
@@ -777,7 +777,7 @@ pub fn restore_task(
     let task_storage_key = task.storage_key();
     let mut restored_task = task.clone();
     restored_task.deleted_at = None;
-    restored_task.modified_at = crate::sync_clock::next_modified_at();
+    restored_task.modified_at = storage.next_modified_at()?;
 
     // Update in store
     store
@@ -980,7 +980,7 @@ pub fn edit_task(
         completed_at: task.completed_at,
         deleted_at: task.deleted_at,
         created_at: task.created_at,
-        modified_at: crate::sync_clock::next_modified_at(),
+        modified_at: storage.next_modified_at()?,
         assigned_to: task.assigned_to.clone(),
         recurrence: task.recurrence.clone(),
         completed_occurrences: task.completed_occurrences.clone(),
@@ -1122,7 +1122,7 @@ pub fn depend_task(
         updated.depends_on.retain(|key| *key != dep_key);
     }
 
-    updated.modified_at = crate::sync_clock::next_modified_at();
+    updated.modified_at = storage.next_modified_at()?;
     let task_storage_key = updated.storage_key();
     store.update_task(updated);
     storage.save(store)?;

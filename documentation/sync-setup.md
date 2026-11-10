@@ -1,248 +1,169 @@
-# Saku Sync — Server Setup & Client Configuration
+# Set up and recover `tdo` sync
 
-This guide covers how to deploy `saku-server` and configure `tdo` to sync through it.
+This guide describes the **unreleased checkout** of `tdo` and `saku-server`. Published v0.13 binaries may not have the SQLite storage and guarded KV v2 protocol described here. Use matching builds of both before connecting any devices.
 
-## Overview
+Sync is manual: local task commands do not contact the server. `tdo sync run` pulls and merges, then pushes encrypted entries to the server's SQLite database. The server cannot read entry plaintext. Current `tdo` KV sync does not request objects from S3; the server still requires a `[storage]` configuration for its legacy routes.
 
-Saku sync uses a self-hosted coordination server that issues presigned S3-compatible URLs. Your encrypted data is stored in an S3-compatible bucket (AWS S3, Cloudflare R2, or MinIO for local dev). The server never sees your unencrypted data — all encryption happens client-side.
+## Build and prerequisites
 
-**Components:**
-
-- **saku-server** — Auth + coordination server (issues presigned URLs, manages users/devices)
-- **S3-compatible storage** — Where encrypted sync data lives (MinIO, AWS S3, Cloudflare R2)
-- **tdo** — CLI client that authenticates and syncs via presigned URLs
-
-## Quick Start (Docker, local dev)
-
-The fastest way to try sync locally. This starts `saku-server` and MinIO together.
+From the repository root:
 
 ```bash
-cd crates/saku-server
-docker compose up -d
+cargo build -p saku-tdo -p saku-server --locked
 ```
 
-This starts:
-- `saku-server` on `http://localhost:8080`
-- MinIO (S3-compatible) on `http://localhost:9000` (console at `http://localhost:9001`)
-- Auto-creates the `saku-sync` bucket in MinIO
+The binaries are `target/debug/tdo` and `target/debug/saku-server`. A C compiler is needed for bundled SQLite and D-Bus. Other native dependencies, such as OpenSSL, may require their development packages and `pkg-config` on your platform. Linux bundles the D-Bus client library; libdbus development headers and custom D-Bus pkg-config metadata are not required.
 
-Create a user account:
+Sync credentials use the OS keychain: on Linux, an unlocked Secret Service session such as GNOME Keyring or KWallet; on macOS and Windows, their native credential stores. Bundling the D-Bus client does not start a Secret Service. Local task commands work without one. There is no plaintext credential fallback.
 
-```bash
-docker compose exec saku-server saku-server \
-  --config /etc/saku-server/config.toml \
-  create-user --email you@example.com
-```
+## Configure a server
 
-You'll be prompted for a password (twice to confirm). Then configure `tdo`:
-
-```bash
-tdo sync login --server http://localhost:8080 --email you@example.com
-```
-
-You'll be prompted for:
-1. **Password** — the account password you just set
-2. **Encryption passphrase** — a separate passphrase used to encrypt your data end-to-end (the server never sees this)
-
-That's it. From now on, every mutating `tdo` command (`add`, `done`, `move`, `delete`, etc.) automatically syncs in the background.
-
-## Production Deployment
-
-### 1. Prepare storage
-
-Create an S3-compatible bucket for sync data. Any S3-compatible service works:
-
-| Provider | Endpoint format |
-|---|---|
-| AWS S3 | `https://s3.<region>.amazonaws.com` |
-| Cloudflare R2 | `https://<account-id>.r2.cloudflarestorage.com` |
-| MinIO | `http://<host>:9000` |
-
-Create a bucket (e.g., `saku-sync`) and an access key with read/write permissions on that bucket.
-
-### 2. Write the config file
-
-Copy the example config and edit it:
-
-```bash
-cp crates/saku-server/config.example.toml /etc/saku-server/config.toml
-```
+Create a private server data directory and config file. The following is a loopback-only example; choose a writable absolute database path and replace the placeholder JWT secret:
 
 ```toml
 [server]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 8080
 
 [auth]
-# Generate a strong random secret: openssl rand -hex 32
-jwt_secret = "<random-secret>"
+jwt_secret = "replace-with-a-strong-random-secret"
 access_token_mins = 15
 refresh_token_days = 90
 
 [database]
-path = "/data/saku-server.db"
+path = "/absolute/path/to/private/server.sqlite3"
 
 [storage]
-bucket = "saku-sync"
-region = "auto"                    # or "us-east-1", etc.
-endpoint = "https://..."           # your S3-compatible endpoint
-access_key_id = "..."
-secret_access_key = "..."
+bucket = "unused-by-tdo-kv"
+region = "auto"
+endpoint = "http://127.0.0.1:9"
+access_key_id = "unused-by-tdo-kv"
+secret_access_key = "unused-by-tdo-kv"
 ```
 
-Every config value can be overridden with environment variables using the `SAKU__SECTION__KEY` pattern:
+Protect the config and preserve the JWT secret and auth configuration with the database backup. If legacy object routes are used, configure their storage separately. The complete fields and environment overrides are in `crates/saku-server/config.example.toml` and `crates/saku-server/src/config.rs`.
 
-| Config key | Environment variable |
-|---|---|
-| `server.host` | `SAKU__SERVER__HOST` |
-| `server.port` | `SAKU__SERVER__PORT` |
-| `auth.jwt_secret` | `SAKU__AUTH__JWT_SECRET` |
-| `database.path` | `SAKU__DATABASE__PATH` |
-| `storage.bucket` | `SAKU__STORAGE__BUCKET` |
-| `storage.endpoint` | `SAKU__STORAGE__ENDPOINT` |
-| `storage.access_key_id` | `SAKU__STORAGE__ACCESS_KEY_ID` |
-| `storage.secret_access_key` | `SAKU__STORAGE__SECRET_ACCESS_KEY` |
-
-### 3. Start the server
-
-**Option A: Docker**
+Create an account interactively, then start the server:
 
 ```bash
-docker run -d \
-  --name saku-server \
-  -p 8080:8080 \
-  -v /path/to/config.toml:/etc/saku-server/config.toml:ro \
-  -v saku-data:/data \
-  saku-server
+target/debug/saku-server --config /path/to/config.toml create-user --email user@example.com
+target/debug/saku-server --config /path/to/config.toml serve
 ```
 
-**Option B: Binary** (requires Rust 1.88+)
+The first command prompts twice for the account password. In another terminal, verify the loopback server:
 
 ```bash
-cargo install --path crates/saku-server
-saku-server --config /etc/saku-server/config.toml
+curl http://127.0.0.1:8080/api/v1/health
 ```
 
-Or run directly with `cargo`:
+For access across machines, configure the server binding and a reverse proxy with TLS appropriate to your environment. Do not expose the loopback example's placeholder secrets. The repository's Compose setup is a legacy development option: it maps host port 4060 to container port 8080 and includes MinIO dependencies; inspect and adapt its configuration before use.
+
+## Rehearse migration on a copy
+
+Existing v9 `store.json` data requires explicit migration. `tdo migrate` imports it only into a pristine SQLite store and retains the JSON source. First rehearse using a copy and inspect the export:
 
 ```bash
-cargo run --release --package saku-server -- --config /path/to/config.toml
+umask 077
+rehearsal_dir=$(mktemp -d)
+mkdir -p "$rehearsal_dir"/{tasks,data,config,cache,runtime}
+cp /path/to/copied-v9.json "$rehearsal_dir/tasks/store.json"
+(
+  export TDO_DATA_DIR="$rehearsal_dir/tasks"
+  export XDG_DATA_HOME="$rehearsal_dir/data"
+  export XDG_CONFIG_HOME="$rehearsal_dir/config"
+  export XDG_CACHE_HOME="$rehearsal_dir/cache"
+  export XDG_RUNTIME_DIR="$rehearsal_dir/runtime"
+  tdo migrate &&
+    tdo export "$rehearsal_dir/migrated.json"
+)
 ```
 
-The server logs to stderr. Set `RUST_LOG=saku_server=debug` for verbose output.
+The subshell keeps rehearsal environment variables out of subsequent commands. The output file must not already exist. Compare the export with the source copy and inspect the tasks before continuing. Migration can normalize legacy schedules; do not assume a byte-for-byte export. A non-pristine database cannot be migrated or imported over.
 
-### 4. Create user accounts
+`TDO_DATA_DIR` isolates task data, not sync config, device identity, or keychain credentials. The XDG paths above isolate the first two on Linux, but they do **not** create a private D-Bus/keychain session. Do not log in to a test server from this shell using a real keychain. A sync rehearsal also needs a separate private D-Bus session and keychain.
 
-There is no public registration. An admin creates accounts via the CLI:
+## Log in and sync
 
-```bash
-saku-server --config /etc/saku-server/config.toml create-user --email user@example.com
-```
-
-This prompts for a password (entered twice). The password is hashed with bcrypt before storage.
-
-### 5. Verify the server is running
-
-```bash
-curl http://localhost:8080/api/v1/health
-# {"status":"ok"}
-```
-
-## Client Configuration
-
-### Log in
+On each device, with the keychain unlocked:
 
 ```bash
 tdo sync login --server https://your-server.example.com --email user@example.com
-```
-
-You'll be prompted for two things:
-
-1. **Password** — your account password (authenticates with the server)
-2. **Encryption passphrase** — encrypts your data client-side before it leaves your machine
-
-Both are stored securely in your OS keychain (macOS Keychain, GNOME Keyring, Windows Credential Manager).
-
-The login command also writes `~/.config/saku/sync.toml` with the server URL and your device ID.
-
-### Check sync status
-
-```bash
 tdo sync status
+tdo sync run
 ```
 
-Shows:
-- Server URL
-- Device ID
-- Whether the encryption passphrase is stored in the keychain
+Login prompts for the account password and a separate encryption passphrase. Use the same encryption passphrase on all devices for this account. The password authenticates the login; the keychain stores tokens and the encryption passphrase, not the account password. The sync config stores the server URL and device ID. Check status for a stored passphrase and pending changes.
 
-### Log out
+Run `tdo sync run` whenever synchronization is wanted. Ordinary local commands do not sync. If `TDO_NO_SYNC` is present in the environment, explicit sync runs are disabled. `tdo sync logout` clears local sync credentials and config.
+
+## Coordinate a live rollout
+
+1. Pause **all** KV writers and take consistent backups of each client's complete data directory: legacy v9 JSON, or SQLite including history, pending changes, and cursor. Back up server SQLite and preserve its auth/JWT configuration too.
+2. Stage matching server and client binaries. The new server rejects v1 writes with HTTP 428; do not leave old writers active.
+3. Upgrade the server and clients. Explicitly migrate existing v9 clients, retaining their JSON sources.
+4. Verify each client's local contents before any manual sync. Log in with its unlocked keychain and matching account/passphrase.
+5. Sync one client, then the next; repeat as needed to converge. Inspect `tdo sync status` and `tdo history list --json` for pending changes and preserved divergent values.
+
+This is a preparation procedure, not a deployment record. If a client reports a different sync target, export its data and import it into a separate data directory; do not clear or edit `sync_state`.
+
+## Back up and restore
+
+Portable `tdo export` is v9 task JSON, not a full operational backup: it omits history, outbox, cursor, and metadata. `tdo history export` produces a separate local history archive; it is not importable with `tdo import`. Protect both exports as plaintext.
+
+For an operational backup, either stop **all** processes using the data directory and copy the entire directory, including any SQLite WAL and sidecars, or use SQLite's backup API. For example, with an existing source and a destination that does not exist:
 
 ```bash
-tdo sync logout
+umask 077
+python3 - /path/to/store.sqlite3 /path/to/new-backup.sqlite3 <<'PY'
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).resolve()
+destination = Path(sys.argv[2])
+fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+os.close(fd)
+with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as db:
+    with sqlite3.connect(destination) as backup:
+        db.backup(backup)
+PY
 ```
 
-Clears all keychain entries (access token, refresh token, encryption passphrase) and deletes `~/.config/saku/sync.toml`.
+Also back up relevant config and keychain access separately. To restore a client operational backup, stop processes using its data directory and restore the complete matching backup. Importing portable JSON into a pristine database restores entries, not operational history or sync state.
 
-## How Sync Works
+To restore the server, stop it first and retain a consistent snapshot of the current database before replacement. Replace the database and remove or replace its stale WAL/sidecars together while the service is stopped. Start the matching v2 server normally. Never edit or restore the live database in place, and do not downgrade to v1 while new writes exist.
 
-After login, sync is automatic and transparent:
+## Recovery and conflict behavior
 
-1. You run a mutating command (e.g., `tdo add "Buy groceries"`)
-2. The command executes locally as usual
-3. After the mutation, `tdo` automatically syncs in the background:
-   - Detects local changes via file hashing
-   - Compares Merkle tree roots with the server to detect remote changes
-   - Pulls remote changes and merges (LWW for JSON, conflict copies for other files)
-   - Encrypts and pushes local changes via presigned S3 URLs
-4. If the server is unreachable, sync is silently skipped — your data is always local-first
+KV v2 cookies have the form `<instance>:<sequence>`. The server generates a new random instance on **every startup**, outside the database. A restart or stop/restore/start invalidates old cursors with HTTP 410: the client atomically requeues all local entries, clears the cursor, and performs a full pull and merge before guarded pushes. Entries absent remotely are not deleted locally; deletions are represented by tombstones.
 
-Sync errors are printed as warnings but never block your workflow.
+Each batch checks its keys against the last completed pull. HTTP 409 causes a pull, merge, and retry. Stale-write and cursor-recovery retries share a limit of three retries. Push responses do not advance the pull cursor. Every restart therefore causes a full reconciliation, even if the database did not change. Run only one server instance: alternating independent instances can exhaust the retry limit.
 
-## Multi-Device Setup
+Recovery history retains divergent values locally in plaintext, without automatic pruning or restoration. It cannot reconstruct a version absent from every client and server, including historical unseen overwrites.
 
-To sync between multiple machines:
+## API reference
 
-1. Install `tdo` on each machine
-2. Run `tdo sync login` on each with the **same email** and **same encryption passphrase**
-3. Each device gets its own device ID (auto-generated on first run at `~/.local/share/saku/device_id`)
-4. Changes sync automatically after every mutation
+KV endpoints require a bearer access token. The old v1 KV reads remain available with decimal cookies, but v1 writes return 428. Current clients do not fall back to v1.
 
-The encryption passphrase must match across devices — using different passphrases means devices cannot decrypt each other's data.
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/health` | Health check; no authentication |
+| `POST` | `/api/v1/auth/login` | Authenticate and issue tokens |
+| `POST` | `/api/v1/auth/refresh` | Rotate tokens |
+| `DELETE` | `/api/v1/auth/devices/{device_id}` | Revoke a device |
+| `GET` | `/api/v2/kv/{tool}` | Incremental pull |
+| `GET` | `/api/v2/kv/{tool}/snapshot` | Full snapshot page |
+| `PUT` | `/api/v2/kv/{tool}` | Guarded batch with `base_cookie` |
+| `GET` | `/api/v1/kv/{tool}` and `/api/v1/kv/{tool}/snapshot` | Legacy reads |
+| `PUT` | `/api/v1/kv/{tool}` and `/api/v1/kv/{tool}/{key}` | Rejected legacy writes |
 
-## Security Model
-
-- **End-to-end encryption**: All data is encrypted client-side with ChaCha20-Poly1305 before upload. The server and S3 storage only see ciphertext.
-- **Key derivation**: Your encryption passphrase is run through Argon2 to produce a master key (KEK). Each file gets a unique random data encryption key (DEK).
-- **Auth tokens**: Short-lived JWT access tokens (15 min) with long-lived refresh tokens (90 days). Refresh tokens are stored as SHA-256 hashes in the server DB.
-- **No public registration**: Only an admin with server access can create accounts.
-- **Credential storage**: Tokens and passphrase are stored in the OS keychain, not on disk.
-
-## API Reference
-
-All endpoints are under `/api/v1/`. Auth endpoints are public; sync endpoints require a `Bearer` JWT.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/health` | No | Health check |
-| `POST` | `/auth/login` | No | Device login → access + refresh tokens |
-| `POST` | `/auth/refresh` | No | Rotate access token |
-| `DELETE` | `/auth/devices/{id}` | Yes | Revoke a device |
-| `GET` | `/sync/{tool}/download-url?path=...` | Yes | Get presigned download URL |
-| `POST` | `/sync/{tool}/upload-url` | Yes | Get presigned upload URL |
-| `POST` | `/sync/{tool}/confirm-upload` | Yes | Confirm upload + update quota |
-| `GET` | `/sync/{tool}/metadata?path=...` | Yes | Get object metadata |
+Legacy object-sync routes remain available separately; see the historical [distributed KV RFC](rfc-distributed-kv-sync.md) and server routes.
 
 ## Troubleshooting
 
-**"sync failed: No refresh token available"**
-Your session has expired or you haven't logged in. Run `tdo sync login` again.
-
-**"sync failed: ServerSyncBackend requires the 'server' feature"**
-`tdo` was compiled without the `sync` feature. Reinstall with: `cargo install --path crates/tdo` (the `sync` feature is on by default).
-
-**Sync silently does nothing**
-Check `tdo sync status`. If sync is not configured, run `tdo sync login`. If it is configured but the server is unreachable, sync is silently skipped (local-first design).
-
-**Different data on different devices**
-Make sure all devices use the same encryption passphrase. Different passphrases produce different encryption keys and devices cannot decrypt each other's data.
+- **Undecryptable entry:** the failed page does not advance the cursor and no push follows it. Check that devices use the same passphrase; do not overwrite the entry to bypass the error.
+- **Guarded KV v2 unavailable:** upgrade the server and clients together; there is no fallback to old-server writes.
+- **Credentials or keychain unavailable:** unlock the OS keychain, run `tdo sync status`, and log in again if needed. On Linux, ensure a Secret Service is running in the intended session.
+- **Target changed:** export and import into a separate data directory rather than editing internal sync state.
+- **Repeated 410 or 409:** check for alternating server instances or concurrent writers, then run sync again after resolving the cause. Local changes remain pending.

@@ -51,7 +51,7 @@ See `documentation/architecture.md` for conventions shared across all tools, and
 
 ## Storage model (v9)
 
-- Default on-disk storage is `store.sqlite3` (schema v2); portable JSON imports and exports use v9 flat KV entries.
+- Default on-disk storage is `store.sqlite3` (schema v4); portable JSON imports and exports use v9 flat KV entries.
 - Entities use natural-key storage keys: `project/{name}`, `area/{name}`, `task/{suffix}`; new task suffixes are UUID v4.
 - `Entity` trait in `saku-storage`: `entity_type()`, `natural_key()`, `storage_key()`
 - `Store` uses `HashMap<String, T>` with `task_number_index` for O(1) lookups
@@ -90,8 +90,12 @@ Your built-in todo list is for short-term step tracking. `tdo` is for shared, la
 
 ## SQLite backend
 
-- `storage::sqlite::SqliteStorage` provides transaction-scoped task storage, strict v9 JSON import/export, and a revisioned pending-change outbox.
+- `storage::sqlite::SqliteStorage` provides transaction-scoped task storage, a persisted transactional hybrid clock, strict v9 JSON import/export, and a revisioned pending-change outbox.
 - Run backend tests with `cargo test -p saku-tdo --no-default-features --locked storage::sqlite`.
+- Run clock integration tests with `cargo test -p saku-tdo --no-default-features --locked --test sqlite_clock`.
 - Use `tdo migrate` for an existing v9 `store.json`; imports require a pristine database and preserve the source.
 - Use `tdo export [file]` for v9 JSON and `tdo import <file|->` to import from a file or stdin.
 - Local commands do not contact the network; sync is manual via `tdo sync run`.
+- Recovery history preserves full divergent-pull and merge-repair values in local plaintext; it is not synced, automatically pruned, or automatically restored. Its source is first provenance, not conflict classification. Undecryptable entries fail closed.
+- Use `tdo history list --json`, `tdo history list --key task/...`, `tdo history show 1`, and `tdo history export recovery.json`. History export is a v1 archive, not importable via `tdo import`; v9 task export excludes it. Export both for portable content, not a full operational backup. Unseen server overwrites cannot be recovered, and concurrent edits cannot be classified without a common base.
+- Guarded KV v2 uses startup-bound cookies (`<server-instance>:<sequence>`). The server generates a new random instance ID outside its database at every startup, so normal restarts and stop/restore/start recovery invalidate old cookies. HTTP 410 makes the client atomically requeue all local entries and clear its cursor, then fully pull and merge before guarded pushes. Missing remote entries do not delete local entries; tombstones and divergent history are preserved. Stale writes return 409; stale-write and cursor-recovery retries share a limit of three retries. V1 writes return 428, and new clients refuse old servers without fallback. SQLite schema v4 and v9 JSON are unchanged.

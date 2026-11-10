@@ -8,6 +8,7 @@ use rusqlite::{
 };
 use saku_storage::entity::Entity;
 use saku_storage::kv_store::{self, KvStore};
+use saku_storage::timestamp::HybridTimestamp;
 use saku_sync::{
     SyncError,
     replica::{PendingEntry, Replica},
@@ -24,7 +25,15 @@ use crate::models::{
 use crate::storage::{Storage, StorageError};
 
 const APPLICATION_ID: i64 = 0x54444f31;
-const DATABASE_VERSION: i64 = 2;
+const DATABASE_VERSION: i64 = 4;
+const CREATE_HISTORY: &str = "CREATE TABLE recovery_history (
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('local', 'remote', 'merged')),
+    recorded_at_ms INTEGER NOT NULL,
+    UNIQUE (key, value)
+);";
 
 pub struct SqliteStorage {
     connection: Connection,
@@ -51,6 +60,8 @@ enum CommandStorage<'conn> {
         connection: &'conn Connection,
         snapshot: Store,
         generation: i64,
+        clock: HybridTimestamp,
+        reserved_clock: RefCell<HybridTimestamp>,
     },
 }
 
@@ -61,13 +72,22 @@ pub struct PendingChange {
     pub value: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub key: String,
+    pub value: Value,
+    pub source: String,
+    pub recorded_at_ms: i64,
+}
+
 impl SqliteStorage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
         let (application_id, version) = database_identity(&connection)?;
         if (application_id == 0 && version == 0)
-            || (application_id == APPLICATION_ID && version == 1)
+            || (application_id == APPLICATION_ID && (1..=3).contains(&version))
         {
             let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let (application_id, version) = database_identity(&tx)?;
@@ -83,7 +103,8 @@ impl SqliteStorage {
                     "CREATE TABLE store_metadata (
                         id INTEGER PRIMARY KEY CHECK (id = 1),
                         data_version INTEGER NOT NULL,
-                        generation INTEGER NOT NULL CHECK (typeof(generation) = 'integer' AND generation >= 0)
+                        generation INTEGER NOT NULL CHECK (typeof(generation) = 'integer' AND generation >= 0),
+                        clock TEXT NOT NULL DEFAULT '{\"wall_ms\":0,\"lamport\":0,\"device_id\":\"\"}'
                     );
                     INSERT INTO store_metadata (id, data_version, generation) VALUES (1, 9, 0);
                     CREATE TABLE entries (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -93,17 +114,41 @@ impl SqliteStorage {
                         value TEXT
                     );
                     CREATE TABLE sync_state (id INTEGER PRIMARY KEY CHECK(id = 1), target TEXT NOT NULL, cookie TEXT);
-                    PRAGMA application_id = 0x54444f31;
-                    PRAGMA user_version = 2;",
+                    PRAGMA application_id = 0x54444f31;",
                 )?;
-            } else if application_id == APPLICATION_ID && version == 1 {
+                tx.execute_batch(CREATE_HISTORY)?;
+                tx.execute_batch("PRAGMA user_version = 4;")?;
+            } else if application_id == APPLICATION_ID && (1..=3).contains(&version) {
                 validate_metadata(&tx)?;
                 tx.prepare("SELECT key, value FROM entries LIMIT 0")?;
                 tx.prepare("SELECT key, revision, value FROM pending_changes LIMIT 0")?;
-                tx.execute_batch(
-                    "CREATE TABLE sync_state (id INTEGER PRIMARY KEY CHECK(id = 1), target TEXT NOT NULL, cookie TEXT);
-                     PRAGMA user_version = 2;",
-                )?;
+                let entries = read_store(&tx)?;
+                let pending = read_pending_changes(&tx)?;
+                if version == 1 {
+                    tx.execute_batch("CREATE TABLE sync_state (id INTEGER PRIMARY KEY CHECK(id = 1), target TEXT NOT NULL, cookie TEXT);")?;
+                } else {
+                    let _: Option<(String, Option<String>)> = tx
+                        .query_row(
+                            "SELECT target, cookie FROM sync_state WHERE id = 1",
+                            [],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?;
+                }
+                if version < 3 {
+                    tx.execute_batch("ALTER TABLE store_metadata ADD COLUMN clock TEXT NOT NULL DEFAULT '{\"wall_ms\":0,\"lamport\":0,\"device_id\":\"\"}';")?;
+                    observe_clock(
+                        &tx,
+                        entries
+                            .entries
+                            .values()
+                            .chain(pending.iter().filter_map(|change| change.value.as_ref())),
+                    )?;
+                } else {
+                    read_clock(&tx)?;
+                }
+                tx.execute_batch(CREATE_HISTORY)?;
+                tx.execute_batch("PRAGMA user_version = 4;")?;
             } else {
                 validate_identity(application_id, version)?;
             }
@@ -136,11 +181,14 @@ impl SqliteStorage {
                 let tx = self.connection.transaction()?;
                 let snapshot = Store::from_stored(read_store(&tx)?);
                 let generation = generation(&tx)?;
+                let clock = read_clock(&tx)?;
                 tx.commit()?;
                 CommandStorage::Edit {
                     connection: &self.connection,
                     snapshot,
                     generation,
+                    reserved_clock: RefCell::new(clock.clone()),
+                    clock,
                 }
             }
         };
@@ -165,8 +213,17 @@ impl SqliteStorage {
             }
             return Ok(true);
         }
-        if application_id == APPLICATION_ID && version == 1 {
+        if application_id == APPLICATION_ID && (1..=3).contains(&version) {
             validate_metadata(&connection)?;
+            connection.prepare("SELECT key, value FROM entries LIMIT 0")?;
+            connection.prepare("SELECT key, revision, value FROM pending_changes LIMIT 0")?;
+            if version >= 2 {
+                connection.prepare("SELECT target, cookie FROM sync_state LIMIT 0")?;
+                if version == 3 {
+                    read_clock(&connection)?;
+                }
+                return is_pristine(&connection);
+            }
             return Ok(connection.query_row(
                 "SELECT generation = 0 AND NOT EXISTS(SELECT 1 FROM entries) AND NOT EXISTS(SELECT 1 FROM pending_changes) FROM store_metadata WHERE id = 1",
                 [],
@@ -226,6 +283,7 @@ impl SqliteStorage {
                 "import requires a pristine database".into(),
             ));
         }
+        observe_clock(&tx, stored.entries.values())?;
         tx.execute("UPDATE store_metadata SET generation = 1 WHERE id = 1", [])?;
         if !serialized.is_empty() {
             for (key, value) in serialized {
@@ -248,44 +306,35 @@ impl SqliteStorage {
             .map_err(|source| StorageError::SerializeFailed { source })
     }
 
+    pub fn history_entries(&self, key: Option<&str>) -> Result<Vec<HistoryEntry>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, key, value, source, recorded_at_ms FROM recovery_history WHERE (?1 IS NULL OR key = ?1) ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map([key], history_row)?;
+        rows.map(|row| decode_history(row?)).collect()
+    }
+
+    pub fn history_entry(&self, id: i64) -> Result<Option<HistoryEntry>, StorageError> {
+        self.connection
+            .query_row(
+                "SELECT id, key, value, source, recorded_at_ms FROM recovery_history WHERE id = ?1",
+                [id],
+                history_row,
+            )
+            .optional()?
+            .map(decode_history)
+            .transpose()
+    }
+
+    pub fn export_history_json(&self, key: Option<&str>) -> Result<String, StorageError> {
+        serde_json::to_string_pretty(
+            &serde_json::json!({"version": 1, "entries": self.history_entries(key)?}),
+        )
+        .map_err(|source| StorageError::SerializeFailed { source })
+    }
+
     pub fn pending_changes(&self) -> Result<Vec<PendingChange>, StorageError> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT key, revision, value FROM pending_changes ORDER BY key")?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?;
-        let mut changes = Vec::new();
-        for row in rows {
-            let (key, revision, value) = row?;
-            if revision <= 0 {
-                return Err(StorageError::InvalidData("invalid pending revision".into()));
-            }
-            if !(key
-                .strip_prefix("task/")
-                .is_some_and(|suffix| !suffix.is_empty())
-                || key.starts_with("project/")
-                || key.starts_with("area/"))
-            {
-                return Err(StorageError::InvalidData(format!(
-                    "invalid pending key {key}"
-                )));
-            }
-            let value = value.map(|value| parse_json(&value)).transpose()?;
-            if let Some(value) = &value {
-                validate_entry(&key, value, &mut HashSet::new())?;
-            }
-            changes.push(PendingChange {
-                key,
-                revision,
-                value,
-            });
-        }
-        Ok(changes)
+        read_pending_changes(&self.connection)
     }
 
     pub fn acknowledge_changes(&mut self, changes: &[(String, i64)]) -> Result<(), StorageError> {
@@ -301,6 +350,69 @@ impl SqliteStorage {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn history_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, String, String, String, i64)> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+    ))
+}
+
+fn decode_history(
+    (id, key, value, source, recorded_at_ms): (i64, String, String, String, i64),
+) -> Result<HistoryEntry, StorageError> {
+    let value = parse_json(&value)?;
+    validate_entry(&key, &value, &mut HashSet::new())?;
+    Ok(HistoryEntry {
+        id,
+        key,
+        value,
+        source,
+        recorded_at_ms,
+    })
+}
+
+fn read_pending_changes(connection: &Connection) -> Result<Vec<PendingChange>, StorageError> {
+    let mut statement =
+        connection.prepare("SELECT key, revision, value FROM pending_changes ORDER BY key")?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    let mut changes = Vec::new();
+    for row in rows {
+        let (key, revision, value) = row?;
+        if revision <= 0 {
+            return Err(StorageError::InvalidData("invalid pending revision".into()));
+        }
+        if !(key
+            .strip_prefix("task/")
+            .is_some_and(|suffix| !suffix.is_empty())
+            || key.starts_with("project/")
+            || key.starts_with("area/"))
+        {
+            return Err(StorageError::InvalidData(format!(
+                "invalid pending key {key}"
+            )));
+        }
+        let value = value.map(|value| parse_json(&value)).transpose()?;
+        if let Some(value) = &value {
+            validate_entry(&key, value, &mut HashSet::new())?;
+        }
+        changes.push(PendingChange {
+            key,
+            revision,
+            value,
+        });
+    }
+    Ok(changes)
 }
 
 impl SqliteTransaction<'_> {
@@ -335,10 +447,11 @@ impl Storage for SqliteCommand<'_> {
             CommandStorage::Edit {
                 connection,
                 generation: expected,
+                clock: expected_clock,
                 ..
             } => {
                 let tx = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
-                if generation(&tx)? != *expected {
+                if generation(&tx)? != *expected || read_clock(&tx)? != *expected_clock {
                     return Err(StorageError::InvalidData(
                         "store changed while editing; reopen the editor".into(),
                     ));
@@ -348,6 +461,19 @@ impl Storage for SqliteCommand<'_> {
                 };
                 tx.save(store)?;
                 tx.commit()
+            }
+        }
+    }
+
+    fn next_modified_at(&self) -> Result<HybridTimestamp, StorageError> {
+        match &self.inner {
+            CommandStorage::Read(_) => Err(StorageError::InvalidData("read-only command".into())),
+            CommandStorage::Write(tx) => tx.next_modified_at(),
+            CommandStorage::Edit { reserved_clock, .. } => {
+                let mut reserved = reserved_clock.borrow_mut();
+                let next = next_clock(&reserved)?;
+                *reserved = next.clone();
+                Ok(next)
             }
         }
     }
@@ -362,6 +488,10 @@ fn sync_error(error: StorageError) -> SyncError {
 impl Replica for SqliteStorage {
     fn prepare_sync(&mut self, target: &str) -> Result<Option<String>, SyncError> {
         self.prepare_sync_inner(target).map_err(sync_error)
+    }
+
+    fn reset_sync(&mut self, target: &str, expected_cookie: Option<&str>) -> Result<(), SyncError> {
+        self.reset_sync_inner(target, expected_cookie).map_err(sync_error)
     }
 
     fn apply_pull(
@@ -394,6 +524,30 @@ impl Replica for SqliteStorage {
 }
 
 impl SqliteStorage {
+    fn reset_sync_inner(&mut self, target: &str, expected_cookie: Option<&str>) -> Result<(), StorageError> {
+        let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let binding: Option<(String, Option<String>)> = tx.query_row(
+            "SELECT target, cookie FROM sync_state WHERE id = 1", [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if binding.as_ref().map(|(bound, cursor)| (bound.as_str(), cursor.as_deref())) != Some((target, expected_cookie)) {
+            return Err(StorageError::InvalidData("sync target or cursor changed".into()));
+        }
+        let stored = read_store(&tx)?;
+        let next = generation(&tx)?.checked_add(1).ok_or_else(|| StorageError::InvalidData("generation overflow".into()))?;
+        let values = serialize_entries(&stored.entries)?;
+        tx.execute("UPDATE store_metadata SET generation = ?1 WHERE id = 1", [next])?;
+        for (key, value) in values {
+            tx.execute(
+                "INSERT INTO pending_changes (key, revision, value) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, value = excluded.value WHERE pending_changes.value IS NOT NULL",
+                params![key, next, value],
+            )?;
+        }
+        tx.execute("UPDATE sync_state SET cookie = NULL WHERE id = 1", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn prepare_sync_inner(&mut self, target: &str) -> Result<Option<String>, StorageError> {
         let tx = self
             .connection
@@ -520,6 +674,8 @@ impl SqliteStorage {
             entries: merged.entries,
         };
         validate_store(&result)?;
+        archive_sync_history(&tx, &old.entries, &remote, &result.entries)?;
+        observe_clock(&tx, remote.values().chain(result.entries.values()))?;
         let mut queues = Vec::new();
         let mut clears = Vec::new();
         let mut changed = Vec::new();
@@ -600,6 +756,46 @@ fn canonical_json(value: &Value) -> Value {
         Value::Array(values) => Value::Array(values.iter().map(canonical_json).collect()),
         _ => value.clone(),
     }
+}
+
+fn archive_sync_history(
+    connection: &Connection,
+    local: &HashMap<String, Value>,
+    remote: &HashMap<String, Value>,
+    merged: &HashMap<String, Value>,
+) -> Result<(), StorageError> {
+    let recorded_at_ms = jiff::Timestamp::now().as_millisecond();
+    let keys = local
+        .keys()
+        .chain(remote.keys())
+        .chain(merged.keys())
+        .collect::<std::collections::BTreeSet<_>>();
+    for key in keys {
+        let versions: Vec<_> = [
+            ("local", local.get(key)),
+            ("remote", remote.get(key)),
+            ("merged", merged.get(key)),
+        ]
+        .into_iter()
+        .filter_map(|(source, value)| value.map(|value| (source, value)))
+        .collect();
+        if !versions
+            .iter()
+            .skip(1)
+            .any(|(_, value)| *value != versions[0].1)
+        {
+            continue;
+        }
+        for (source, value) in versions {
+            let value = serde_json::to_string(&canonical_json(value))
+                .map_err(|source| StorageError::SerializeFailed { source })?;
+            connection.execute(
+                "INSERT INTO recovery_history (key, value, source, recorded_at_ms) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key, value) DO NOTHING",
+                params![key, value, source, recorded_at_ms],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn normalize_schedules(entries: &mut HashMap<String, Value>) -> Result<(), StorageError> {
@@ -709,6 +905,9 @@ impl Storage for SqliteTransaction<'_> {
             }
         }
         if changes.is_empty() {
+            let savepoint = tx.savepoint()?;
+            observe_clock(&savepoint, old.entries.values().chain(new.entries.values()))?;
+            savepoint.commit()?;
             return Ok(());
         }
         let changes: Vec<_> = changes
@@ -727,6 +926,7 @@ impl Storage for SqliteTransaction<'_> {
             .checked_add(1)
             .ok_or_else(|| StorageError::InvalidData("generation overflow".into()))?;
         let savepoint = tx.savepoint()?;
+        observe_clock(&savepoint, old.entries.values().chain(new.entries.values()))?;
         savepoint.execute(
             "UPDATE store_metadata SET generation = ?1 WHERE id = 1",
             [next],
@@ -749,6 +949,10 @@ impl Storage for SqliteTransaction<'_> {
         }
         savepoint.commit()?;
         Ok(())
+    }
+
+    fn next_modified_at(&self) -> Result<HybridTimestamp, StorageError> {
+        allocate_clock(&self.transaction.borrow())
     }
 }
 
@@ -882,11 +1086,75 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.prepare("SELECT key, value FROM entries LIMIT 0")?;
     connection.prepare("SELECT key, revision, value FROM pending_changes LIMIT 0")?;
     connection.prepare("SELECT target, cookie FROM sync_state LIMIT 0")?;
+    connection
+        .prepare("SELECT id, key, value, source, recorded_at_ms FROM recovery_history LIMIT 0")?;
+    read_clock(connection)?;
     Ok(())
+}
+
+fn parse_clock(value: Value) -> Result<HybridTimestamp, StorageError> {
+    check_fields(&value, &["wall_ms", "lamport", "device_id"], "hybrid clock")?;
+    serde_json::from_value(value)
+        .map_err(|error| StorageError::InvalidData(format!("invalid hybrid clock: {error}")))
+}
+
+fn read_clock(connection: &Connection) -> Result<HybridTimestamp, StorageError> {
+    let raw: String =
+        connection.query_row("SELECT clock FROM store_metadata WHERE id = 1", [], |row| {
+            row.get(0)
+        })?;
+    parse_clock(parse_json(&raw)?)
+}
+
+fn write_clock(connection: &Connection, clock: &HybridTimestamp) -> Result<(), StorageError> {
+    let value =
+        serde_json::to_string(clock).map_err(|source| StorageError::SerializeFailed { source })?;
+    connection.execute("UPDATE store_metadata SET clock = ?1 WHERE id = 1", [value])?;
+    Ok(())
+}
+
+fn observe_clock<'a>(
+    connection: &Connection,
+    values: impl IntoIterator<Item = &'a Value>,
+) -> Result<(), StorageError> {
+    let current = read_clock(connection)?;
+    let mut maximum = current.clone();
+    for value in values {
+        let timestamp = value
+            .get("modified_at")
+            .ok_or_else(|| StorageError::InvalidData("missing modified_at".into()))?;
+        let timestamp = parse_clock(timestamp.clone())?;
+        if timestamp > maximum {
+            maximum = timestamp;
+        }
+    }
+    if maximum > current {
+        write_clock(connection, &maximum)?;
+    }
+    Ok(())
+}
+
+fn next_clock(previous: &HybridTimestamp) -> Result<HybridTimestamp, StorageError> {
+    let device_id = saku_storage::device::get_or_create_device_id()
+        .map_err(|error| StorageError::InvalidData(format!("failed to get device ID: {error}")))?;
+    crate::sync_clock::after(previous, jiff::Timestamp::now().as_millisecond(), device_id)
+}
+
+fn allocate_clock(connection: &Connection) -> Result<HybridTimestamp, StorageError> {
+    let next = next_clock(&read_clock(connection)?)?;
+    write_clock(connection, &next)?;
+    Ok(next)
 }
 
 fn is_pristine(connection: &Connection) -> Result<bool, StorageError> {
     validate_metadata(connection)?;
+    if database_identity(connection)?.1 >= 4 {
+        return Ok(connection.query_row(
+            "SELECT generation = 0 AND NOT EXISTS(SELECT 1 FROM entries) AND NOT EXISTS(SELECT 1 FROM pending_changes) AND NOT EXISTS(SELECT 1 FROM sync_state) AND NOT EXISTS(SELECT 1 FROM recovery_history) FROM store_metadata WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )?);
+    }
     Ok(connection.query_row(
         "SELECT generation = 0 AND NOT EXISTS(SELECT 1 FROM entries) AND NOT EXISTS(SELECT 1 FROM pending_changes) AND NOT EXISTS(SELECT 1 FROM sync_state) FROM store_metadata WHERE id = 1",
         [],
@@ -1356,7 +1624,7 @@ mod tests {
         let before = storage.pending_changes().unwrap();
         storage
             .connection
-            .execute_batch("DROP TABLE sync_state; PRAGMA user_version = 1;")
+            .execute_batch("DROP TABLE recovery_history; DROP TABLE sync_state; ALTER TABLE store_metadata DROP COLUMN clock; PRAGMA user_version = 1;")
             .unwrap();
         drop(storage);
         let barrier = Arc::new(Barrier::new(2));
@@ -1374,7 +1642,257 @@ mod tests {
             let opened = thread.join().unwrap();
             assert_eq!(opened.pending_changes().unwrap(), before);
             assert_eq!(opened.load().unwrap().tasks.len(), 1);
-            assert_eq!(database_identity(&opened.connection).unwrap().1, 2);
+            assert_eq!(database_identity(&opened.connection).unwrap().1, 4);
+        }
+    }
+
+    #[test]
+    fn upgrades_seed_maximum_entry_and_orphan_pending_clocks_atomically() {
+        for version in [1, 2] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("tasks.sqlite");
+            let mut storage = SqliteStorage::open(&path).unwrap();
+            let mut source = fixture();
+            let entry_clock = HybridTimestamp {
+                wall_ms: if version == 1 { 100 } else { 300 },
+                lamport: 7,
+                device_id: "entry".into(),
+            };
+            let pending_clock = HybridTimestamp {
+                wall_ms: if version == 1 { 300 } else { 100 },
+                lamport: u64::MAX,
+                device_id: "pending".into(),
+            };
+            source["entries"]["task/parent"]["modified_at"] =
+                serde_json::to_value(&entry_clock).unwrap();
+            storage.import_json(&source.to_string()).unwrap();
+            storage.prepare_sync("target").unwrap();
+            storage.apply_pull("target", None, "42", &[]).unwrap();
+            let mut orphan = serde_json::to_value(task("orphan")).unwrap();
+            orphan["task_number"] = json!(99);
+            orphan["modified_at"] = serde_json::to_value(&pending_clock).unwrap();
+            let original_generation = generation(&storage);
+            storage
+                .connection
+                .execute(
+                    "INSERT INTO pending_changes (key, revision, value) VALUES (?1, ?2, ?3)",
+                    params!["task/orphan", original_generation, orphan.to_string()],
+                )
+                .unwrap();
+            let pending = storage.pending_changes().unwrap();
+            let original = serde_json::from_str::<Value>(&storage.export_json().unwrap()).unwrap();
+            if version == 1 {
+                storage
+                    .connection
+                    .execute_batch("DROP TABLE sync_state;")
+                    .unwrap();
+            }
+            storage
+                .connection
+                .execute_batch(&format!(
+                    "DROP TABLE recovery_history; ALTER TABLE store_metadata DROP COLUMN clock; PRAGMA user_version = {version};"
+                ))
+                .unwrap();
+            drop(storage);
+            let barrier = Arc::new(Barrier::new(2));
+            let handles: Vec<_> = (0..2)
+                .map(|_| {
+                    let path = path.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        SqliteStorage::open(path).unwrap()
+                    })
+                })
+                .collect();
+            for handle in handles {
+                let mut opened = handle.join().unwrap();
+                assert_eq!(database_identity(&opened.connection).unwrap().1, 4);
+                assert_eq!(generation(&opened), original_generation);
+                assert_eq!(opened.pending_changes().unwrap(), pending);
+                assert_eq!(
+                    serde_json::from_str::<Value>(&opened.export_json().unwrap()).unwrap(),
+                    original
+                );
+                assert_eq!(
+                    read_clock(&opened.connection).unwrap(),
+                    std::cmp::max(entry_clock.clone(), pending_clock.clone())
+                );
+                if version == 2 {
+                    assert_eq!(
+                        opened.prepare_sync("target").unwrap().as_deref(),
+                        Some("42")
+                    );
+                } else {
+                    let count: i64 = opened
+                        .connection
+                        .query_row("SELECT COUNT(*) FROM sync_state", [], |row| row.get(0))
+                        .unwrap();
+                    assert_eq!(count, 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pristine_v2_is_checked_read_only_without_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.sqlite");
+        let storage = SqliteStorage::open(&path).unwrap();
+        storage
+            .connection
+            .execute_batch("DROP TABLE recovery_history; ALTER TABLE store_metadata DROP COLUMN clock; PRAGMA user_version = 2;")
+            .unwrap();
+        drop(storage);
+        assert!(SqliteStorage::existing_is_pristine(&path).unwrap());
+        let connection = Connection::open(path).unwrap();
+        assert_eq!(database_identity(&connection).unwrap().1, 2);
+        assert!(
+            connection
+                .prepare("SELECT clock FROM store_metadata")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn corrupt_prior_entries_and_pending_roll_back_schema_upgrade() {
+        for corrupt_pending in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("tasks.sqlite");
+            let storage = SqliteStorage::open(&path).unwrap();
+            let bad = r#"{"modified_at":{"wall_ms":1,"wall_ms":2}}"#;
+            if corrupt_pending {
+                storage.connection.execute("INSERT INTO pending_changes (key, revision, value) VALUES ('task/a', 1, ?1)", [bad]).unwrap();
+            } else {
+                storage
+                    .connection
+                    .execute(
+                        "INSERT INTO entries (key, value) VALUES ('task/a', ?1)",
+                        [bad],
+                    )
+                    .unwrap();
+            }
+            storage
+                .connection
+                .execute_batch(
+                    "DROP TABLE recovery_history; ALTER TABLE store_metadata DROP COLUMN clock; PRAGMA user_version = 2;",
+                )
+                .unwrap();
+            drop(storage);
+            assert!(SqliteStorage::open(&path).is_err());
+            let connection = Connection::open(path).unwrap();
+            assert_eq!(database_identity(&connection).unwrap().1, 2);
+            assert!(
+                connection
+                    .prepare("SELECT clock FROM store_metadata")
+                    .is_err()
+            );
+            let table = if corrupt_pending {
+                "pending_changes"
+            } else {
+                "entries"
+            };
+            let raw: String = connection
+                .query_row(
+                    &format!("SELECT value FROM {table} WHERE key = 'task/a'"),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(raw, bad);
+        }
+    }
+
+    #[test]
+    fn corrupt_v2_sync_binding_rolls_back_schema_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.sqlite");
+        let storage = SqliteStorage::open(&path).unwrap();
+        storage
+            .connection
+            .execute_batch(
+                "INSERT INTO sync_state (id, target, cookie) VALUES (1, X'FF', NULL);
+             DROP TABLE recovery_history;
+             ALTER TABLE store_metadata DROP COLUMN clock;
+             PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        drop(storage);
+        assert!(SqliteStorage::open(&path).is_err());
+        let connection = Connection::open(path).unwrap();
+        assert_eq!(database_identity(&connection).unwrap().1, 2);
+        assert!(
+            connection
+                .prepare("SELECT clock FROM store_metadata")
+                .is_err()
+        );
+        let target: Vec<u8> = connection
+            .query_row("SELECT target FROM sync_state WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(target, [0xff]);
+    }
+
+    #[test]
+    fn clock_seed_failure_rolls_back_schema_upgrade() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.sqlite");
+        let mut storage = SqliteStorage::open(&path).unwrap();
+        let mut source = fixture();
+        source["entries"]["task/parent"]["modified_at"] =
+            json!({"wall_ms":9000000000000_i64,"lamport":7,"device_id":"remote"});
+        storage.import_json(&source.to_string()).unwrap();
+        let entries = storage.export_json().unwrap();
+        let pending = storage.pending_changes().unwrap();
+        let prior_generation = generation(&storage);
+        storage.connection.execute_batch(
+            "DROP TABLE recovery_history;
+             ALTER TABLE store_metadata DROP COLUMN clock;
+             CREATE TRIGGER fail_clock_seed BEFORE UPDATE ON store_metadata BEGIN SELECT RAISE(ABORT, 'injected clock failure'); END;
+             PRAGMA user_version = 2;"
+        ).unwrap();
+        drop(storage);
+        assert!(SqliteStorage::open(&path).is_err());
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_identity(&connection).unwrap().1, 2);
+        assert!(
+            connection
+                .prepare("SELECT clock FROM store_metadata")
+                .is_err()
+        );
+        assert_eq!(super::generation(&connection).unwrap(), prior_generation);
+        assert_eq!(read_pending_changes(&connection).unwrap(), pending);
+        assert_eq!(
+            serde_json::to_value(read_store(&connection).unwrap()).unwrap(),
+            serde_json::from_str::<Value>(&entries).unwrap()
+        );
+    }
+
+    #[test]
+    fn invalid_clock_metadata_is_rejected_without_mutation() {
+        for raw in [
+            r#"{"wall_ms":1,"wall_ms":2,"lamport":0,"device_id":"x"}"#,
+            r#"{"wall_ms":1,"lamport":0,"device_id":"x","unknown":true}"#,
+            r#"{"wall_ms":1,"lamport":0}"#,
+            r#"{"wall_ms":1,"lamport":-1,"device_id":"x"}"#,
+            r#"{"wall_ms":"1","lamport":0,"device_id":"x"}"#,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("tasks.sqlite");
+            let storage = SqliteStorage::open(&path).unwrap();
+            storage
+                .connection
+                .execute("UPDATE store_metadata SET clock = ?1", [raw])
+                .unwrap();
+            drop(storage);
+            assert!(SqliteStorage::open(&path).is_err());
+            let connection = Connection::open(path).unwrap();
+            let actual: String = connection
+                .query_row("SELECT clock FROM store_metadata", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(actual, raw);
+            assert_eq!(database_identity(&connection).unwrap().1, 4);
         }
     }
 
@@ -1507,10 +2025,18 @@ mod tests {
         storage.connection.execute_batch(
             "CREATE TEMP TRIGGER fail_pending BEFORE INSERT ON pending_changes BEGIN SELECT RAISE(ABORT, 'injected pending failure'); END;"
         ).unwrap();
+        let before = read_clock(&storage.connection).unwrap();
         let result = storage.transaction::<(), StorageError>(|store, tx| {
-            store.add_task(task("one"));
+            let mut value = task("one");
+            value.modified_at = HybridTimestamp {
+                wall_ms: 9_000_000_000_000,
+                lamport: 4,
+                device_id: "remote".into(),
+            };
+            store.add_task(value);
             assert!(matches!(tx.save(store), Err(StorageError::Database(_))));
             assert!(tx.load()?.tasks.is_empty());
+            assert_eq!(read_clock(&tx.transaction.borrow())?, before);
             Err(StorageError::InvalidData(
                 "abort after checking savepoint".into(),
             ))
@@ -1519,6 +2045,7 @@ mod tests {
         assert!(storage.load().unwrap().tasks.is_empty());
         assert!(storage.pending_changes().unwrap().is_empty());
         assert_eq!(generation(&storage), 0);
+        assert_eq!(read_clock(&storage.connection).unwrap(), before);
     }
 
     #[test]
@@ -1528,8 +2055,11 @@ mod tests {
         storage.connection.execute_batch(
             "CREATE TEMP TRIGGER fail_pending BEFORE INSERT ON pending_changes BEGIN SELECT RAISE(ABORT, 'injected pending failure'); END;"
         ).unwrap();
+        let mut source = fixture();
+        source["entries"]["task/parent"]["modified_at"] =
+            json!({"wall_ms":9000000000000_i64,"lamport":7,"device_id":"remote"});
         assert!(matches!(
-            storage.import_json(&fixture().to_string()),
+            storage.import_json(&source.to_string()),
             Err(StorageError::Database(_))
         ));
         assert!(storage.load().unwrap().tasks.is_empty());
@@ -1537,6 +2067,43 @@ mod tests {
         assert!(storage.load().unwrap().areas.is_empty());
         assert!(storage.pending_changes().unwrap().is_empty());
         assert_eq!(generation(&storage), 0);
+        assert_eq!(
+            read_clock(&storage.connection).unwrap(),
+            HybridTimestamp::default()
+        );
+    }
+
+    #[test]
+    fn failed_pull_after_observation_rolls_back_clock_entries_and_cookie() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = SqliteStorage::open(dir.path().join("tasks.sqlite")).unwrap();
+        storage.prepare_sync("target").unwrap();
+        let before_clock = read_clock(&storage.connection).unwrap();
+        let before_generation = generation(&storage);
+        storage.connection.execute_batch(
+            "CREATE TEMP TRIGGER fail_cookie BEFORE UPDATE OF cookie ON sync_state BEGIN SELECT RAISE(ABORT, 'injected cookie failure'); END;"
+        ).unwrap();
+        let mut area = serde_json::to_value(Area {
+            name: "remote".into(),
+            ..Area::default()
+        })
+        .unwrap();
+        area["modified_at"] = json!({"wall_ms":9000000000000_i64,"lamport":7,"device_id":"remote"});
+        assert!(
+            storage
+                .apply_pull(
+                    "target",
+                    None,
+                    "1",
+                    &[("area/remote".into(), area.to_string())]
+                )
+                .is_err()
+        );
+        assert_eq!(read_clock(&storage.connection).unwrap(), before_clock);
+        assert_eq!(generation(&storage), before_generation);
+        assert!(storage.load().unwrap().areas.is_empty());
+        assert!(storage.pending_changes().unwrap().is_empty());
+        assert_eq!(storage.prepare_sync("target").unwrap(), None);
     }
 
     #[test]
@@ -1865,18 +2432,18 @@ mod tests {
         );
         let future = dir.path().join("future.sqlite");
         let conn = Connection::open(&future).unwrap();
-        conn.execute_batch("PRAGMA application_id = 0x54444f31; PRAGMA user_version = 3;")
+        conn.execute_batch("PRAGMA application_id = 0x54444f31; PRAGMA user_version = 5;")
             .unwrap();
         drop(conn);
         assert!(matches!(
             SqliteStorage::open(&future),
-            Err(StorageError::UnsupportedDatabaseVersion(3))
+            Err(StorageError::UnsupportedDatabaseVersion(5))
         ));
         let conn = Connection::open(&future).unwrap();
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            3
+            5
         );
         let old_data = dir.path().join("old-data.sqlite");
         let storage = SqliteStorage::open(&old_data).unwrap();
@@ -2248,5 +2815,90 @@ mod tests {
             .unwrap();
         assert_eq!(generation(&reopened), version);
         assert_eq!(reopened.pending_changes().unwrap(), pending);
+    }
+
+    #[test]
+    fn reset_requeues_clean_pending_and_tombstones_without_changing_values_or_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let mut initial = fixture();
+        initial["entries"]["task/child"]["deleted_at"] = json!("2026-01-01T00:00:00Z");
+        let mut storage = SqliteStorage::open(&path).unwrap();
+        storage.import_json(&initial.to_string()).unwrap();
+        storage.prepare_sync_inner("target").unwrap();
+        let old = storage.pending_changes().unwrap();
+        storage.acknowledge_changes(&old.iter().map(|entry| (entry.key.clone(), entry.revision)).collect::<Vec<_>>()).unwrap();
+        let mut remote = initial["entries"]["task/parent"].clone();
+        remote["title"] = json!("remote");
+        remote["modified_at"]["wall_ms"] = json!(0);
+        storage.apply_pull_inner("target", None, "old", &[("task/parent".into(), remote.to_string())]).unwrap();
+        storage.transaction::<_, StorageError>(|store, _| {
+            let parent = store.tasks.get_mut("task/parent").unwrap();
+            parent.title = "pending edit".into();
+            parent.modified_at.wall_ms = 200;
+            Ok(())
+        }).unwrap();
+        let previously_pending = storage.pending_changes().unwrap();
+        assert!(previously_pending.iter().any(|entry| entry.key == "task/parent" && entry.value.is_some()));
+        assert!(!previously_pending.iter().any(|entry| entry.key == "task/child"));
+        storage.connection.execute("INSERT INTO pending_changes (key, revision, value) VALUES ('task/gone', 1, NULL)", []).unwrap();
+        let before: Value = serde_json::from_str(&storage.export_json().unwrap()).unwrap();
+        let history = storage.history_entries(None).unwrap();
+        assert!(!history.is_empty());
+        let clock = read_clock(&storage.connection).unwrap();
+        let before_generation = generation(&storage);
+        storage.reset_sync_inner("target", Some("old")).unwrap();
+        assert_eq!(generation(&storage), before_generation + 1);
+        assert_eq!(serde_json::from_str::<Value>(&storage.export_json().unwrap()).unwrap(), before);
+        assert_eq!(read_clock(&storage.connection).unwrap(), clock);
+        assert_eq!(storage.history_entries(None).unwrap(), history);
+        let pending = storage.pending_changes().unwrap();
+        let exported = before.clone();
+        assert_eq!(pending.len(), exported["entries"].as_object().unwrap().len() + 1);
+        for entry in pending.iter().filter(|entry| entry.key != "task/gone") {
+            assert_eq!(entry.revision, before_generation + 1);
+            assert_eq!(entry.value.as_ref().unwrap(), &exported["entries"][&entry.key]);
+        }
+        assert!(pending.iter().any(|entry| entry.key == "task/child" && !entry.value.as_ref().unwrap()["deleted_at"].is_null()));
+        assert!(pending.iter().any(|entry| entry.key == "task/gone" && entry.value.is_none()));
+        storage.acknowledge_changes(&old.iter().chain(&previously_pending).map(|entry| (entry.key.clone(), entry.revision)).collect::<Vec<_>>()).unwrap();
+        assert_eq!(storage.pending_changes().unwrap(), pending);
+        drop(storage);
+        let mut reopened = SqliteStorage::open(path).unwrap();
+        assert_eq!(reopened.prepare_sync_inner("target").unwrap(), None);
+        assert_eq!(reopened.pending_changes().unwrap(), pending);
+        assert_eq!(serde_json::from_str::<Value>(&reopened.export_json().unwrap()).unwrap(), before);
+        assert_eq!(reopened.history_entries(None).unwrap(), history);
+    }
+
+    #[test]
+    fn reset_failure_and_stale_binding_roll_back_everything() {
+        for mode in ["target", "cursor", "insert", "cursor-update", "overflow"] {
+            let mut storage = SqliteStorage::open(":memory:").unwrap();
+            storage.import_json(&fixture().to_string()).unwrap();
+            storage.prepare_sync_inner("target").unwrap();
+            storage.apply_pull_inner("target", None, "old", &[]).unwrap();
+            if mode == "insert" {
+                storage.connection.execute_batch("CREATE TRIGGER fail_reset BEFORE INSERT ON pending_changes BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+            } else if mode == "cursor-update" {
+                storage.connection.execute_batch("CREATE TRIGGER fail_reset BEFORE UPDATE ON sync_state BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+            } else if mode == "overflow" {
+                storage.connection.execute("UPDATE store_metadata SET generation = ?1", [i64::MAX]).unwrap();
+            }
+            let before: Value = serde_json::from_str(&storage.export_json().unwrap()).unwrap();
+            let pending = storage.pending_changes().unwrap();
+            let generation = generation(&storage);
+            let clock = read_clock(&storage.connection).unwrap();
+            let history = storage.history_entries(None).unwrap();
+            let target = if mode == "target" { "other" } else { "target" };
+            let cursor = if mode == "cursor" { Some("stale") } else { Some("old") };
+            assert!(storage.reset_sync_inner(target, cursor).is_err(), "{mode}");
+            assert_eq!(serde_json::from_str::<Value>(&storage.export_json().unwrap()).unwrap(), before, "{mode}");
+            assert_eq!(storage.pending_changes().unwrap(), pending, "{mode}");
+            assert_eq!(super::generation(&storage.connection).unwrap(), generation, "{mode}");
+            assert_eq!(read_clock(&storage.connection).unwrap(), clock, "{mode}");
+            assert_eq!(storage.history_entries(None).unwrap(), history, "{mode}");
+            assert_eq!(storage.prepare_sync_inner("target").unwrap().as_deref(), Some("old"), "{mode}");
+        }
     }
 }

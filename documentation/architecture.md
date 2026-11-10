@@ -27,29 +27,37 @@ The existing CLI is shared by humans, scripts, and agents. Bare invocation curre
 
 ## Current Task Storage
 
-The default store is `~/.local/share/tdo/store.json`; `TDO_DATA_DIR` overrides its directory. The current on-disk format is version 9:
+The default store is `~/.local/share/tdo/store.sqlite3` (SQLite schema v4); `TDO_DATA_DIR` overrides its directory. Portable JSON uses version 9:
 
 ```json
 {"version": 9, "entries": {}}
 ```
 
-Entities use natural-key storage keys such as `project/website`, `area/work`, and `task/k7m2a3x9`. Tasks also have user-facing numeric identifiers. The in-memory store uses maps and a task-number index.
+Entities use natural-key storage keys such as `project/website`, `area/work`, and `task/{suffix}`. New task suffixes use UUID v4. Tasks also have user-facing numeric identifiers. The in-memory store uses maps and a task-number index.
 
-Individual saves take a file lock, retain up to five backup files in a sibling `backups/` directory, and replace the store atomically. This does not make the complete read-modify-write operation transactional.
+Mutating commands use an immediate SQLite transaction for the whole read-modify-write session. Entries, the revisioned outbox, and the persisted hybrid clock are committed together. Task editor sessions reserve timestamps without holding a writer lock and reject stale saves.
 
-Schema migrations run when older stores are loaded. Deletion uses tombstones, and renames use tombstone/new-entry pairs with reference repair.
+Existing v9 JSON ledgers require explicit `tdo migrate` or `tdo import`; the source is retained. `tdo export` produces portable v9 JSON without overwriting an existing file. Deletion uses soft tombstones, and renames use tombstone/new-entry pairs with timestamped reference updates.
 
 ## Current Sync
 
-The default `sync` feature enables server sync and OS keychain integration. The CLI attempts sync before loading task data and after mutating commands. `TDO_NO_SYNC=1` disables these attempts; `TDO_SYNC_DIR` selects the legacy local-filesystem fallback.
+The default `sync` feature enables server sync and OS keychain integration. Network sync is explicit through `tdo sync run`; ordinary local commands do not sync before or after execution and do not use a `TDO_SYNC_DIR` fallback. `TDO_NO_SYNC=1` disables explicit sync.
 
-The server path uses encrypted per-entry HTTP sync and a dirty-tracker sidecar. The server stores those entries in SQLite. The legacy whole-file engine, Merkle comparison, and S3 endpoints remain available in the infrastructure; their replacement or retirement is not part of the product cleanup.
+The server path uses encrypted per-entry HTTP sync, with its cursor and revisioned outbox stored in the task database. Guarded KV v2 writes use the last completed pull cookie as `base_cookie`: the server atomically checks every submitted key against that watermark before writing the batch. A 409 causes a pull, merge, and regenerated push, with at most three retries. Push responses never advance the pull cursor. The client uses last-writer-wins merging with deterministic equal-clock tie-breaks, rename reconciliation, and reference repair; it does not preserve all conflicts. Undecryptable entries fail closed. SQLite schema v4 and portable v9 JSON are unchanged by the protocol update. The JSON storage and whole-file sync engine remain library-only for historical tests.
 
-[Sync setup](sync-setup.md) and [sync architecture](sync-architecture.md) include legacy whole-file material. The [distributed KV RFC](rfc-distributed-kv-sync.md) records the per-entry design.
+On divergent pulls or merge repairs, local recovery history preserves full JSON values for the local, remote, and resulting versions when they differ. It is plaintext like the task database, never synced, and neither automatically pruned nor restored. The recorded source is the first provenance, not a winner/loser classification. History cannot recover historical unseen server overwrites or classify concurrent edits without a common base.
 
-The cleanup does not change the storage format, sync behavior, keychain, deployed services, or user data.
+Guarded KV v2 uses startup-bound cookies (`<server-instance>:<sequence>`). The server generates a new random instance ID outside its database at every startup, so normal restarts and stop/restore/start recovery invalidate old cookies. HTTP 410 makes the client atomically requeue all local entries and clear its cursor, then fully pull and merge before guarded pushes. Missing remote entries do not delete local entries; tombstones and divergent history are preserved. Stale writes return 409; stale-write and cursor-recovery retries share a limit of three retries. V1 writes return 428, and new clients refuse old servers without fallback. SQLite schema v4 and v9 JSON are unchanged.
+
+Recovery supports one running server instance. Stop the server before replacing its SQLite database, then start it normally; no manual epoch rotation is needed. Every restart causes one full reconciliation, even when the database has not changed. Editing or restoring a live SQLite database in place is unsupported. Alternating requests across independent server instances can exhaust the bounded recovery retries. Recovery restores only values still present on a client or server; it cannot reconstruct a version absent from every copy. Deploy the matching server and clients together before live rollout.
+
+Use `tdo history list --json` or `tdo history list --key task/...`, `tdo history show 1`, and `tdo history export recovery.json` to inspect or export it. The version 1 history archive is not importable with `tdo import`; ordinary v9 `tdo export` excludes history. Export both to preserve portable contents, not as a full operational backup.
+
+[Sync setup](sync-setup.md) covers the current KV deployment and recovery procedure. [Sync architecture](sync-architecture.md) is legacy research. The [distributed KV RFC](rfc-distributed-kv-sync.md) records the per-entry design.
 
 ## Development
+
+Linux builds bundle the D-Bus client library through keyring's vendored feature, so libdbus development headers and custom pkg-config metadata are not required. A C compiler is still needed for bundled SQLite and D-Bus. Runtime sync credentials still use the session's Secret Service keychain (for example, GNOME Keyring or KWallet); bundling the client library does not provide that service. Local task commands work without a keychain service.
 
 Run commands from the repository root:
 

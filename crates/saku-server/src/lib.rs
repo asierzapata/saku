@@ -19,6 +19,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1/auth", auth::router())
         .nest("/api/v1/sync", sync::router())
         .nest("/api/v1/kv", kv::router())
+        .nest("/api/v2/kv", kv::v2_router())
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .with_state(state)

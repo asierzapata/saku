@@ -72,6 +72,9 @@ pub enum StorageError {
 pub trait Storage {
     fn load(&self) -> Result<Store, StorageError>;
     fn save(&self, store: &Store) -> Result<(), StorageError>;
+    fn next_modified_at(&self) -> Result<saku_storage::timestamp::HybridTimestamp, StorageError> {
+        Ok(crate::sync_clock::next_modified_at())
+    }
 }
 
 /// Returns the default path to the tdo store file.

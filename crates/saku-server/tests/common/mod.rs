@@ -59,9 +59,9 @@ pub fn create_test_user(state: &AppState, email: &str) -> String {
     create_user(&db, email, "$2b$12$dummy_hash_not_used_in_tests").unwrap()
 }
 
-/// Send a GET /api/v1/kv/:tool request.
+/// Send a GET /api/v2/kv/:tool request.
 pub async fn get_kv(app: &Router, token: &str, tool: &str, cookie: Option<&str>, limit: Option<i64>) -> axum::response::Response {
-    let mut uri = format!("/api/v1/kv/{tool}");
+    let mut uri = format!("/api/v2/kv/{tool}");
     let mut params = vec![];
     if let Some(c) = cookie {
         params.push(format!("cookie={c}"));
@@ -84,11 +84,11 @@ pub async fn get_kv(app: &Router, token: &str, tool: &str, cookie: Option<&str>,
     app.clone().oneshot(req).await.unwrap()
 }
 
-/// Send a PUT /api/v1/kv/:tool batch request.
+/// Send a PUT /api/v2/kv/:tool batch request.
 pub async fn put_kv_batch(app: &Router, token: &str, tool: &str, body: serde_json::Value) -> axum::response::Response {
     let req = Request::builder()
         .method("PUT")
-        .uri(format!("/api/v1/kv/{tool}"))
+        .uri(format!("/api/v2/kv/{tool}"))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
@@ -109,9 +109,9 @@ pub async fn put_kv_single(app: &Router, token: &str, tool: &str, key: &str, bod
     app.clone().oneshot(req).await.unwrap()
 }
 
-/// Send a GET /api/v1/kv/:tool/snapshot request.
+/// Send a GET /api/v2/kv/:tool/snapshot request.
 pub async fn get_kv_snapshot(app: &Router, token: &str, tool: &str, limit: Option<i64>) -> axum::response::Response {
-    let mut uri = format!("/api/v1/kv/{tool}/snapshot");
+    let mut uri = format!("/api/v2/kv/{tool}/snapshot");
     if let Some(l) = limit {
         uri.push_str(&format!("?limit={l}"));
     }

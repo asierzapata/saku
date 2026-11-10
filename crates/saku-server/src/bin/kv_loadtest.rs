@@ -59,6 +59,7 @@ struct LoginResponse {
 
 #[derive(Serialize)]
 struct BatchPutRequest {
+    base_cookie: String,
     entries: Vec<BatchPutEntry>,
 }
 
@@ -228,8 +229,10 @@ async fn run_worker(
     };
 
     let tool = "tdo";
-    let mut cookie = "0".to_string();
+    let mut cookie: Option<String> = None;
+    let mut pull_complete = false;
     let mut write_counter = 0u64;
+    let key_prefix = format!("loadtest-{}", uuid::Uuid::new_v4().simple());
 
     // Generate a reusable payload
     let payload_bytes: Vec<u8> = (0..config.payload_size)
@@ -248,19 +251,19 @@ async fn run_worker(
             }
         };
 
-        if do_write {
+        if do_write && pull_complete {
             let entries: Vec<BatchPutEntry> = (0..config.batch_size)
                 .map(|j| BatchPutEntry {
-                    key: format!("w{id}-{write_counter}-{j}"),
+                    key: format!("{key_prefix}-w{id}-{write_counter}-{j}"),
                     blob: payload_b64.clone(),
                 })
                 .collect();
 
             let req_start = Instant::now();
             let resp = http
-                .put(format!("{}/api/v1/kv/{tool}", config.url))
+                .put(format!("{}/api/v2/kv/{tool}", config.url))
                 .header("authorization", format!("Bearer {token}"))
-                .json(&BatchPutRequest { entries })
+                .json(&BatchPutRequest { base_cookie: cookie.clone().unwrap(), entries })
                 .send()
                 .await;
 
@@ -268,22 +271,31 @@ async fn run_worker(
                 Ok(r) if r.status().is_success() => {
                     result.write_latencies.push(req_start.elapsed());
                     result.bytes_written += batch_payload_size as u64;
+                    write_counter += 1;
+                }
+                Ok(r) if r.status().as_u16() == 410 => {
+                    result.write_errors += 1;
+                    cookie = None;
+                    pull_complete = false;
+                }
+                Ok(r) if r.status().as_u16() == 409 => {
+                    result.write_errors += 1;
+                    pull_complete = false;
                 }
                 _ => {
                     result.write_errors += 1;
+                    write_counter += 1;
                 }
             }
-            write_counter += 1;
         } else {
             let req_start = Instant::now();
-            let resp = http
-                .get(format!(
-                    "{}/api/v1/kv/{tool}?cookie={}&limit=100",
-                    config.url, cookie
-                ))
-                .header("authorization", format!("Bearer {token}"))
-                .send()
-                .await;
+            let mut request = http
+                .get(format!("{}/api/v2/kv/{tool}?limit=100", config.url))
+                .header("authorization", format!("Bearer {token}"));
+            if let Some(cookie) = &cookie {
+                request = request.query(&[("cookie", cookie)]);
+            }
+            let resp = request.send().await;
 
             match resp {
                 Ok(r) if r.status().is_success() => {
@@ -295,16 +307,23 @@ async fn run_worker(
                             .filter_map(|e| e["blob"].as_str())
                             .map(|b| b.len() as u64)
                             .sum::<u64>();
-                        if !body.has_more {
-                            cookie = body.cookie;
-                        }
+                        cookie = Some(body.cookie);
+                        pull_complete = !body.has_more;
+                    } else {
+                        pull_complete = false;
                     }
+                }
+                Ok(r) if r.status().as_u16() == 410 => {
+                    result.read_errors += 1;
+                    cookie = None;
+                    pull_complete = false;
                 }
                 _ => {
                     result.read_errors += 1;
+                    pull_complete = false;
                 }
             }
-            write_counter += 1;
+            if !do_write { write_counter += 1; }
         }
     }
 

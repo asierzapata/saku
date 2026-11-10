@@ -15,6 +15,7 @@ pub struct AppStateInner {
     pub db: Mutex<Connection>,
     pub storage: Operator,
     pub config: ServerConfig,
+    kv_generation: String,
 }
 
 impl AppState {
@@ -24,7 +25,13 @@ impl AppState {
                 db: Mutex::new(db),
                 storage,
                 config,
+                // A restored database must never restore the identity used by old cursors.
+                kv_generation: uuid::Uuid::new_v4().simple().to_string(),
             }),
         }
+    }
+
+    pub fn kv_generation(&self) -> &str {
+        &self.inner.kv_generation
     }
 }

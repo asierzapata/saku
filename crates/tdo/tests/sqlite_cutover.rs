@@ -30,6 +30,15 @@ fn success(output: Output) -> Output {
     output
 }
 
+fn db_clock(dir: &TempDir) -> String {
+    rusqlite::Connection::open(dir.path().join("store.sqlite3"))
+        .unwrap()
+        .query_row("SELECT clock FROM store_metadata WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+}
+
 fn fixture() -> String {
     let mut store = Store::default();
     store.add_task(Task {
@@ -127,8 +136,21 @@ fn concurrent_cli_adds_do_not_overwrite_or_duplicate_numbers() {
     let store = storage.load().unwrap();
     assert_eq!(store.tasks.len(), 12);
     assert_eq!(storage.pending_changes().unwrap().len(), 12);
+    let titles: std::collections::BTreeSet<_> = store
+        .tasks
+        .values()
+        .map(|task| task.title.clone())
+        .collect();
+    let expected: std::collections::BTreeSet<_> =
+        (0..12).map(|index| format!("task {index}")).collect();
+    assert_eq!(titles, expected);
+    let mut previous = None;
     for number in 1..=12 {
-        assert!(store.get_task_by_number(number).is_some());
+        let stamp = &store.get_task_by_number(number).unwrap().modified_at;
+        if let Some(previous) = previous {
+            assert!(stamp > previous);
+        }
+        previous = Some(stamp);
     }
     for key in store.tasks.keys() {
         let suffix = key.strip_prefix("task/").unwrap();
@@ -143,12 +165,14 @@ fn multi_done_error_rolls_back_entries_and_outbox() {
     success(run(&dir, &["add", "first"]));
     let storage = SqliteStorage::open(dir.path().join("store.sqlite3")).unwrap();
     let before = storage.pending_changes().unwrap();
+    let clock_before = db_clock(&dir);
     let snapshot: serde_json::Value =
         serde_json::from_str(&storage.export_json().unwrap()).unwrap();
     drop(storage);
     assert!(!run(&dir, &["done", "1", "999"]).status.success());
     let storage = SqliteStorage::open(dir.path().join("store.sqlite3")).unwrap();
     assert_eq!(storage.pending_changes().unwrap(), before);
+    assert_eq!(db_clock(&dir), clock_before);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&storage.export_json().unwrap()).unwrap(),
         snapshot
@@ -196,7 +220,7 @@ fn legacy_guard_does_not_upgrade_a_pristine_v1_database() {
     drop(SqliteStorage::open(&path).unwrap());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
-        .execute_batch("DROP TABLE sync_state; PRAGMA user_version = 1;")
+        .execute_batch("DROP TABLE recovery_history; DROP TABLE sync_state; ALTER TABLE store_metadata DROP COLUMN clock; PRAGMA user_version = 1;")
         .unwrap();
     drop(connection);
     fs::write(dir.path().join("store.json"), fixture()).unwrap();
@@ -367,6 +391,7 @@ fn editor_does_not_lock_writer_and_refuses_stale_save() {
         std::thread::sleep(Duration::from_millis(10));
     }
     success(run(&dir, &["add", "concurrent"]));
+    let clock_after_writer = db_clock(&dir);
     writeln!(
         fs::OpenOptions::new().write(true).open(&fifo).unwrap(),
         "go"
@@ -383,10 +408,12 @@ fn editor_does_not_lock_writer_and_refuses_stale_save() {
     let store = storage.load().unwrap();
     assert_eq!(store.get_task_by_number(1).unwrap().title, "original");
     assert_eq!(store.get_task_by_number(2).unwrap().title, "concurrent");
+    assert_eq!(db_clock(&dir), clock_after_writer);
     let unchanged = command(&dir)
         .env("VISUAL", "/bin/true")
         .args(["edit", "task", "1"])
         .output()
         .unwrap();
     success(unchanged);
+    assert_eq!(db_clock(&dir), clock_after_writer);
 }

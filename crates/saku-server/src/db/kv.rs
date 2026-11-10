@@ -44,7 +44,6 @@ pub fn get_entries_since(
 }
 
 /// Get the current maximum seq for a (user_id, tool) pair. Returns 0 if no entries exist.
-#[allow(dead_code)]
 pub fn get_max_seq(
     conn: &Connection,
     user_id: &str,
@@ -57,69 +56,68 @@ pub fn get_max_seq(
     )
 }
 
-/// Batch upsert entries within a single transaction.
-/// Returns (results, cookie) where cookie is the string representation of the max seq after upsert.
+#[derive(Debug, thiserror::Error)]
+pub enum KvWriteError {
+    #[error(transparent)]
+    Db(#[from] rusqlite::Error),
+    #[error("{0}")]
+    InvalidRequest(String),
+    #[error("entries changed since the last pull")]
+    StaleWrite,
+    #[error("server sequence exhausted")]
+    SequenceExhausted,
+}
+
 pub fn batch_upsert(
     conn: &Connection,
     user_id: &str,
     tool: &str,
+    base_seq: i64,
     entries: &[(String, Vec<u8>)],
-) -> Result<(Vec<UpsertResult>, String), rusqlite::Error> {
-    let tx = conn.unchecked_transaction()?;
-
-    // Ensure seq counter exists
-    tx.execute(
-        "INSERT OR IGNORE INTO kv_seq_counters (user_id, tool, next_seq) VALUES (?1, ?2, 1)",
-        params![user_id, tool],
-    )?;
-
-    let mut next_seq: i64 = tx.query_row(
+) -> Result<(Vec<UpsertResult>, String), KvWriteError> {
+    use rusqlite::{OptionalExtension, Transaction, TransactionBehavior};
+    let mut keys = std::collections::HashSet::new();
+    if base_seq < 0 || entries.is_empty() || entries.iter().any(|(key, _)| !keys.insert(key)) {
+        return Err(KvWriteError::InvalidRequest("require a nonnegative base cookie and a nonempty batch of unique keys".into()));
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let next_seq: i64 = tx.query_row(
         "SELECT next_seq FROM kv_seq_counters WHERE user_id = ?1 AND tool = ?2",
         params![user_id, tool],
         |row| row.get(0),
-    )?;
-
+    ).optional()?.unwrap_or(1);
+    let current_seq = next_seq.checked_sub(1).filter(|seq| *seq >= 0).ok_or(KvWriteError::SequenceExhausted)?;
+    if base_seq > current_seq {
+        return Err(KvWriteError::InvalidRequest("base cookie is ahead of server state; recovery required".into()));
+    }
+    for (key, _) in entries {
+        let seq: Option<i64> = tx.query_row(
+            "SELECT seq FROM kv_entries WHERE user_id = ?1 AND tool = ?2 AND key = ?3",
+            params![user_id, tool, key], |row| row.get(0),
+        ).optional()?;
+        if seq.is_some_and(|seq| seq > base_seq) {
+            return Err(KvWriteError::StaleWrite);
+        }
+    }
+    let count = i64::try_from(entries.len()).map_err(|_| KvWriteError::SequenceExhausted)?;
+    let after_seq = next_seq.checked_add(count).ok_or(KvWriteError::SequenceExhausted)?;
     let mut results = Vec::with_capacity(entries.len());
-
-    for (key, blob) in entries {
-        let seq = next_seq;
+    for (index, (key, blob)) in entries.iter().enumerate() {
+        let seq = next_seq + index as i64;
         tx.execute(
-            "INSERT INTO kv_entries (user_id, tool, key, blob, seq)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(user_id, tool, key) DO UPDATE SET
-                blob = excluded.blob,
-                seq = excluded.seq,
-                written_at = strftime('%s','now')",
+            "INSERT INTO kv_entries (user_id, tool, key, blob, seq) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(user_id, tool, key) DO UPDATE SET blob = excluded.blob, seq = excluded.seq, written_at = strftime('%s','now')",
             params![user_id, tool, key, blob, seq],
         )?;
-        results.push(UpsertResult {
-            key: key.clone(),
-            seq,
-        });
-        next_seq += 1;
+        results.push(UpsertResult { key: key.clone(), seq });
     }
-
     tx.execute(
-        "UPDATE kv_seq_counters SET next_seq = ?3 WHERE user_id = ?1 AND tool = ?2",
-        params![user_id, tool, next_seq],
+        "INSERT INTO kv_seq_counters (user_id, tool, next_seq) VALUES (?1, ?2, ?3)
+         ON CONFLICT(user_id, tool) DO UPDATE SET next_seq = excluded.next_seq",
+        params![user_id, tool, after_seq],
     )?;
-
     tx.commit()?;
-
-    let cookie = (next_seq - 1).to_string();
-    Ok((results, cookie))
-}
-
-/// Upsert a single entry. Returns the assigned seq number.
-pub fn upsert_single(
-    conn: &Connection,
-    user_id: &str,
-    tool: &str,
-    key: &str,
-    blob: &[u8],
-) -> Result<i64, rusqlite::Error> {
-    let (results, _) = batch_upsert(conn, user_id, tool, &[(key.to_string(), blob.to_vec())])?;
-    Ok(results[0].seq)
+    Ok((results, (after_seq - 1).to_string()))
 }
 
 #[cfg(test)]
@@ -141,7 +139,7 @@ mod tests {
             ("key2".into(), b"blob2".to_vec()),
             ("key3".into(), b"blob3".to_vec()),
         ];
-        let (results, _) = batch_upsert(&conn, "user1", "tdo", &entries).unwrap();
+        let (results, _) = batch_upsert(&conn, "user1", "tdo", 0, &entries).unwrap();
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].seq, 1);
         assert_eq!(results[1].seq, 2);
@@ -156,14 +154,14 @@ mod tests {
             ("b".into(), b"2".to_vec()),
             ("c".into(), b"3".to_vec()),
         ];
-        batch_upsert(&conn, "user1", "tdo", &batch1).unwrap();
+        batch_upsert(&conn, "user1", "tdo", 0, &batch1).unwrap();
 
         let batch2: Vec<(String, Vec<u8>)> = vec![
             ("d".into(), b"4".to_vec()),
             ("e".into(), b"5".to_vec()),
             ("f".into(), b"6".to_vec()),
         ];
-        let (results, _) = batch_upsert(&conn, "user1", "tdo", &batch2).unwrap();
+        let (results, _) = batch_upsert(&conn, "user1", "tdo", 0, &batch2).unwrap();
         assert_eq!(results[0].seq, 4);
         assert_eq!(results[1].seq, 5);
         assert_eq!(results[2].seq, 6);
@@ -176,6 +174,7 @@ mod tests {
             &conn,
             "user1",
             "tdo",
+            0,
             &[("key1".into(), b"old".to_vec())],
         )
         .unwrap();
@@ -184,6 +183,7 @@ mod tests {
             &conn,
             "user1",
             "tdo",
+            1,
             &[("key1".into(), b"new".to_vec())],
         )
         .unwrap();
@@ -204,7 +204,7 @@ mod tests {
         let entries: Vec<(String, Vec<u8>)> = (1..=5)
             .map(|i| (format!("key{i}"), format!("blob{i}").into_bytes()))
             .collect();
-        batch_upsert(&conn, "user1", "tdo", &entries).unwrap();
+        batch_upsert(&conn, "user1", "tdo", 0, &entries).unwrap();
 
         let result = get_entries_since(&conn, "user1", "tdo", 3, 100).unwrap();
         assert_eq!(result.len(), 2);
@@ -219,7 +219,7 @@ mod tests {
             ("a".into(), b"1".to_vec()),
             ("b".into(), b"2".to_vec()),
         ];
-        batch_upsert(&conn, "user1", "tdo", &entries).unwrap();
+        batch_upsert(&conn, "user1", "tdo", 0, &entries).unwrap();
 
         let result = get_entries_since(&conn, "user1", "tdo", 0, 100).unwrap();
         assert_eq!(result.len(), 2);
@@ -231,7 +231,7 @@ mod tests {
         let entries: Vec<(String, Vec<u8>)> = (1..=5)
             .map(|i| (format!("key{i}"), format!("blob{i}").into_bytes()))
             .collect();
-        batch_upsert(&conn, "user1", "tdo", &entries).unwrap();
+        batch_upsert(&conn, "user1", "tdo", 0, &entries).unwrap();
 
         let result = get_entries_since(&conn, "user1", "tdo", 0, 2).unwrap();
         assert_eq!(result.len(), 2);
@@ -243,7 +243,7 @@ mod tests {
     fn get_entries_since_empty_when_up_to_date() {
         let conn = setup_db();
         let entries: Vec<(String, Vec<u8>)> = vec![("a".into(), b"1".to_vec())];
-        batch_upsert(&conn, "user1", "tdo", &entries).unwrap();
+        batch_upsert(&conn, "user1", "tdo", 0, &entries).unwrap();
 
         let max = get_max_seq(&conn, "user1", "tdo").unwrap();
         let result = get_entries_since(&conn, "user1", "tdo", max, 100).unwrap();
@@ -258,20 +258,45 @@ mod tests {
             ("b".into(), b"2".to_vec()),
             ("c".into(), b"3".to_vec()),
         ];
-        let (_, cookie) = batch_upsert(&conn, "user1", "tdo", &entries).unwrap();
+        let (_, cookie) = batch_upsert(&conn, "user1", "tdo", 0, &entries).unwrap();
         assert_eq!(cookie, "3");
     }
 
     #[test]
-    fn upsert_single_works() {
+    fn stale_batch_is_atomic_and_validation_does_not_consume_sequences() {
         let conn = setup_db();
-        let seq = upsert_single(&conn, "user1", "tdo", "mykey", b"myblob").unwrap();
-        assert_eq!(seq, 1);
-
+        let old = vec![("mykey".into(), b"old".to_vec())];
+        batch_upsert(&conn, "user1", "tdo", 0, &old).unwrap();
+        let mixed = vec![("new".into(), b"new".to_vec()), ("mykey".into(), b"stale".to_vec())];
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", 0, &mixed), Err(KvWriteError::StaleWrite)));
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", -1, &old), Err(KvWriteError::InvalidRequest(_))));
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", 2, &old), Err(KvWriteError::InvalidRequest(_))));
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", 1, &[]), Err(KvWriteError::InvalidRequest(_))));
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", 1, &[old[0].clone(), old[0].clone()]), Err(KvWriteError::InvalidRequest(_))));
         let entries = get_entries_since(&conn, "user1", "tdo", 0, 100).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key, "mykey");
-        assert_eq!(entries[0].blob, b"myblob");
+        assert_eq!(entries[0].blob, b"old");
+        assert_eq!(batch_upsert(&conn, "user1", "tdo", 1, &mixed).unwrap().1, "3");
+    }
+
+    #[test]
+    fn counter_write_failure_and_sequence_exhaustion_roll_back() {
+        let conn = setup_db();
+        let entry = vec![("a".into(), b"old".to_vec())];
+        batch_upsert(&conn, "user1", "tdo", 0, &entry).unwrap();
+        conn.execute_batch("CREATE TRIGGER fail_counter BEFORE UPDATE ON kv_seq_counters BEGIN SELECT RAISE(ABORT, 'counter failed'); END;").unwrap();
+        let changed = vec![("a".into(), b"new".to_vec()), ("b".into(), b"new".to_vec())];
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", 1, &changed), Err(KvWriteError::Db(_))));
+        let entries = get_entries_since(&conn, "user1", "tdo", 0, 100).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].blob, b"old");
+        assert_eq!(entries[0].seq, 1);
+        assert_eq!(conn.query_row("SELECT next_seq FROM kv_seq_counters", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
+        conn.execute_batch("DROP TRIGGER fail_counter").unwrap();
+        conn.execute("UPDATE kv_seq_counters SET next_seq = ?1", [i64::MAX]).unwrap();
+        assert!(matches!(batch_upsert(&conn, "user1", "tdo", i64::MAX - 1, &changed), Err(KvWriteError::SequenceExhausted)));
+        assert_eq!(get_entries_since(&conn, "user1", "tdo", 0, 100).unwrap()[0].blob, b"old");
     }
 
     #[test]
@@ -281,6 +306,7 @@ mod tests {
             &conn,
             "user1",
             "tdo",
+            0,
             &[("a".into(), b"1".to_vec())],
         )
         .unwrap();
@@ -289,7 +315,8 @@ mod tests {
             &conn,
             "user1",
             "other-tool",
-            &[("b".into(), b"2".to_vec())],
+            0,
+            &[("a".into(), b"2".to_vec())],
         )
         .unwrap();
 
@@ -304,6 +331,7 @@ mod tests {
             &conn,
             "user1",
             "tdo",
+            0,
             &[("a".into(), b"1".to_vec()), ("b".into(), b"2".to_vec())],
         )
         .unwrap();
@@ -312,7 +340,8 @@ mod tests {
             &conn,
             "user2",
             "tdo",
-            &[("c".into(), b"3".to_vec())],
+            0,
+            &[("a".into(), b"3".to_vec())],
         )
         .unwrap();
 

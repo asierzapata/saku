@@ -18,6 +18,12 @@ pub enum SyncError {
     #[error("Backend error: {message}")]
     Backend { message: String },
 
+    #[error("server entries changed during sync; local changes remain pending; run sync again")]
+    StaleWrite,
+
+    #[error("server sync cursor is no longer valid; local data is preserved; run sync again")]
+    CursorInvalidated,
+
     #[error("No passphrase provided")]
     NoPassphrase,
 

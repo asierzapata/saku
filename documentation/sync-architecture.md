@@ -1,5 +1,7 @@
 # Saku Sync — Architecture Research
 
+For the implemented SQLite, KV v2, and recovery behavior, see [Current Sync](architecture.md#current-sync).
+
 ## Crate Structure
 
 ```

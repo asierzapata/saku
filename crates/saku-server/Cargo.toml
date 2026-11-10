@@ -51,3 +51,6 @@ reqwest = { version = "0.12", features = ["json"], optional = true }
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
+saku-tdo = { path = "../tdo", default-features = false }
+saku-sync.workspace = true
+saku-crypto.workspace = true

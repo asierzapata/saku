@@ -20,6 +20,12 @@ pub enum ServerError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("sync cursor is no longer valid; pull the full state before writing")]
+    CursorInvalidated,
+
+    #[error("Precondition required: {0}")]
+    PreconditionRequired(String),
+
     #[error("Storage error: {0}")]
     Storage(String),
 
@@ -35,6 +41,8 @@ impl IntoResponse for ServerError {
             ServerError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             ServerError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             ServerError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            ServerError::CursorInvalidated => (StatusCode::GONE, self.to_string()),
+            ServerError::PreconditionRequired(msg) => (StatusCode::PRECONDITION_REQUIRED, msg.clone()),
             ServerError::Storage(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             ServerError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };

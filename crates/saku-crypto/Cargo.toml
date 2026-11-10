@@ -15,7 +15,7 @@ rand.workspace = true
 sha2.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true
-keyring = { version = "3", features = ["apple-native", "sync-secret-service", "crypto-rust", "windows-native"], optional = true }
+keyring = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 

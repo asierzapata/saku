@@ -1,4 +1,5 @@
 use saku_storage::entity::Entity;
+use saku_storage::timestamp::HybridTimestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -314,31 +315,36 @@ impl Store {
     }
 
     /// Rename a project: tombstone old key, create new key, update all task references.
-    pub fn rename_project(&mut self, old_name: &str, new_name: &str) -> Option<String> {
+    pub fn rename_project(&mut self, old_name: &str, new_name: &str, modified_at: HybridTimestamp) -> Option<String> {
         let old_key = format!("project/{}", old_name.to_lowercase());
         let new_key = format!("project/{}", new_name.to_lowercase());
 
         let mut project = self.projects.remove(&old_key)?;
+        if old_key == new_key {
+            project.name = new_name.to_string();
+            project.modified_at = modified_at;
+            self.projects.insert(new_key.clone(), project);
+            return Some(new_key);
+        }
 
         // Tombstone old entry
         let mut tombstone = project.clone();
         tombstone.deleted_at = Some(jiff::Timestamp::now());
         tombstone.renamed_to = Some(new_key.clone());
+        tombstone.modified_at = modified_at.clone();
         self.projects.insert(old_key.clone(), tombstone);
 
         // Create new entry
         project.name = new_name.to_string();
         project.previous_key = Some(old_key.clone());
-        project.modified_at = saku_storage::timestamp::HybridTimestamp::now(
-            project.modified_at.lamport + 1,
-            project.modified_at.device_id.clone(),
-        );
+        project.modified_at = modified_at.clone();
         self.projects.insert(new_key.clone(), project);
 
         // Update task references
         for task in self.tasks.values_mut() {
             if task.project_key.as_deref() == Some(old_key.as_str()) {
                 task.project_key = Some(new_key.clone());
+                task.modified_at = modified_at.clone();
             }
         }
 
@@ -346,31 +352,36 @@ impl Store {
     }
 
     /// Rename an area: tombstone old key, create new key, update all project and task references.
-    pub fn rename_area(&mut self, old_name: &str, new_name: &str) -> Option<String> {
+    pub fn rename_area(&mut self, old_name: &str, new_name: &str, modified_at: HybridTimestamp) -> Option<String> {
         let old_key = format!("area/{}", old_name.to_lowercase());
         let new_key = format!("area/{}", new_name.to_lowercase());
 
         let mut area = self.areas.remove(&old_key)?;
+        if old_key == new_key {
+            area.name = new_name.to_string();
+            area.modified_at = modified_at;
+            self.areas.insert(new_key.clone(), area);
+            return Some(new_key);
+        }
 
         // Tombstone old entry
         let mut tombstone = area.clone();
         tombstone.deleted_at = Some(jiff::Timestamp::now());
         tombstone.renamed_to = Some(new_key.clone());
+        tombstone.modified_at = modified_at.clone();
         self.areas.insert(old_key.clone(), tombstone);
 
         // Create new entry
         area.name = new_name.to_string();
         area.previous_key = Some(old_key.clone());
-        area.modified_at = saku_storage::timestamp::HybridTimestamp::now(
-            area.modified_at.lamport + 1,
-            area.modified_at.device_id.clone(),
-        );
+        area.modified_at = modified_at.clone();
         self.areas.insert(new_key.clone(), area);
 
         // Update project references
         for project in self.projects.values_mut() {
             if project.area_key.as_deref() == Some(old_key.as_str()) {
                 project.area_key = Some(new_key.clone());
+                project.modified_at = modified_at.clone();
             }
         }
 
@@ -378,6 +389,7 @@ impl Store {
         for task in self.tasks.values_mut() {
             if task.area_key.as_deref() == Some(old_key.as_str()) {
                 task.area_key = Some(new_key.clone());
+                task.modified_at = modified_at.clone();
             }
         }
 

@@ -40,6 +40,7 @@ struct KvEntryResponse {
 
 #[derive(Serialize)]
 struct BatchPutRequest {
+    base_cookie: String,
     entries: Vec<BatchPutEntry>,
 }
 
@@ -130,20 +131,38 @@ fn sync_target(
     Ok(sha256_bytes(&scope))
 }
 
+fn parse_cursor(text: &str) -> Result<(&str, i64), SyncError> {
+    if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(SyncError::Backend {
+            message: "guarded KV sync v2 is unavailable; upgrade the server and client".into(),
+        });
+    }
+    let invalid = || SyncError::Backend { message: "invalid pull cursor".into() };
+    let (generation, sequence) = text.split_once(':').ok_or_else(invalid)?;
+    if generation.len() != 32
+        || !generation.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || sequence.is_empty()
+        || !sequence.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(invalid());
+    }
+    let sequence = sequence.parse::<i64>().map_err(|_| invalid())?;
+    Ok((generation, sequence))
+}
+
 fn decode_pull_page(
     response: GetEntriesResponse,
     requested: Option<&str>,
 ) -> Result<PullPage, SyncError> {
-    let parse_cursor = |text: &str| -> Result<i64, SyncError> {
-        text.parse::<i64>()
-            .ok()
-            .filter(|value| *value >= 0)
-            .ok_or_else(|| SyncError::Backend {
-                message: "invalid pull cursor".into(),
-            })
-    };
+    let (response_generation, response_sequence) = parse_cursor(&response.cookie)?;
     let mut previous = match requested {
-        Some(cookie) => parse_cursor(cookie)?,
+        Some(cookie) => {
+            let (generation, sequence) = parse_cursor(cookie)?;
+            if generation != response_generation {
+                return Err(SyncError::CursorInvalidated);
+            }
+            sequence
+        }
         None => 0,
     };
     for entry in &response.entries {
@@ -154,7 +173,7 @@ fn decode_pull_page(
         }
         previous = entry.seq;
     }
-    if parse_cursor(&response.cookie)? != previous {
+    if response_sequence != previous {
         return Err(SyncError::Backend {
             message: "pull response cursor does not match entries".into(),
         });
@@ -272,11 +291,22 @@ struct HttpTransport<'a> {
     tool: &'a str,
 }
 
+fn kv_http_error(error: ureq::Error, pushing: bool) -> SyncError {
+    match error {
+        ureq::Error::Status(409, _) if pushing => SyncError::StaleWrite,
+        ureq::Error::Status(410, _) => SyncError::CursorInvalidated,
+        ureq::Error::Status(404 | 405 | 428, _) => SyncError::Backend {
+            message: "guarded KV sync v2 is unavailable; upgrade the server and client".into(),
+        },
+        error => SyncError::Backend { message: format!("{error}") },
+    }
+}
+
 impl Transport for HttpTransport<'_> {
     /// GET /kv/{tool}?cookie={cookie}&limit={limit}
     fn pull(&mut self, cookie: Option<&str>) -> Result<PullPage, SyncError> {
         let response = self.client.with_auth_retry(|token| {
-            let url = format!("{}/api/v1/kv/{}", self.client.server_url, self.tool);
+            let url = format!("{}/api/v2/kv/{}", self.client.server_url, self.tool);
             let mut request = self.client.http.get(&url).query("limit", "100");
             if let Some(cookie) = cookie {
                 request = request.query("cookie", cookie);
@@ -284,9 +314,7 @@ impl Transport for HttpTransport<'_> {
             request
                 .set("Authorization", &format!("Bearer {token}"))
                 .call()
-                .map_err(|e| SyncError::Backend {
-                    message: format!("{e}"),
-                })?
+                .map_err(|e| kv_http_error(e, false))?
                 .into_json::<GetEntriesResponse>()
                 .map_err(|e| SyncError::Backend {
                     message: format!("invalid pull response: {e}"),
@@ -296,10 +324,11 @@ impl Transport for HttpTransport<'_> {
     }
 
     /// PUT /kv/{tool} with batch entries
-    fn push(&mut self, entries: &[(String, Vec<u8>)]) -> Result<Vec<String>, SyncError> {
+    fn push(&mut self, entries: &[(String, Vec<u8>)], base_cookie: &str) -> Result<Vec<String>, SyncError> {
         let response = self.client.with_auth_retry(|token| {
-            let url = format!("{}/api/v1/kv/{}", self.client.server_url, self.tool);
+            let url = format!("{}/api/v2/kv/{}", self.client.server_url, self.tool);
             let body = BatchPutRequest {
+                base_cookie: base_cookie.to_owned(),
                 entries: entries
                     .iter()
                     .map(|(key, blob)| BatchPutEntry {
@@ -313,9 +342,7 @@ impl Transport for HttpTransport<'_> {
                 .put(&url)
                 .set("Authorization", &format!("Bearer {token}"))
                 .send_json(&body)
-                .map_err(|e| SyncError::Backend {
-                    message: format!("{e}"),
-                })?
+                .map_err(|e| kv_http_error(e, true))?
                 .into_json::<BatchPutResponse>()
                 .map_err(|e| SyncError::Backend {
                     message: format!("invalid push response: {e}"),
@@ -359,6 +386,25 @@ pub fn sync_kv(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const GENERATION: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    fn cookie(sequence: i64) -> String {
+        format!("{GENERATION}:{sequence}")
+    }
+
+    fn accept_deadline(listener: &std::net::TcpListener) -> std::net::TcpStream {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => return stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(std::time::Instant::now() < deadline, "mock HTTP accept timed out");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("mock HTTP accept failed: {error}"),
+            }
+        }
+    }
 
     fn token(claims: serde_json::Value) -> String {
         format!(
@@ -414,7 +460,7 @@ mod tests {
                     deleted: false,
                 },
             ],
-            cookie: "2".into(),
+            cookie: cookie(2),
             has_more: false,
         };
         assert!(decode_pull_page(response, None).is_err());
@@ -425,7 +471,7 @@ mod tests {
                 seq: 1,
                 deleted: true,
             }],
-            cookie: "1".into(),
+            cookie: cookie(1),
             has_more: false,
         };
         assert!(decode_pull_page(deleted, None).is_err());
@@ -446,7 +492,7 @@ mod tests {
             cookie: cookie.into(),
             has_more,
         };
-        for (seqs, cookie, more) in [
+        for (seqs, sequence, more) in [
             (vec![6, 6], "6", false),
             (vec![7, 6], "6", false),
             (vec![5], "5", false),
@@ -456,13 +502,19 @@ mod tests {
             (vec![6], "-1", false),
             (vec![6], "bad", false),
         ] {
-            assert!(decode_pull_page(response(&seqs, cookie, more), Some("5")).is_err());
+            let candidate = format!("{GENERATION}:{sequence}");
+            assert!(decode_pull_page(response(&seqs, &candidate, more), Some(&cookie(5))).is_err());
         }
-        assert!(decode_pull_page(response(&[], "0", false), Some("-1")).is_err());
-        assert!(decode_pull_page(response(&[], "0", false), Some("bad")).is_err());
-        assert!(decode_pull_page(response(&[0], "0", false), None).is_err());
-        assert!(decode_pull_page(response(&[6, 8], "8", false), Some("5")).is_ok());
-        assert!(decode_pull_page(response(&[], "5", false), Some("5")).is_ok());
+        assert!(decode_pull_page(response(&[], &cookie(0), false), Some("-1")).is_err());
+        assert!(decode_pull_page(response(&[], &cookie(0), false), Some("bad")).is_err());
+        assert!(decode_pull_page(response(&[0], &cookie(0), false), None).is_err());
+        assert!(decode_pull_page(response(&[6, 8], &cookie(8), false), Some(&cookie(5))).is_ok());
+        assert!(decode_pull_page(response(&[], &cookie(5), false), Some(&cookie(5))).is_ok());
+        assert!(matches!(decode_pull_page(response(&[], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:5", false), Some(&cookie(5))), Err(SyncError::CursorInvalidated)));
+        for invalid in ["5", "AAAA0000000000000000000000000000:5", "a:5", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:+5", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:9223372036854775808"] {
+            assert!(matches!(decode_pull_page(response(&[], invalid, false), None), Err(SyncError::Backend { .. })));
+        }
+        assert!(decode_pull_page(response(&[], "5", false), None).err().unwrap().to_string().contains("upgrade"));
     }
 
     #[test]
@@ -480,6 +532,7 @@ mod tests {
             fn prepare_sync(&mut self, _: &str) -> Result<Option<String>, SyncError> {
                 Ok(self.cookie.clone())
             }
+            fn reset_sync(&mut self, _: &str, _: Option<&str>) -> Result<(), SyncError> { unreachable!() }
             fn apply_pull(
                 &mut self,
                 _: &str,
@@ -506,16 +559,17 @@ mod tests {
         let first = STANDARD.encode(saku_crypto::encrypt_entry(br#"{"title":"one"}"#, &master));
         let second = STANDARD.encode(saku_crypto::encrypt_entry(br#"{"title":"two"}"#, &master));
         let responses = [
-            json!({"entries":[{"key":"task/remote1","blob":first,"seq":8,"deleted":false}],"cookie":"8","has_more":false}),
+            json!({"entries":[{"key":"task/remote1","blob":first,"seq":8,"deleted":false}],"cookie":cookie(8),"has_more":false}),
             json!({"results":[{"key":"task/local","seq":99}],"cookie":"99999"}),
-            json!({"entries":[{"key":"task/remote2","blob":second,"seq":9,"deleted":false}],"cookie":"9","has_more":false}),
+            json!({"entries":[{"key":"task/remote2","blob":second,"seq":9,"deleted":false}],"cookie":cookie(9),"has_more":false}),
         ];
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let mut requests = Vec::new();
             for response in responses {
-                let (mut stream, _) = listener.accept().unwrap();
+                let mut stream = accept_deadline(&listener);
                 stream
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                     .unwrap();
@@ -567,7 +621,7 @@ mod tests {
             tool: "tdo",
         };
         let mut replica = FakeReplica {
-            cookie: Some("7".into()),
+            cookie: Some(cookie(7)),
             pending: vec![PendingEntry {
                 key: "task/local".into(),
                 revision: 4,
@@ -576,17 +630,18 @@ mod tests {
             applied: vec![],
         };
         sync_replica(&mut replica, &mut transport, &master, "target").unwrap();
-        assert_eq!(replica.cookie.as_deref(), Some("8"));
+        assert_eq!(replica.cookie.as_deref(), Some(cookie(8).as_str()));
         assert!(replica.pending.is_empty());
         sync_replica(&mut replica, &mut transport, &master, "target").unwrap();
-        assert_eq!(replica.cookie.as_deref(), Some("9"));
+        assert_eq!(replica.cookie.as_deref(), Some(cookie(9).as_str()));
         assert_eq!(replica.applied.len(), 2);
         let requests = server.join().unwrap();
-        assert!(requests[0].0.starts_with("GET /api/v1/kv/tdo?"));
+        assert!(requests[0].0.starts_with("GET /api/v2/kv/tdo?"));
         assert!(requests[0].0.contains("limit=100"));
-        assert!(requests[0].0.contains("cookie=7"));
-        assert!(requests[1].0.starts_with("PUT /api/v1/kv/tdo "));
+        assert!(requests[0].0.contains(&format!("cookie={GENERATION}%3A7")));
+        assert!(requests[1].0.starts_with("PUT /api/v2/kv/tdo "));
         let body: serde_json::Value = serde_json::from_slice(&requests[1].1).unwrap();
+        assert_eq!(body["base_cookie"], cookie(8));
         assert_eq!(body["entries"].as_array().unwrap().len(), 1);
         assert_eq!(body["entries"][0]["key"], "task/local");
         let blob = STANDARD
@@ -597,7 +652,221 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&plaintext).unwrap(),
             json!({"title":"local"})
         );
-        assert!(requests[2].0.contains("cookie=8"));
+        assert!(requests[2].0.contains(&format!("cookie={GENERATION}%3A8")));
         assert!(!requests[2].0.contains("99999"));
+    }
+
+    #[test]
+    fn http_conflict_repulls_and_regenerates_batch_without_using_push_cookie() {
+        use crate::replica::PendingEntry;
+        struct MergingReplica {
+            cookie: Option<String>,
+            pending: Vec<PendingEntry>,
+        }
+        impl Replica for MergingReplica {
+            fn prepare_sync(&mut self, _: &str) -> Result<Option<String>, SyncError> {
+                Ok(self.cookie.clone())
+            }
+            fn reset_sync(&mut self, _: &str, _: Option<&str>) -> Result<(), SyncError> { unreachable!() }
+            fn apply_pull(&mut self, _: &str, expected: Option<&str>, cookie: &str, entries: &[(String, String)]) -> Result<(), SyncError> {
+                assert_eq!(self.cookie.as_deref(), expected);
+                if !entries.is_empty() {
+                    self.pending[0].value = Some(json!({"title":"merged"}));
+                    self.pending[0].revision += 1;
+                }
+                self.cookie = Some(cookie.into());
+                Ok(())
+            }
+            fn pending(&self) -> Result<Vec<PendingEntry>, SyncError> {
+                Ok(self.pending.clone())
+            }
+            fn acknowledge(&mut self, changes: &[(String, i64)]) -> Result<(), SyncError> {
+                self.pending.retain(|entry| !changes.contains(&(entry.key.clone(), entry.revision)));
+                Ok(())
+            }
+        }
+        let master = derive_master_key(b"loopback conflict", &[4; 16]).unwrap();
+        let remote = STANDARD.encode(saku_crypto::encrypt_entry(br#"{"title":"remote"}"#, &master));
+        let replies = vec![
+            (200, json!({"entries":[],"cookie":cookie(7),"has_more":false})),
+            (409, json!({"error":"conflict"})),
+            (200, json!({"entries":[{"key":"task/remote","blob":remote,"seq":8,"deleted":false}],"cookie":cookie(8),"has_more":false})),
+            (200, json!({"results":[{"key":"task/local","seq":9}],"cookie":"99999"})),
+            (200, json!({"entries":[],"cookie":cookie(8),"has_more":false})),
+        ];
+        let (url, server) = mock_http(replies);
+        let client = test_client(url);
+        let mut transport = HttpTransport { client: &client, tool: "tdo" };
+        let mut replica = MergingReplica {
+            cookie: Some(cookie(7)),
+            pending: vec![PendingEntry { key: "task/local".into(), revision: 1, value: Some(json!({"title":"before"})) }],
+        };
+        sync_replica(&mut replica, &mut transport, &master, "target").unwrap();
+        assert_eq!(replica.cookie.as_deref(), Some(cookie(8).as_str()));
+        assert!(replica.pending.is_empty());
+        sync_replica(&mut replica, &mut transport, &master, "target").unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].0.contains(&format!("cookie={GENERATION}%3A7")));
+        assert!(requests[2].0.contains(&format!("cookie={GENERATION}%3A7")));
+        assert!(requests[4].0.contains(&format!("cookie={GENERATION}%3A8")));
+        assert!(!requests[4].0.contains("99999"));
+        for (index, base, title) in [(1, cookie(7), "before"), (3, cookie(8), "merged")] {
+            assert!(requests[index].0.starts_with("PUT /api/v2/kv/tdo "));
+            let body: serde_json::Value = serde_json::from_slice(&requests[index].1).unwrap();
+            assert_eq!(body["base_cookie"], base);
+            let blob = STANDARD.decode(body["entries"][0]["blob"].as_str().unwrap()).unwrap();
+            let plaintext: serde_json::Value = serde_json::from_slice(&saku_crypto::decrypt_entry(&blob, &master).unwrap()).unwrap();
+            assert_eq!(plaintext["title"], title);
+        }
+    }
+
+    #[test]
+    fn http_gone_on_pull_or_push_resets_and_repulls_without_push_cookie() {
+        use crate::replica::PendingEntry;
+        struct RecoveryReplica {
+            cursor: Option<String>,
+            pending: Vec<PendingEntry>,
+            resets: Vec<Option<String>>,
+        }
+        impl Replica for RecoveryReplica {
+            fn prepare_sync(&mut self, _: &str) -> Result<Option<String>, SyncError> { Ok(self.cursor.clone()) }
+            fn reset_sync(&mut self, _: &str, expected: Option<&str>) -> Result<(), SyncError> {
+                assert_eq!(self.cursor.as_deref(), expected);
+                self.resets.push(expected.map(str::to_owned));
+                self.cursor = None;
+                self.pending = vec![PendingEntry { key: "task/a".into(), revision: 2, value: Some(json!({"title":"local"})) }];
+                Ok(())
+            }
+            fn apply_pull(&mut self, _: &str, expected: Option<&str>, cursor: &str, _: &[(String, String)]) -> Result<(), SyncError> {
+                assert_eq!(self.cursor.as_deref(), expected);
+                self.cursor = Some(cursor.into());
+                Ok(())
+            }
+            fn pending(&self) -> Result<Vec<PendingEntry>, SyncError> { Ok(self.pending.clone()) }
+            fn acknowledge(&mut self, changes: &[(String, i64)]) -> Result<(), SyncError> {
+                self.pending.retain(|entry| !changes.contains(&(entry.key.clone(), entry.revision)));
+                Ok(())
+            }
+        }
+        let new_cookie = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:0";
+        for on_push in [false, true] {
+            let mut replies = Vec::new();
+            if on_push {
+                replies.push((200, json!({"entries":[],"cookie":cookie(9),"has_more":false})));
+            }
+            replies.push((410, json!({"error":"invalidated"})));
+            replies.push((200, json!({"entries":[],"cookie":new_cookie,"has_more":false})));
+            replies.push((200, json!({"results":[{"key":"task/a","seq":1}],"cookie":"ignored:99999"})));
+            replies.push((200, json!({"entries":[],"cookie":new_cookie,"has_more":false})));
+            let (url, server) = mock_http(replies);
+            let client = test_client(url);
+            let mut transport = HttpTransport { client: &client, tool: "tdo" };
+            let master = derive_master_key(b"recovery test", &[3; 16]).unwrap();
+            let mut replica = RecoveryReplica {
+                cursor: Some(cookie(9)),
+                pending: vec![PendingEntry { key: "task/a".into(), revision: 1, value: Some(json!({"title":"local"})) }],
+                resets: vec![],
+            };
+            sync_replica(&mut replica, &mut transport, &master, "target").unwrap();
+            assert_eq!(replica.resets, [Some(cookie(9))]);
+            assert!(replica.pending.is_empty());
+            assert_eq!(replica.cursor.as_deref(), Some(new_cookie));
+            sync_replica(&mut replica, &mut transport, &master, "target").unwrap();
+            let requests = server.join().unwrap();
+            let recovery_get = if on_push { 2 } else { 1 };
+            assert!(requests[recovery_get].0.starts_with("GET /api/v2/kv/tdo?"));
+            assert!(!requests[recovery_get].0.contains("cookie="));
+            let body: serde_json::Value = serde_json::from_slice(&requests[recovery_get + 1].1).unwrap();
+            assert_eq!(body["base_cookie"], new_cookie);
+            assert!(requests[recovery_get + 2].0.contains("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb%3A0"));
+            assert!(!requests[recovery_get + 2].0.contains("99999"));
+        }
+    }
+
+    fn test_client(url: String) -> KvHttpClient {
+        KvHttpClient {
+            server_url: url,
+            access_token: RefCell::new("test-token".into()),
+            refresh_token: RefCell::new(String::new()),
+            subject: "test-subject".into(),
+            http: ureq::AgentBuilder::new()
+                .timeout_connect(std::time::Duration::from_secs(5))
+                .timeout_read(std::time::Duration::from_secs(5))
+                .build(),
+        }
+    }
+
+    fn mock_http(replies: Vec<(u16, serde_json::Value)>) -> (String, std::thread::JoinHandle<Vec<(String, Vec<u8>)>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for (status, response) in replies {
+                let mut stream = accept_deadline(&listener);
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                let mut data = Vec::new();
+                let end = loop {
+                    let mut chunk = [0; 4096];
+                    let count = stream.read(&mut chunk).unwrap();
+                    assert!(count > 0);
+                    data.extend_from_slice(&chunk[..count]);
+                    if let Some(offset) = data.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        break offset + 4;
+                    }
+                };
+                let headers = String::from_utf8(data[..end].to_vec()).unwrap();
+                let length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
+                }).unwrap_or(0);
+                while data.len() < end + length {
+                    let mut chunk = [0; 4096];
+                    let count = stream.read(&mut chunk).unwrap();
+                    assert!(count > 0);
+                    data.extend_from_slice(&chunk[..count]);
+                }
+                requests.push((headers.lines().next().unwrap().to_owned(), data[end..end + length].to_vec()));
+                let body = response.to_string();
+                write!(stream, "HTTP/1.1 {status} test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock), "unexpected extra request");
+            requests
+        });
+        (format!("http://{address}"), handle)
+    }
+
+    #[test]
+    fn http_unavailable_v2_never_falls_back_or_retries_legacy_writes() {
+        struct PendingReplica;
+        impl Replica for PendingReplica {
+            fn prepare_sync(&mut self, _: &str) -> Result<Option<String>, SyncError> { Ok(None) }
+            fn reset_sync(&mut self, _: &str, _: Option<&str>) -> Result<(), SyncError> { unreachable!() }
+            fn apply_pull(&mut self, _: &str, _: Option<&str>, _: &str, _: &[(String, String)]) -> Result<(), SyncError> { panic!("404 must not apply a pull") }
+            fn pending(&self) -> Result<Vec<crate::replica::PendingEntry>, SyncError> {
+                Ok(vec![crate::replica::PendingEntry { key: "task/a".into(), revision: 1, value: Some(json!({})) }])
+            }
+            fn acknowledge(&mut self, _: &[(String, i64)]) -> Result<(), SyncError> { panic!("404 must not acknowledge") }
+        }
+        let (url, server) = mock_http(vec![(404, json!({"error":"not found"}))]);
+        let client = test_client(url);
+        let mut transport = HttpTransport { client: &client, tool: "tdo" };
+        let key = derive_master_key(b"unavailable", &[5; 16]).unwrap();
+        let error = sync_replica(&mut PendingReplica, &mut transport, &key, "target").err().unwrap();
+        assert!(error.to_string().contains("guarded KV sync v2 is unavailable"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].0.starts_with("GET /api/v2/kv/tdo?"));
+
+        let (url, server) = mock_http(vec![(428, json!({"error":"upgrade"}))]);
+        let client = test_client(url);
+        let mut transport = HttpTransport { client: &client, tool: "tdo" };
+        let error = transport.push(&[("task/a".into(), vec![1])], "0").err().unwrap();
+        assert!(error.to_string().contains("guarded KV sync v2 is unavailable"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].0.starts_with("PUT /api/v2/kv/tdo "));
     }
 }

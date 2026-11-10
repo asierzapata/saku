@@ -5,9 +5,13 @@ metadata:
   internal: false
 ---
 
-# tdo Quick Reference (v0.9.0)
+# tdo Quick Reference (unreleased checkout)
 
-**Model**: Area → Project → Task | **Storage**: `~/.local/share/tdo/store.json`
+**Model**: Area → Project → Task | **Storage**: `~/.local/share/tdo/store.sqlite3`; portable task exports use v9 JSON.
+
+Inspect local plaintext merge history with `tdo history list --json`, `tdo history list --key task/...`, or `tdo history show 1`. `tdo history export recovery.json` writes a separate v1 archive, not importable via `tdo import`; v9 task exports exclude history. History is not synced, automatically pruned, or automatically restored. Source records first provenance, not conflict classification; historical unseen overwrites cannot be recovered, and concurrent edits cannot be classified without a common base. Undecryptable entries fail closed. Export both archives to preserve portable content, not a full operational backup.
+
+Guarded KV v2 uses startup-bound cookies (`<server-instance>:<sequence>`). The server generates a new random instance ID outside its database at every startup, so normal restarts and stop/restore/start recovery invalidate old cookies. HTTP 410 makes the client atomically requeue all local entries and clear its cursor, then fully pull and merge before guarded pushes. Missing remote entries do not delete local entries; tombstones and divergent history are preserved. Stale writes return 409; stale-write and cursor-recovery retries share a limit of three retries. V1 writes return 428, and new clients refuse old servers without fallback. SQLite schema v4 and v9 JSON are unchanged.
 
 ## View
 

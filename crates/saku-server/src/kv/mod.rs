@@ -9,7 +9,13 @@ use axum::{
 /// Build the KV router: `/api/v1/kv/*`
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/:tool", get(handlers::get_entries).put(handlers::batch_put))
-        .route("/:tool/snapshot", get(handlers::snapshot))
-        .route("/:tool/:key", put(handlers::put_single))
+        .route("/:tool", get(handlers::get_entries).put(handlers::reject_legacy_write))
+        .route("/:tool/snapshot", get(handlers::snapshot).put(handlers::reject_legacy_write))
+        .route("/:tool/:key", put(handlers::reject_legacy_write))
+}
+
+pub fn v2_router() -> Router<AppState> {
+    Router::new()
+        .route("/:tool", get(handlers::get_entries_v2).put(handlers::batch_put))
+        .route("/:tool/snapshot", get(handlers::snapshot_v2))
 }

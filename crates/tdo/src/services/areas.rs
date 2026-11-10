@@ -34,7 +34,7 @@ pub fn create_area(
     let area = Area {
         name: parameters.name,
         deleted_at: None,
-        modified_at: crate::sync_clock::next_modified_at(),
+        modified_at: storage.next_modified_at()?,
         renamed_to: None,
         previous_key: None,
     };
@@ -114,7 +114,7 @@ pub fn delete_area(
         for task_key in task_keys {
             if let Some(task) = store.get_task_mut(&task_key) {
                 task.deleted_at = Some(now);
-                task.modified_at = crate::sync_clock::next_modified_at();
+                task.modified_at = storage.next_modified_at()?;
             }
         }
     }
@@ -123,7 +123,7 @@ pub fn delete_area(
     for project_key in &project_keys_to_delete {
         if let Some(project) = store.get_project_mut(project_key) {
             project.deleted_at = Some(now);
-            project.modified_at = crate::sync_clock::next_modified_at();
+            project.modified_at = storage.next_modified_at()?;
         }
     }
 
@@ -139,14 +139,14 @@ pub fn delete_area(
     for task_key in direct_task_keys {
         if let Some(task) = store.get_task_mut(&task_key) {
             task.deleted_at = Some(now);
-            task.modified_at = crate::sync_clock::next_modified_at();
+            task.modified_at = storage.next_modified_at()?;
         }
     }
 
     // Mark area as deleted
     if let Some(area) = store.get_area_mut(&area_key) {
         area.deleted_at = Some(now);
-        area.modified_at = crate::sync_clock::next_modified_at();
+        area.modified_at = storage.next_modified_at()?;
     }
 
     // Persist to storage
@@ -222,8 +222,9 @@ pub fn edit_area(
     drop(matching_areas);
 
     // Use store.rename_area to handle tombstone + create + reference updates
+    let modified_at = storage.next_modified_at()?;
     store
-        .rename_area(&old_name, &parameters.new_name)
+        .rename_area(&old_name, &parameters.new_name, modified_at)
         .ok_or(EditAreaError::AreaNotFound(parameters.name))?;
 
     // Persist to storage
@@ -274,7 +275,7 @@ pub fn restore_area(
     // Restore area (does NOT auto-restore projects/tasks - user must restore them separately)
     if let Some(area) = store.get_area_mut(&area_key) {
         area.deleted_at = None;
-        area.modified_at = crate::sync_clock::next_modified_at();
+        area.modified_at = storage.next_modified_at()?;
     }
 
     // Persist to storage

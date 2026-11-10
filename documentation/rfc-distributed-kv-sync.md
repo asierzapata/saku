@@ -3,6 +3,8 @@
 **Author:** @asierzapata
 **Status:** Drafting
 
+The write protocol in this RFC is superseded by guarded KV v2. Current clients use `PUT /api/v2/kv/{tool}` with a required startup-bound `base_cookie` from their last completed pull. The server rejects a batch with HTTP 409 if any submitted key changed after that cookie; clients pull, merge, and retry. HTTP 410 invalidates a cursor and triggers requeueing and a full pull/merge. Legacy v1 batch and single-entry PUTs return HTTP 428. See [Current Sync](architecture.md#current-sync) for the implemented contract and deployment requirements. The older write examples below are historical.
+
 ## Summary
 
 We want every client — CLI, iOS app, web app — to share the same task data. A task added on iPhone should appear in `tdo view today` on the terminal and in the browser, and vice versa. Our current sync architecture syncs **whole encrypted files** — the entire `store.json` per tool. This works between two CLI instances, but it breaks down for non-CLI clients: the whole-file sync is not atomic (two devices can race on the Merkle tree update), background sync on iOS has tight time constraints (~30 seconds), and web apps need to work with browser storage constraints. We need to move to **per-entry sync over an HTTP-native protocol** and extend the server to support entry-level operations. The HTTP protocol *is* the SDK — any client that can make HTTP requests, implement LWW merge, and handle the crypto can participate. Each platform gets a native implementation: Rust for CLI, Swift for iOS, TypeScript for web.
