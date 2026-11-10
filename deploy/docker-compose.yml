@@ -1,0 +1,25 @@
+name: saku
+
+services:
+  saku-server:
+    image: ${SAKU_SERVER_IMAGE:-ghcr.io/asierzapata/saku-server:latest}
+    container_name: saku-server
+    restart: unless-stopped
+    environment:
+      SAKU__SERVER__HOST: 0.0.0.0
+      SAKU__SERVER__PORT: 8080
+      SAKU__DATABASE__PATH: /data/saku-server.db
+      SAKU__AUTH__JWT_SECRET: ${SAKU_JWT_SECRET:?Set SAKU_JWT_SECRET in your environment or .env file}
+      RUST_LOG: ${RUST_LOG:-saku_server=info,tower_http=info}
+    ports:
+      - "${HOST_PORT:-4060}:8080"
+    volumes:
+      - ${SAKU_DATA_DIR:-/mnt/nas/saku}:/data
+
+  # Optional Cloudflare Tunnel service for exposing saku-server securely to the internet.
+  # Set TUNNEL_TOKEN in your environment or .env file to enable.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: saku-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}

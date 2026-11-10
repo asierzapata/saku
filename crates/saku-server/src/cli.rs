@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "saku-server",
+    version,
     about = "Auth and coordination server for saku sync"
 )]
 pub struct Cli {

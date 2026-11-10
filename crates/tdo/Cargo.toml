@@ -10,7 +10,10 @@ readme = "README.md"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-publish = true
+publish = false
+
+[package.metadata.dist]
+dist = true
 
 [[bin]]
 name = "tdo"

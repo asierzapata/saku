@@ -1,11 +1,15 @@
 [package]
 name = "saku-server"
-version = "0.1.0"
+version = "0.13.0"
 description = "Auth and coordination server for saku sync"
 repository = "https://github.com/asierzapata/saku"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
+
+[package.metadata.dist]
+dist = false
 
 [lib]
 name = "saku_server"
@@ -49,6 +53,7 @@ base64.workspace = true
 reqwest = { version = "0.12", features = ["json"], optional = true }
 
 [dev-dependencies]
+tempfile.workspace = true
 tower = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
 saku-tdo = { path = "../tdo", default-features = false }

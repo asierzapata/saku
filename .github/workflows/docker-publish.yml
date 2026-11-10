@@ -1,0 +1,65 @@
+name: Publish Docker image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/saku-server/**"
+      - "crates/saku-sync/**"
+      - "crates/saku-storage/**"
+      - "crates/saku-crypto/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".dockerignore"
+      - ".github/workflows/docker-publish.yml"
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/saku-server
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/saku-server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/saku-server:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/saku-server:buildcache,mode=max

@@ -12,10 +12,16 @@ A flexible task management tool for the terminal with support for areas, project
 
 ## Installation
 
-**From crates.io (recommended):**
+**Via Homebrew (recommended):**
 
 ```bash
-cargo install saku-tdo
+brew install asierzapata/saku/saku
+```
+
+**Via shell installer:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/asierzapata/saku/releases/latest/download/saku-tdo-installer.sh | sh
 ```
 
 **From source:**
@@ -177,7 +183,7 @@ See [documentation/sync-setup.md](../../documentation/sync-setup.md) for server 
 **To build without sync support:**
 
 ```bash
-cargo install saku-tdo --no-default-features
+cargo install --path crates/tdo --no-default-features
 ```
 
 ## License

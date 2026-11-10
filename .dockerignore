@@ -1,6 +1,31 @@
-target/
-.git/
-documentation/
-skills/
-.claude/
-.cursor/
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+target
+**/target
+
+# Runtime local data
+*.db
+**/*.db
+*.sqlite3
+**/*.sqlite3
+
+# Local/editor/system files
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+
+# Env / logs
+.env
+.env.*
+*.log
+**/*.log
+
+# Rust and test leftovers
+*.profraw
+*.profdata

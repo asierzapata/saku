@@ -56,7 +56,7 @@ The first command prompts twice for the account password. In another terminal, v
 curl http://127.0.0.1:8080/api/v1/health
 ```
 
-For access across machines, configure the server binding and a reverse proxy with TLS appropriate to your environment. Do not expose the loopback example's placeholder secrets. The repository's Compose setup is a legacy development option: it maps host port 4060 to container port 8080 and includes MinIO dependencies; inspect and adapt its configuration before use.
+For access across machines, configure the server binding and a reverse proxy or tunnel with TLS appropriate to your environment. Do not expose the loopback example's placeholder secrets. For container deployments, `deploy/docker-compose.yml` runs the published `ghcr.io/asierzapata/saku-server:latest` image (with an optional Cloudflare Tunnel service) configured via `SAKU__*` environment variables; `crates/saku-server/docker-compose.yml` remains available as a local development stack with MinIO.
 
 ## Rehearse migration on a copy
 

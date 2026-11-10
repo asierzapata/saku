@@ -14,13 +14,19 @@ See [the philosophy](documentation/PHILOSOPHY.md) for the product boundaries and
 
 ## Installation
 
-Install the task CLI from crates.io:
+Install `tdo` via Homebrew:
 
 ```bash
-cargo install saku-tdo
+brew install asierzapata/saku/saku
 ```
 
-Or from this checkout:
+Or via the shell installer:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/asierzapata/saku/releases/latest/download/saku-tdo-installer.sh | sh
+```
+
+Or build from this checkout:
 
 ```bash
 cargo install --path crates/tdo

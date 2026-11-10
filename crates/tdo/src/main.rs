@@ -41,6 +41,7 @@ mod tui;
 #[derive(Parser)]
 #[command(
     name = "tdo",
+    version,
     about = "A minimal and clean task manager for your terminal"
 )]
 struct Cli {

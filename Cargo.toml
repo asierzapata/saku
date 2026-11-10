@@ -12,13 +12,27 @@ members = [
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Asier Zapata <me@asierzapata.com>"]
+repository = "https://github.com/asierzapata/saku"
+homepage = "https://asierzapata.github.io/saku/"
+publish = false
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Config for 'cargo-release'
+[workspace.metadata.release]
+shared-version = true
+consolidate-commits = true
+tag-name = "v{{version}}"
 publish = false
 
 [workspace.dependencies]
 # Internal dependencies
-saku-crypto = { version = "0.3.0", path = "crates/saku-crypto" }
-saku-storage = { version = "0.4.0", path = "crates/saku-storage" }
-saku-sync = { version = "0.4.0", path = "crates/saku-sync" }
+saku-crypto = { version = "0.13.0", path = "crates/saku-crypto" }
+saku-storage = { version = "0.13.0", path = "crates/saku-storage" }
+saku-sync = { version = "0.13.0", path = "crates/saku-sync" }
 
 # Shared dependencies with versions
 clap = { version = "4.5.58", features = ["derive"] }
